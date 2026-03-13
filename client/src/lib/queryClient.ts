@@ -1,12 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
-const PORT_PLACEHOLDER = "__PORT_5000__";
 
 function getApiBase() {
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
-    return PORT_PLACEHOLDER;
-  }
+  // Always use relative URLs — works on localhost (same port), Vercel (same domain),
+  // and any other deployment. The __PORT_5000__ placeholder was for Perplexity's
+  // static hosting only and must NOT be used on Vercel.
   return API_BASE;
 }
 
