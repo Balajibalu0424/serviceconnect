@@ -1,21 +1,23 @@
 /**
  * Vercel Serverless Entry Point
  *
- * Vercel runs this as a serverless function — we export the Express app
- * instead of calling httpServer.listen(). Vercel handles the port binding.
+ * Vercel runs this as a serverless function — we export a handler function.
+ * Routes are registered once via a module-level promise (lazy init pattern)
+ * so they're ready before the first request is served.
  *
- * Static frontend files (dist/public) are served directly by Vercel's CDN
- * for performance — only /api/* routes hit this function.
+ * Socket.io is NOT used here — it requires a persistent server which is
+ * incompatible with Vercel serverless. Real-time features degrade gracefully.
+ *
+ * node-cron (aftercare scheduler) is also NOT started here — Vercel functions
+ * are stateless and short-lived. The scheduler must be run separately
+ * (e.g., a Vercel Cron Job or a separate always-on server).
  */
 
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "../server/routes";
-import path from "path";
-import fs from "fs";
 import { createServer } from "http";
 
 const app = express();
-const httpServer = createServer(app);
 
 app.use(
   express.json({
@@ -27,7 +29,7 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-// Logging middleware
+// Request logging
 app.use((req, res, next) => {
   const start = Date.now();
   const reqPath = req.path;
@@ -40,29 +42,44 @@ app.use((req, res, next) => {
   next();
 });
 
-// Register all API routes
-(async () => {
-  await registerRoutes(httpServer, app);
+// ── Lazy-init pattern ──────────────────────────────────────────────────────
+// Routes are registered once. The promise is reused on subsequent invocations
+// so we never register routes twice, and the handler always waits until ready.
+let routesRegistered: Promise<void> | null = null;
 
-  // Error handler
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    console.error("Internal Server Error:", err);
-    if (res.headersSent) return next(err);
-    return res.status(status).json({ message });
-  });
-
-  // Serve static frontend files (dist/public) in production
-  const distPath = path.resolve(process.cwd(), "dist", "public");
-  if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-    // SPA fallback — send index.html for all non-API routes
-    app.use("/{*path}", (_req, res) => {
-      res.sendFile(path.resolve(distPath, "index.html"));
-    });
+function ensureRoutes(): Promise<void> {
+  if (!routesRegistered) {
+    const httpServer = createServer(app);
+    routesRegistered = registerRoutes(httpServer, app)
+      .then(() => {
+        // Global error handler — must be added AFTER routes
+        app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+          const status = err.status || err.statusCode || 500;
+          const message = err.message || "Internal Server Error";
+          console.error("Unhandled error:", err);
+          if (!res.headersSent) {
+            res.status(status).json({ message });
+          }
+        });
+      })
+      .catch((err) => {
+        // Reset so the next invocation retries
+        routesRegistered = null;
+        throw err;
+      });
   }
-})();
+  return routesRegistered;
+}
 
-// Export the Express app for Vercel — DO NOT call listen() here
-export default app;
+// ── Vercel handler export ──────────────────────────────────────────────────
+// Vercel calls this function for every /api/* request.
+// We await route registration before letting Express handle the request.
+export default async function handler(req: Request, res: Response) {
+  try {
+    await ensureRoutes();
+  } catch (err: any) {
+    console.error("Failed to initialise routes:", err);
+    return res.status(500).json({ message: "Server initialisation failed" });
+  }
+  app(req, res);
+}

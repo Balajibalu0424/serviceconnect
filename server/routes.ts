@@ -64,32 +64,42 @@ async function addCredits(userId: string, amount: number, type: any, description
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // ─── Socket.io ──────────────────────────────────────────────────────────────
-  const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  // Socket.io requires a persistent server — skip in Vercel serverless.
+  // In serverless, httpServer.listening is false (never bound to a port).
+  const isServerless = !httpServer.listening && process.env.VERCEL === "1";
+
+  let io: SocketIOServer | null = null;
   const onlineUsers = new Map<string, string>(); // userId → socketId
 
-  io.on("connection", (socket) => {
-    const userId = socket.handshake.auth?.userId;
-    if (userId) onlineUsers.set(userId, socket.id);
+  if (!isServerless) {
+    io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
 
-    socket.on("join_conversation", (conversationId: string) => {
-      socket.join(`conv_${conversationId}`);
+    io.on("connection", (socket) => {
+      const userId = socket.handshake.auth?.userId;
+      if (userId) onlineUsers.set(userId, socket.id);
+
+      socket.on("join_conversation", (conversationId: string) => {
+        socket.join(`conv_${conversationId}`);
+      });
+
+      socket.on("leave_conversation", (conversationId: string) => {
+        socket.leave(`conv_${conversationId}`);
+      });
+
+      socket.on("typing", ({ conversationId, isTyping }: any) => {
+        socket.to(`conv_${conversationId}`).emit("user_typing", { userId, isTyping });
+      });
+
+      socket.on("disconnect", () => {
+        if (userId) onlineUsers.delete(userId);
+      });
     });
 
-    socket.on("leave_conversation", (conversationId: string) => {
-      socket.leave(`conv_${conversationId}`);
-    });
-
-    socket.on("typing", ({ conversationId, isTyping }: any) => {
-      socket.to(`conv_${conversationId}`).emit("user_typing", { userId, isTyping });
-    });
-
-    socket.on("disconnect", () => {
-      if (userId) onlineUsers.delete(userId);
-    });
-  });
-
-  // Start aftercare scheduler
-  startAftercareScheduler(createNotification, io);
+    // Start aftercare scheduler only in persistent server mode
+    startAftercareScheduler(createNotification, io);
+  } else {
+    console.log("[serverless] Socket.io and cron scheduler disabled in Vercel environment");
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // AUTH ROUTES
@@ -911,8 +921,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           "A message has been auto-flagged for moderation", { messageId: msg.id, conversationId: convId });
       }
 
-      // Emit via socket
-      io.to(`conv_${convId}`).emit("new_message", msg);
+      // Emit via socket (only available in persistent server mode, not serverless)
+      if (io) io.to(`conv_${convId}`).emit("new_message", msg);
 
       // Notify other participants
       const otherParticipants = await db.select({ userId: conversationParticipants.userId })
