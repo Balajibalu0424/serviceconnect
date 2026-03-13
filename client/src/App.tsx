@@ -12,6 +12,7 @@ import Login from "@/pages/public/Login";
 import Register from "@/pages/public/Register";
 import AdminLogin from "@/pages/public/AdminLogin";
 import Services from "@/pages/public/Services";
+import ProOnboarding from "@/pages/public/ProOnboarding";
 
 // Customer pages
 import CustomerDashboard from "@/pages/customer/Dashboard";
@@ -63,6 +64,7 @@ function AppRoutes() {
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/services" component={Services} />
       <Route path="/post-job" component={PostJob} />
+      <Route path="/pro/onboarding" component={ProOnboarding} />
 
       {/* Customer */}
       <Route path="/dashboard">

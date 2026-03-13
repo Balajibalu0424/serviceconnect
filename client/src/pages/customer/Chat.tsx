@@ -1,134 +1,237 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Send } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { MessageSquare, Send, Loader2, ArrowLeft } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
 export default function Chat() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const qc = useQueryClient();
-  const [selectedConv, setSelectedConv] = useState<string | null>(null);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
-  const { data: messages = [] } = useQuery<any[]>({
-    queryKey: selectedConv ? [`/api/chat/conversations/${selectedConv}/messages`] : ["__disabled__"],
-    enabled: !!selectedConv
+  const { data: conversations = [], isLoading: loadingConvs } = useQuery<any[]>({
+    queryKey: ["/api/chat/conversations"],
+    refetchInterval: 5000,
   });
 
-  const sendMsg = useMutation({
+  const { data: messages = [], isLoading: loadingMsgs } = useQuery<any[]>({
+    queryKey: ["/api/chat/conversations", activeConvId, "messages"],
+    queryFn: async () => {
+      if (!activeConvId) return [];
+      const res = await apiRequest("GET", `/api/chat/conversations/${activeConvId}/messages`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!activeConvId,
+    refetchInterval: 3000,
+  });
+
+  const { data: unreadCount } = useQuery<any>({
+    queryKey: ["/api/chat/unread-count"],
+    refetchInterval: 10000,
+  });
+
+  const sendMessage = useMutation({
     mutationFn: async (content: string) => {
-      const res = await apiRequest("POST", `/api/chat/conversations/${selectedConv}/messages`, { content });
+      const res = await apiRequest("POST", `/api/chat/conversations/${activeConvId}/messages`, { content });
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [`/api/chat/conversations/${selectedConv}/messages`] });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations", activeConvId, "messages"] });
       qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       setMessage("");
-    }
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+
+  const markRead = useMutation({
+    mutationFn: async (convId: string) => {
+      await apiRequest("PATCH", `/api/chat/conversations/${convId}/read`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/chat/unread-count"] }),
+  });
+
+  useEffect(() => {
+    if (activeConvId) markRead.mutate(activeConvId);
+  }, [activeConvId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || !selectedConv) return;
-    sendMsg.mutate(message.trim());
+    if (!message.trim() || !activeConvId) return;
+    sendMessage.mutate(message.trim());
   };
 
-  const activeConv = (conversations as any[]).find(c => c.id === selectedConv);
-  const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+  const activeConv = (conversations as any[]).find((c: any) => c.id === activeConvId);
 
   return (
     <DashboardLayout>
-      <div className="flex h-[calc(100vh-64px)] lg:h-screen">
-        {/* Conversation list */}
-        <div className={cn("w-full lg:w-80 border-r border-border flex flex-col", selectedConv && "hidden lg:flex")}>
-          <div className="p-4 border-b border-border">
-            <h1 className="font-bold">Messages</h1>
+      <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+        {/* Sidebar: conversation list */}
+        <div className={cn(
+          "w-full md:w-80 flex-shrink-0 border-r bg-background flex flex-col",
+          activeConvId && "hidden md:flex"
+        )}>
+          <div className="p-4 border-b">
+            <div className="flex items-center justify-between">
+              <h1 className="font-bold text-lg">Messages</h1>
+              {(unreadCount?.count ?? 0) > 0 && (
+                <Badge variant="destructive" className="text-xs">{unreadCount.count}</Badge>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {(conversations as any[]).length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No conversations yet</p>
+            {loadingConvs ? (
+              <div className="p-4 space-y-3">
+                {[1, 2, 3].map(i => <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />)}
+              </div>
+            ) : (conversations as any[]).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-6 text-center">
+                <MessageSquare className="w-10 h-10 mb-3 opacity-20" />
+                <p className="text-sm">No conversations yet.</p>
+                <p className="text-xs mt-1">Unlock a job to start chatting.</p>
               </div>
             ) : (
-              (conversations as any[]).map((conv: any) => {
-                const other = conv.participants?.find((p: any) => p.id !== user?.id);
-                return (
-                  <button key={conv.id} onClick={() => setSelectedConv(conv.id)}
-                    className={cn("w-full p-4 text-left hover:bg-muted/50 transition-colors border-b border-border",
-                      selectedConv === conv.id && "bg-muted")}
-                    data-testid={`conv-${conv.id}`}>
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-9 w-9"><AvatarFallback className="text-xs">{other?.firstName?.[0]}{other?.lastName?.[0]}</AvatarFallback></Avatar>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <p className="font-medium text-sm truncate">{other?.firstName} {other?.lastName}</p>
-                          {conv.lastMessage && <p className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(conv.lastMessage.createdAt), { addSuffix: true })}</p>}
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate">{conv.job?.title}</p>
-                        {conv.unreadCount > 0 && <Badge className="text-xs h-4 mt-1">{conv.unreadCount} new</Badge>}
-                      </div>
+              (conversations as any[]).map((conv: any) => (
+                <button
+                  key={conv.id}
+                  data-testid={`conv-${conv.id}`}
+                  onClick={() => setActiveConvId(conv.id)}
+                  className={cn(
+                    "w-full flex items-start gap-3 p-4 hover:bg-accent/50 transition-colors text-left border-b last:border-0",
+                    activeConvId === conv.id && "bg-accent"
+                  )}
+                >
+                  <Avatar className="w-10 h-10 flex-shrink-0">
+                    <AvatarFallback className="text-sm bg-primary/10 text-primary">
+                      {conv.jobTitle?.[0] || "J"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="font-medium text-sm truncate">{conv.jobTitle || "Conversation"}</p>
+                      {conv.lastMessageAt && (
+                        <span className="text-xs text-muted-foreground flex-shrink-0">
+                          {formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: false })}
+                        </span>
+                      )}
                     </div>
-                  </button>
-                );
-              })
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {conv.lastMessage || "Start the conversation…"}
+                    </p>
+                  </div>
+                  {conv.unreadCount > 0 && (
+                    <Badge className="text-xs w-5 h-5 flex items-center justify-center rounded-full p-0">
+                      {conv.unreadCount}
+                    </Badge>
+                  )}
+                </button>
+              ))
             )}
           </div>
         </div>
 
-        {/* Message area */}
-        <div className={cn("flex-1 flex flex-col", !selectedConv && "hidden lg:flex")}>
-          {!selectedConv ? (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                <p>Select a conversation</p>
-              </div>
+        {/* Main: message thread */}
+        <div className={cn(
+          "flex-1 flex flex-col bg-background",
+          !activeConvId && "hidden md:flex items-center justify-center"
+        )}>
+          {!activeConvId ? (
+            <div className="text-center text-muted-foreground">
+              <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-20" />
+              <p>Select a conversation to start messaging</p>
             </div>
           ) : (
             <>
-              <div className="p-4 border-b border-border flex items-center gap-3">
-                <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSelectedConv(null)}>←</Button>
-                <Avatar className="h-8 w-8"><AvatarFallback className="text-xs">{otherParticipant?.firstName?.[0]}{otherParticipant?.lastName?.[0]}</AvatarFallback></Avatar>
+              {/* Header */}
+              <div className="flex items-center gap-3 p-4 border-b">
+                <button
+                  className="md:hidden text-muted-foreground hover:text-foreground"
+                  onClick={() => setActiveConvId(null)}
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <Avatar className="w-9 h-9">
+                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                    {activeConv?.jobTitle?.[0] || "J"}
+                  </AvatarFallback>
+                </Avatar>
                 <div>
-                  <p className="font-medium text-sm">{otherParticipant?.firstName} {otherParticipant?.lastName}</p>
-                  <p className="text-xs text-muted-foreground">{activeConv?.job?.title}</p>
+                  <p className="font-semibold text-sm">{activeConv?.jobTitle || "Conversation"}</p>
+                  <p className="text-xs text-muted-foreground">Active now</p>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {(messages as any[]).map((msg: any) => {
-                  const isOwn = msg.senderId === user?.id;
-                  const isSystem = msg.type === "SYSTEM";
-                  if (isSystem) return (
-                    <div key={msg.id} className="text-center">
-                      <span className="text-xs bg-muted text-muted-foreground px-3 py-1 rounded-full">{msg.content}</span>
-                    </div>
-                  );
-                  return (
-                    <div key={msg.id} className={cn("flex", isOwn ? "justify-end" : "justify-start")}>
-                      <div className={cn("max-w-xs lg:max-w-md rounded-2xl px-4 py-2 text-sm",
-                        isOwn ? "bg-primary text-primary-foreground" : "bg-muted")}>
-                        {msg.isFiltered && <p className="text-xs opacity-70 mb-1">[Message filtered]</p>}
-                        <p>{msg.content}</p>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {loadingMsgs ? (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (messages as any[]).length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    No messages yet — say hello!
+                  </div>
+                ) : (
+                  (messages as any[]).map((msg: any) => {
+                    const isMe = msg.senderId === user?.id;
+                    return (
+                      <div key={msg.id} className={cn("flex", isMe ? "justify-end" : "justify-start")}>
+                        <div className={cn(
+                          "max-w-[75%] rounded-2xl px-4 py-2.5 text-sm",
+                          isMe
+                            ? "bg-primary text-primary-foreground rounded-br-sm"
+                            : "bg-muted text-foreground rounded-bl-sm"
+                        )}>
+                          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                          <p className={cn("text-xs mt-1 opacity-70", isMe ? "text-right" : "text-left")}>
+                            {formatDistanceToNow(new Date(msg.createdAt), { addSuffix: true })}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
               </div>
-              <form onSubmit={handleSend} className="p-4 border-t border-border flex gap-2">
-                <Input value={message} onChange={e => setMessage(e.target.value)} placeholder="Type a message..." className="flex-1" data-testid="input-message" />
-                <Button type="submit" size="icon" disabled={sendMsg.isPending || !message.trim()} data-testid="button-send">
-                  <Send className="w-4 h-4" />
+
+              {/* Input */}
+              <form onSubmit={handleSend} className="p-4 border-t bg-background flex gap-2">
+                <Input
+                  data-testid="input-message"
+                  placeholder="Type a message…"
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                  className="flex-1"
+                  autoComplete="off"
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={!message.trim() || sendMessage.isPending}
+                  data-testid="button-send"
+                >
+                  {sendMessage.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
                 </Button>
               </form>
             </>

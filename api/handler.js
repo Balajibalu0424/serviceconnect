@@ -50592,6 +50592,203 @@ async function registerRoutes(httpServer, app2) {
     });
     return res.json({ success: true, newBalance });
   });
+  app2.get("/api/conversations", requireAuth, async (req, res) => {
+    const userId = req.user.userId;
+    const rows = await db.select().from(conversations).innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id)).where(eq(conversationParticipants.userId, userId)).orderBy(desc(conversations.lastMessageAt));
+    return res.json(rows.map((r) => r.conversations));
+  });
+  app2.get("/api/reviews", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { targetUserId } = req.query;
+      const whereClause = targetUserId ? eq(reviews.revieweeId, String(targetUserId)) : eq(reviews.revieweeId, userId);
+      const rows = await db.select().from(reviews).where(whereClause).orderBy(desc(reviews.createdAt));
+      return res.json(rows);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/reviews/given", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const rows = await db.select().from(reviews).where(eq(reviews.reviewerId, userId)).orderBy(desc(reviews.createdAt));
+      return res.json(rows);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/onboarding/professional", async (req, res) => {
+    try {
+      const {
+        email,
+        password,
+        firstName,
+        lastName,
+        phone,
+        bio,
+        specialisations,
+        yearsExperience,
+        serviceRadius,
+        categoryIds,
+        location
+      } = req.body;
+      if (!email || !password || !firstName || !lastName) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+      if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
+      const passwordHash = await db.transaction(async (tx) => {
+        const hash = await __require("bcryptjs").hash(password, 12);
+        return hash;
+      });
+      const result = await db.transaction(async (tx) => {
+        const [user] = await tx.insert(users).values({
+          email: email.toLowerCase(),
+          passwordHash: await __require("bcryptjs").hash(password, 12),
+          firstName,
+          lastName,
+          phone: phone || null,
+          role: "PROFESSIONAL",
+          status: "ACTIVE",
+          emailVerified: true,
+          onboardingCompleted: true,
+          creditBalance: 20
+          // starter credits
+        }).returning();
+        const [profile] = await tx.insert(professionalProfiles).values({
+          userId: user.id,
+          bio: bio || "",
+          specialisations: specialisations || [],
+          yearsExperience: yearsExperience || 0,
+          serviceRadius: serviceRadius || 25,
+          categoryIds: categoryIds || [],
+          location: location || null,
+          isVerified: false,
+          averageRating: "0",
+          totalReviews: 0,
+          completedJobs: 0
+        }).returning();
+        await tx.insert(creditTransactions).values({
+          userId: user.id,
+          type: "BONUS",
+          amount: 20,
+          balanceAfter: 20,
+          description: "Starter bonus \u2014 welcome to ServiceConnect!"
+        });
+        return { user, profile };
+      });
+      const { accessToken, refreshToken } = generateTokens(result.user.id, result.user.role);
+      await db.insert(userSessions).values({
+        userId: result.user.id,
+        refreshToken,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3)
+      });
+      return res.status(201).json({
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          firstName: result.user.firstName,
+          lastName: result.user.lastName,
+          role: result.user.role,
+          creditBalance: result.user.creditBalance
+        },
+        accessToken,
+        refreshToken,
+        profile: result.profile
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.patch("/api/auth/profile", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { firstName, lastName, phone } = req.body;
+      const [updated] = await db.update(users).set({ firstName, lastName, phone: phone || null, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId)).returning();
+      return res.json({
+        id: updated.id,
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        phone: updated.phone,
+        role: updated.role,
+        creditBalance: updated.creditBalance
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/admin/users/:id/suspend", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { reason } = req.body;
+      await db.update(users).set({ status: "SUSPENDED" }).where(eq(users.id, req.params.id));
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "SUSPEND_USER",
+        resourceType: "USER",
+        resourceId: req.params.id,
+        changes: { reason },
+        ipAddress: req.ip
+      });
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/admin/users/:id/unsuspend", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      await db.update(users).set({ status: "ACTIVE" }).where(eq(users.id, req.params.id));
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "UNSUSPEND_USER",
+        resourceType: "USER",
+        resourceId: req.params.id,
+        changes: {},
+        ipAddress: req.ip
+      });
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/support/tickets/:id/reply", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const { content } = req.body;
+      const [msg] = await db.insert(ticketMessages).values({
+        ticketId: req.params.id,
+        senderId: req.user.userId,
+        content
+      }).returning();
+      await db.update(supportTickets).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq(supportTickets.id, req.params.id));
+      return res.json(msg);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/support/tickets/:id/messages", requireAuth, async (req, res) => {
+    try {
+      const msgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, req.params.id)).orderBy(asc(ticketMessages.createdAt));
+      return res.json(msgs);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/admin/stats", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const [totalUsers] = await db.select({ count: count() }).from(users);
+      const [totalJobs] = await db.select({ count: count() }).from(jobs);
+      const [totalBookings] = await db.select({ count: count() }).from(bookings);
+      const [totalRevenue] = await db.select({ total: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      return res.json({
+        totalUsers: totalUsers.count,
+        totalJobs: totalJobs.count,
+        totalBookings: totalBookings.count,
+        totalRevenue: totalRevenue.total || "0"
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
   return httpServer;
 }
 
