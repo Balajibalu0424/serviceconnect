@@ -65,7 +65,7 @@ async function buildAll() {
     entryPoints: ["api/index.ts"],
     platform: "node",
     bundle: true,
-    format: "cjs",
+    format: "esm",  // ESM so it works with "type": "module" in package.json
     outfile: "api/handler.js",
     define: {
       "process.env.NODE_ENV": '"production"',
@@ -76,6 +76,10 @@ async function buildAll() {
     // Resolve @shared/* path alias from tsconfig
     alias: {
       "@shared": new URL("../shared", import.meta.url).pathname,
+    },
+    banner: {
+      // Needed for CJS compat in ESM bundle
+      js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
     },
   });
 }
