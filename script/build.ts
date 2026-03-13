@@ -59,6 +59,25 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  console.log("building vercel api function...");
+  await esbuild({
+    entryPoints: ["api/index.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "api/handler.js",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: false,
+    external: externals,
+    logLevel: "info",
+    // Resolve @shared/* path alias from tsconfig
+    alias: {
+      "@shared": new URL("../shared", import.meta.url).pathname,
+    },
+  });
 }
 
 buildAll().catch((err) => {
