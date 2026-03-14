@@ -28,7 +28,7 @@ export default function ProSpinWheel() {
   const [currentAngle, setCurrentAngle] = useState(0);
   const [result, setResult] = useState<any>(null);
 
-  const { data: status } = useQuery<any>({ queryKey: ["/api/spin-wheel/status"] });
+  const { data: status, isLoading: statusLoading } = useQuery<any>({ queryKey: ["/api/spin-wheel/status"] });
 
   const spin = useMutation({
     mutationFn: async () => {
@@ -133,7 +133,9 @@ export default function ProSpinWheel() {
           )}
 
           {/* CTA */}
-          {status?.eligible ? (
+          {statusLoading ? (
+            <div className="h-12 w-48 rounded-lg bg-muted animate-pulse" />
+          ) : status?.eligible ? (
             <Button size="lg" className="gap-2 text-base px-8" onClick={() => spin.mutate()} disabled={isSpinning || spin.isPending} data-testid="button-spin">
               <Dices className="w-5 h-5" />
               {isSpinning ? "Spinning..." : "Spin the Wheel!"}

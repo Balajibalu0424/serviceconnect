@@ -49675,8 +49675,8 @@ async function registerRoutes(httpServer, app2) {
   app2.post("/api/onboarding/customer/verify", requireAuth, async (req, res) => {
     try {
       const { otp } = req.body;
-      if (otp !== "123456" && true) {
-        return res.status(400).json({ error: "Invalid OTP code" });
+      if (otp !== "123456") {
+        return res.status(400).json({ error: "Invalid OTP code. In demo mode use: 123456" });
       }
       const [user] = await db.select().from(users).where(eq(users.id, req.user.userId));
       if (!user) return res.status(404).json({ error: "User not found" });
@@ -49790,6 +49790,19 @@ async function registerRoutes(httpServer, app2) {
     if (job.customerId !== req.user.userId && req.user.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
     await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id));
     return res.json({ success: true });
+  });
+  app2.post("/api/jobs/:id/publish", requireAuth, async (req, res) => {
+    try {
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      if (job.customerId !== req.user.userId && req.user.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
+      if (job.status !== "DRAFT") return res.status(400).json({ error: "Only DRAFT jobs can be published" });
+      await db.update(users).set({ emailVerified: true, onboardingCompleted: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, job.customerId));
+      const [updated] = await db.update(jobs).set({ status: "LIVE", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id)).returning();
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.post("/api/jobs/:id/matchbook", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
     const proId = req.user.userId;

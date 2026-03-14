@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { PlusCircle, Briefcase, MessageSquare, CheckCircle, AlertCircle, TrendingUp, ThumbsUp, ThumbsDown } from "lucide-react";
+import { PlusCircle, Briefcase, MessageSquare, CheckCircle, AlertCircle, TrendingUp, ThumbsUp, ThumbsDown, Zap } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -66,6 +66,7 @@ export default function CustomerDashboard() {
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
 
   const activeJobs = (jobs as any[]).filter(j => ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(j.status));
+  const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
   const aftercareJobs = (jobs as any[]).filter(j => ["AFTERCARE_2D", "AFTERCARE_5D"].includes(j.status));
   const completedBookings = (bookings as any[]).filter(b => b.status === "COMPLETED");
 
@@ -83,6 +84,28 @@ export default function CustomerDashboard() {
             </Button>
           </Link>
         </div>
+
+        {/* Draft job banner */}
+        {draftJobs.length > 0 && (
+          <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-sm">You have {draftJobs.length} unpublished job{draftJobs.length > 1 ? "s" : ""}</p>
+                    <p className="text-xs text-muted-foreground">Publish to make it live so professionals can see it</p>
+                  </div>
+                </div>
+                <Link href="/my-jobs">
+                  <Button size="sm" className="gap-1 shrink-0" data-testid="button-publish-draft">
+                    <Zap className="w-3 h-3" /> Publish Now
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Aftercare alerts */}
         {aftercareJobs.length > 0 && (

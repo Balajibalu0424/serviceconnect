@@ -272,7 +272,7 @@ export default function PostJob() {
             <div>
               <h1 className="text-2xl font-bold mb-1">Verify your email</h1>
               <p className="text-muted-foreground">Enter the 6-digit code sent to {account.email}</p>
-              <p className="text-xs text-muted-foreground mt-1">(In dev mode, use: <strong>123456</strong>)</p>
+              <p className="text-xs text-accent font-medium mt-1">Demo mode — use code: <strong className="font-mono">123456</strong></p>
             </div>
             <div className="max-w-xs mx-auto">
               <Input

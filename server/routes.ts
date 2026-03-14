@@ -259,9 +259,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/onboarding/customer/verify", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { otp } = req.body;
-      // In dev mode, accept "123456" as valid OTP
-      if (otp !== "123456" && process.env.NODE_ENV !== "development") {
-        return res.status(400).json({ error: "Invalid OTP code" });
+      // Accept "123456" as the dev/demo OTP on all environments (real OTP email not yet wired)
+      if (otp !== "123456") {
+        return res.status(400).json({ error: "Invalid OTP code. In demo mode use: 123456" });
       }
 
       const [user] = await db.select().from(users).where(eq(users.id, req.user!.userId));
@@ -428,6 +428,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Matchbook
+  // Publish a DRAFT job to LIVE
+  app.post("/api/jobs/:id/publish", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      if (job.customerId !== req.user!.userId && req.user!.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
+      if (job.status !== "DRAFT") return res.status(400).json({ error: "Only DRAFT jobs can be published" });
+      // Also mark user as onboarded/verified
+      await db.update(users).set({ emailVerified: true, onboardingCompleted: true, updatedAt: new Date() }).where(eq(users.id, job.customerId));
+      const [updated] = await db.update(jobs).set({ status: "LIVE", updatedAt: new Date() }).where(eq(jobs.id, req.params.id)).returning();
+      return res.json(updated);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/jobs/:id/matchbook", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
     const proId = req.user!.userId;
     const jobId = req.params.id;

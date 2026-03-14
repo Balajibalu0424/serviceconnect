@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,15 +9,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { MapPin, Clock, Star, Lock, Zap, Users, DollarSign } from "lucide-react";
+import { MapPin, Clock, Star, Lock, Zap, Users, DollarSign, MessageCircle, Phone, CheckCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
-// Unlock Tier Modal
+// Unlock Tier Modal — shows result (phone / chat) inline before closing
 function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
   const { toast } = useToast();
   const { user, refreshUser } = useAuth();
+  const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const [unlockResult, setUnlockResult] = useState<any>(null);
+  const [chosenTier, setChosenTier] = useState<"FREE" | "STANDARD" | null>(null);
 
   const unlock = useMutation({
     mutationFn: async (tier: "FREE" | "STANDARD") => {
@@ -25,23 +29,52 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
       return res.json();
     },
     onSuccess: (data, tier) => {
+      setChosenTier(tier);
+      setUnlockResult(data);
       qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] });
+      qc.invalidateQueries({ queryKey: ["/api/conversations"] });
       refreshUser();
-      if (tier === "STANDARD" && data.customerPhone) {
-        toast({ title: "Unlocked!", description: `Customer's phone: ${data.customerPhone}` });
-      } else {
-        toast({ title: "Unlocked!", description: "Chat conversation created." });
-      }
-      onClose();
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
   });
+
+  if (unlockResult) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-card rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+          <div className="text-center">
+            <div className="w-14 h-14 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-3">
+              <CheckCircle className="w-7 h-7 text-accent" />
+            </div>
+            <h2 className="text-lg font-bold">Lead Unlocked!</h2>
+            <p className="text-sm text-muted-foreground">{job.title}</p>
+          </div>
+          {chosenTier === "STANDARD" && unlockResult.customerPhone && (
+            <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-3">
+              <Phone className="w-4 h-4 text-accent shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Customer phone</p>
+                <p className="font-bold text-sm">{unlockResult.customerPhone}</p>
+              </div>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button className="flex-1 gap-2" onClick={() => { onClose(); setLocation("/pro/chat"); }} data-testid="button-go-to-chat">
+              <MessageCircle className="w-4 h-4" /> Open Chat
+            </Button>
+            <Button variant="outline" className="flex-1" onClick={onClose}>Close</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-card rounded-xl max-w-md w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
         <h2 className="text-lg font-bold mb-1">Unlock Lead</h2>
-        <p className="text-sm text-muted-foreground mb-6">Choose how you want to access this lead</p>
+        <p className="text-sm text-muted-foreground mb-1">Choose how you want to access this lead</p>
+        <p className="text-xs bg-primary/10 text-primary rounded px-2 py-1 mb-5 inline-block">Job: {job.title}</p>
         <div className="grid grid-cols-2 gap-4">
           <button onClick={() => unlock.mutate("FREE")} disabled={unlock.isPending}
             className="p-4 rounded-xl border-2 border-border hover:border-primary/40 transition-all text-left"
@@ -50,7 +83,7 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
             <p className="font-semibold text-sm">Free Tier</p>
             <p className="text-xs text-muted-foreground mt-0.5">Chat only</p>
             <p className="text-lg font-bold mt-2 text-accent">0 credits</p>
-            <p className="text-xs text-muted-foreground mt-1">Contact details hidden</p>
+            <p className="text-xs text-muted-foreground mt-1">Contact details masked</p>
           </button>
           <button onClick={() => unlock.mutate("STANDARD")} disabled={unlock.isPending || (user?.creditBalance || 0) < job.creditCost}
             className={cn("p-4 rounded-xl border-2 transition-all text-left relative overflow-hidden",
@@ -59,12 +92,14 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
             <div className="absolute top-2 right-2"><Badge className="text-xs">Recommended</Badge></div>
             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center mb-2"><Zap className="w-4 h-4 text-primary" /></div>
             <p className="font-semibold text-sm">Standard Tier</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Chat + Phone</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Chat + Phone number</p>
             <p className="text-lg font-bold mt-2 text-primary">{job.creditCost} credits</p>
-            <p className="text-xs text-muted-foreground mt-1">Full contact access</p>
+            <p className="text-xs text-muted-foreground mt-1">{(user?.creditBalance || 0) < job.creditCost ? `Need ${job.creditCost - (user?.creditBalance || 0)} more credits` : "Full contact access"}</p>
           </button>
         </div>
-        <Button variant="outline" className="w-full mt-4" onClick={onClose}>Cancel</Button>
+        <Button variant="outline" className="w-full mt-4" onClick={onClose} disabled={unlock.isPending}>
+          {unlock.isPending ? "Processing..." : "Cancel"}
+        </Button>
       </div>
     </div>
   );
