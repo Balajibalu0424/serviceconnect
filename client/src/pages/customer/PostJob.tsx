@@ -29,6 +29,7 @@ export default function PostJob() {
   const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [otp, setOtp] = useState("");
+  const [needsVerify, setNeedsVerify] = useState(false); // track if we're in verify step for new accounts
 
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/categories"] });
 
@@ -87,6 +88,7 @@ export default function PostJob() {
       const data = await res.json();
       setTokens(data.accessToken, data.refreshToken);
       setJobId(data.jobId);
+      setNeedsVerify(true);
       await refreshUser();
       setStep(3);
     } catch (e: any) {
@@ -267,7 +269,7 @@ export default function PostJob() {
         )}
 
         {/* Step 3: OTP Verification */}
-        {step === 3 && !isLoggedIn && (
+        {step === 3 && (needsVerify || !isLoggedIn) && (
           <div className="space-y-6 text-center">
             <div>
               <h1 className="text-2xl font-bold mb-1">Verify your email</h1>
