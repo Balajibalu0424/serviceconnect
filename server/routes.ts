@@ -838,64 +838,88 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // CHAT
   // ═══════════════════════════════════════════════════════════════════════════
   app.get("/api/chat/conversations", requireAuth, async (req: AuthRequest, res: Response) => {
-    const userId = req.user!.userId;
-    const myConvs = await db.select({ conv: conversations })
-      .from(conversationParticipants)
-      .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
-      .where(eq(conversationParticipants.userId, userId))
-      .orderBy(desc(conversations.lastMessageAt));
+    try {
+      const userId = req.user!.userId;
+      const myConvs = await db.select({ conv: conversations, lastReadAt: conversationParticipants.lastReadAt })
+        .from(conversationParticipants)
+        .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
+        .where(eq(conversationParticipants.userId, userId))
+        .orderBy(desc(conversations.lastMessageAt));
 
-    const result = await Promise.all(myConvs.map(async ({ conv }) => {
-      const participants = await db.select({
-        id: users.id, firstName: users.firstName, lastName: users.lastName,
-        avatarUrl: users.avatarUrl, role: users.role
-      }).from(conversationParticipants)
-        .innerJoin(users, eq(conversationParticipants.userId, users.id))
-        .where(eq(conversationParticipants.conversationId, conv.id));
+      const result = await Promise.all(myConvs.map(async ({ conv, lastReadAt }) => {
+        const participants = await db.select({
+          id: users.id, firstName: users.firstName, lastName: users.lastName,
+          avatarUrl: users.avatarUrl, role: users.role
+        }).from(conversationParticipants)
+          .innerJoin(users, eq(conversationParticipants.userId, users.id))
+          .where(eq(conversationParticipants.conversationId, conv.id));
 
-      const [lastMsg] = await db.select().from(messages)
-        .where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt)))
-        .orderBy(desc(messages.createdAt)).limit(1);
+        const [lastMsg] = await db.select().from(messages)
+          .where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt)))
+          .orderBy(desc(messages.createdAt)).limit(1);
 
-      const [unreadResult] = await db.select({ c: count() }).from(messages)
-        .where(and(
+        // Count only messages after lastReadAt (true unread count)
+        const unreadConditions = [
           eq(messages.conversationId, conv.id),
           ne(messages.senderId, userId),
-          isNull(messages.deletedAt)
-        ));
+          isNull(messages.deletedAt),
+          ...(lastReadAt ? [gt(messages.createdAt, lastReadAt)] : [])
+        ];
+        const [unreadResult] = await db.select({ c: count() }).from(messages).where(and(...unreadConditions));
 
-      let jobData = null;
-      if (conv.jobId) {
-        const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
-        jobData = j;
-      }
+        let jobData: { title: string; status: string } | null = null;
+        if (conv.jobId) {
+          const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
+          jobData = j || null;
+        }
 
-      return { ...conv, participants, lastMessage: lastMsg, unreadCount: unreadResult.c, job: jobData };
-    }));
+        // Compute the other participant's display name
+        const other = participants.find(p => p.id !== userId);
+        const otherName = other ? `${other.firstName} ${other.lastName}`.trim() : "Unknown";
 
-    return res.json(result);
+        return {
+          ...conv,
+          // Flatten for easy frontend use
+          jobTitle: jobData?.title || otherName,
+          lastMessage: lastMsg?.content || null,
+          lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
+          unreadCount: unreadResult?.c ?? 0,
+          // Full objects also available
+          participants,
+          job: jobData,
+        };
+      }));
+
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/chat/conversations/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
-    const userId = req.user!.userId;
-    const convId = req.params.id;
-    const { page = "1", limit = "50" } = req.query as any;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    try {
+      const userId = req.user!.userId;
+      const convId = req.params.id;
+      const { page = "1", limit = "50" } = req.query as any;
+      const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const [participant] = await db.select().from(conversationParticipants)
-      .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
-    if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
+      const [participant] = await db.select().from(conversationParticipants)
+        .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
+      if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
 
-    const msgs = await db.select().from(messages)
-      .where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt)))
-      .orderBy(asc(messages.createdAt))
-      .limit(parseInt(limit)).offset(offset);
+      const msgs = await db.select().from(messages)
+        .where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt)))
+        .orderBy(asc(messages.createdAt))
+        .limit(parseInt(limit)).offset(offset);
 
-    // Mark as read
-    await db.update(conversationParticipants).set({ lastReadAt: new Date() })
-      .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
+      // Mark as read
+      await db.update(conversationParticipants).set({ lastReadAt: new Date() })
+        .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
 
-    return res.json(msgs);
+      return res.json(msgs);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/chat/conversations/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
@@ -956,24 +980,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/chat/unread-count", requireAuth, async (req: AuthRequest, res: Response) => {
-    const userId = req.user!.userId;
-    const myConvIds = await db.select({ convId: conversationParticipants.conversationId })
-      .from(conversationParticipants).where(eq(conversationParticipants.userId, userId));
-    const ids = myConvIds.map(r => r.convId);
-    if (ids.length === 0) return res.json({ count: 0 });
+    try {
+      const userId = req.user!.userId;
+      const myParticipations = await db.select({
+        convId: conversationParticipants.conversationId,
+        lastReadAt: conversationParticipants.lastReadAt
+      }).from(conversationParticipants).where(eq(conversationParticipants.userId, userId));
 
-    const [result] = await db.select({ c: count() }).from(messages)
-      .where(and(inArray(messages.conversationId, ids), ne(messages.senderId, userId), isNull(messages.deletedAt)));
-    return res.json({ count: result.c });
+      if (myParticipations.length === 0) return res.json({ count: 0 });
+
+      // Sum unread counts per conversation (respecting lastReadAt)
+      let totalUnread = 0;
+      for (const p of myParticipations) {
+        const conditions = [
+          eq(messages.conversationId, p.convId),
+          ne(messages.senderId, userId),
+          isNull(messages.deletedAt),
+          ...(p.lastReadAt ? [gt(messages.createdAt, p.lastReadAt)] : [])
+        ];
+        const [r] = await db.select({ c: count() }).from(messages).where(and(...conditions));
+        totalUnread += r?.c ?? 0;
+      }
+      return res.json({ count: totalUnread });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.patch("/api/chat/conversations/:id/read", requireAuth, async (req: AuthRequest, res: Response) => {
-    await db.update(conversationParticipants).set({ lastReadAt: new Date() })
-      .where(and(
-        eq(conversationParticipants.conversationId, req.params.id),
-        eq(conversationParticipants.userId, req.user!.userId)
-      ));
-    return res.json({ success: true });
+    try {
+      await db.update(conversationParticipants).set({ lastReadAt: new Date() })
+        .where(and(
+          eq(conversationParticipants.conversationId, req.params.id),
+          eq(conversationParticipants.userId, req.user!.userId)
+        ));
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

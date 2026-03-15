@@ -30194,8 +30194,8 @@ var require_gt = __commonJS({
   "node_modules/jsonwebtoken/node_modules/semver/functions/gt.js"(exports, module) {
     "use strict";
     var compare = require_compare();
-    var gt3 = (a, b, loose) => compare(a, b, loose) > 0;
-    module.exports = gt3;
+    var gt2 = (a, b, loose) => compare(a, b, loose) > 0;
+    module.exports = gt2;
   }
 });
 
@@ -30255,7 +30255,7 @@ var require_cmp = __commonJS({
     "use strict";
     var eq2 = require_eq();
     var neq = require_neq();
-    var gt3 = require_gt();
+    var gt2 = require_gt();
     var gte3 = require_gte();
     var lt3 = require_lt();
     var lte3 = require_lte();
@@ -30284,7 +30284,7 @@ var require_cmp = __commonJS({
         case "!=":
           return neq(a, b, loose);
         case ">":
-          return gt3(a, b, loose);
+          return gt2(a, b, loose);
         case ">=":
           return gte3(a, b, loose);
         case "<":
@@ -30964,7 +30964,7 @@ var require_min_version = __commonJS({
     "use strict";
     var SemVer = require_semver();
     var Range = require_range2();
-    var gt3 = require_gt();
+    var gt2 = require_gt();
     var minVersion = (range, loose) => {
       range = new Range(range, loose);
       let minver = new SemVer("0.0.0");
@@ -30992,7 +30992,7 @@ var require_min_version = __commonJS({
             /* fallthrough */
             case "":
             case ">=":
-              if (!setMin || gt3(compver, setMin)) {
+              if (!setMin || gt2(compver, setMin)) {
                 setMin = compver;
               }
               break;
@@ -31004,7 +31004,7 @@ var require_min_version = __commonJS({
               throw new Error(`Unexpected operation: ${comparator.operator}`);
           }
         });
-        if (setMin && (!minver || gt3(minver, setMin))) {
+        if (setMin && (!minver || gt2(minver, setMin))) {
           minver = setMin;
         }
       }
@@ -31042,7 +31042,7 @@ var require_outside = __commonJS({
     var { ANY } = Comparator;
     var Range = require_range2();
     var satisfies = require_satisfies();
-    var gt3 = require_gt();
+    var gt2 = require_gt();
     var lt3 = require_lt();
     var lte3 = require_lte();
     var gte3 = require_gte();
@@ -31052,7 +31052,7 @@ var require_outside = __commonJS({
       let gtfn, ltefn, ltfn, comp, ecomp;
       switch (hilo) {
         case ">":
-          gtfn = gt3;
+          gtfn = gt2;
           ltefn = lte3;
           ltfn = lt3;
           comp = ">";
@@ -31061,7 +31061,7 @@ var require_outside = __commonJS({
         case "<":
           gtfn = lt3;
           ltefn = gte3;
-          ltfn = gt3;
+          ltfn = gt2;
           comp = "<";
           ecomp = "<=";
           break;
@@ -31239,10 +31239,10 @@ var require_subset = __commonJS({
         }
       }
       const eqSet = /* @__PURE__ */ new Set();
-      let gt3, lt3;
+      let gt2, lt3;
       for (const c of sub) {
         if (c.operator === ">" || c.operator === ">=") {
-          gt3 = higherGT(gt3, c, options);
+          gt2 = higherGT(gt2, c, options);
         } else if (c.operator === "<" || c.operator === "<=") {
           lt3 = lowerLT(lt3, c, options);
         } else {
@@ -31253,16 +31253,16 @@ var require_subset = __commonJS({
         return null;
       }
       let gtltComp;
-      if (gt3 && lt3) {
-        gtltComp = compare(gt3.semver, lt3.semver, options);
+      if (gt2 && lt3) {
+        gtltComp = compare(gt2.semver, lt3.semver, options);
         if (gtltComp > 0) {
           return null;
-        } else if (gtltComp === 0 && (gt3.operator !== ">=" || lt3.operator !== "<=")) {
+        } else if (gtltComp === 0 && (gt2.operator !== ">=" || lt3.operator !== "<=")) {
           return null;
         }
       }
       for (const eq2 of eqSet) {
-        if (gt3 && !satisfies(eq2, String(gt3), options)) {
+        if (gt2 && !satisfies(eq2, String(gt2), options)) {
           return null;
         }
         if (lt3 && !satisfies(eq2, String(lt3), options)) {
@@ -31278,25 +31278,25 @@ var require_subset = __commonJS({
       let higher, lower;
       let hasDomLT, hasDomGT;
       let needDomLTPre = lt3 && !options.includePrerelease && lt3.semver.prerelease.length ? lt3.semver : false;
-      let needDomGTPre = gt3 && !options.includePrerelease && gt3.semver.prerelease.length ? gt3.semver : false;
+      let needDomGTPre = gt2 && !options.includePrerelease && gt2.semver.prerelease.length ? gt2.semver : false;
       if (needDomLTPre && needDomLTPre.prerelease.length === 1 && lt3.operator === "<" && needDomLTPre.prerelease[0] === 0) {
         needDomLTPre = false;
       }
       for (const c of dom) {
         hasDomGT = hasDomGT || c.operator === ">" || c.operator === ">=";
         hasDomLT = hasDomLT || c.operator === "<" || c.operator === "<=";
-        if (gt3) {
+        if (gt2) {
           if (needDomGTPre) {
             if (c.semver.prerelease && c.semver.prerelease.length && c.semver.major === needDomGTPre.major && c.semver.minor === needDomGTPre.minor && c.semver.patch === needDomGTPre.patch) {
               needDomGTPre = false;
             }
           }
           if (c.operator === ">" || c.operator === ">=") {
-            higher = higherGT(gt3, c, options);
-            if (higher === c && higher !== gt3) {
+            higher = higherGT(gt2, c, options);
+            if (higher === c && higher !== gt2) {
               return false;
             }
-          } else if (gt3.operator === ">=" && !satisfies(gt3.semver, String(c), options)) {
+          } else if (gt2.operator === ">=" && !satisfies(gt2.semver, String(c), options)) {
             return false;
           }
         }
@@ -31315,14 +31315,14 @@ var require_subset = __commonJS({
             return false;
           }
         }
-        if (!c.operator && (lt3 || gt3) && gtltComp !== 0) {
+        if (!c.operator && (lt3 || gt2) && gtltComp !== 0) {
           return false;
         }
       }
-      if (gt3 && hasDomLT && !lt3 && gtltComp !== 0) {
+      if (gt2 && hasDomLT && !lt3 && gtltComp !== 0) {
         return false;
       }
-      if (lt3 && hasDomGT && !gt3 && gtltComp !== 0) {
+      if (lt3 && hasDomGT && !gt2 && gtltComp !== 0) {
         return false;
       }
       if (needDomGTPre || needDomLTPre) {
@@ -31371,7 +31371,7 @@ var require_semver2 = __commonJS({
     var compareBuild = require_compare_build();
     var sort = require_sort();
     var rsort = require_rsort();
-    var gt3 = require_gt();
+    var gt2 = require_gt();
     var lt3 = require_lt();
     var eq2 = require_eq();
     var neq = require_neq();
@@ -31409,7 +31409,7 @@ var require_semver2 = __commonJS({
       compareBuild,
       sort,
       rsort,
-      gt: gt3,
+      gt: gt2,
       lt: lt3,
       eq: eq2,
       neq,
@@ -50159,41 +50159,63 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.get("/api/chat/conversations", requireAuth, async (req, res) => {
-    const userId = req.user.userId;
-    const myConvs = await db.select({ conv: conversations }).from(conversationParticipants).innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id)).where(eq(conversationParticipants.userId, userId)).orderBy(desc(conversations.lastMessageAt));
-    const result = await Promise.all(myConvs.map(async ({ conv }) => {
-      const participants = await db.select({
-        id: users.id,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        avatarUrl: users.avatarUrl,
-        role: users.role
-      }).from(conversationParticipants).innerJoin(users, eq(conversationParticipants.userId, users.id)).where(eq(conversationParticipants.conversationId, conv.id));
-      const [lastMsg] = await db.select().from(messages).where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt))).orderBy(desc(messages.createdAt)).limit(1);
-      const [unreadResult] = await db.select({ c: count() }).from(messages).where(and(
-        eq(messages.conversationId, conv.id),
-        ne(messages.senderId, userId),
-        isNull(messages.deletedAt)
-      ));
-      let jobData = null;
-      if (conv.jobId) {
-        const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
-        jobData = j;
-      }
-      return { ...conv, participants, lastMessage: lastMsg, unreadCount: unreadResult.c, job: jobData };
-    }));
-    return res.json(result);
+    try {
+      const userId = req.user.userId;
+      const myConvs = await db.select({ conv: conversations, lastReadAt: conversationParticipants.lastReadAt }).from(conversationParticipants).innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id)).where(eq(conversationParticipants.userId, userId)).orderBy(desc(conversations.lastMessageAt));
+      const result = await Promise.all(myConvs.map(async ({ conv, lastReadAt }) => {
+        const participants = await db.select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          avatarUrl: users.avatarUrl,
+          role: users.role
+        }).from(conversationParticipants).innerJoin(users, eq(conversationParticipants.userId, users.id)).where(eq(conversationParticipants.conversationId, conv.id));
+        const [lastMsg] = await db.select().from(messages).where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt))).orderBy(desc(messages.createdAt)).limit(1);
+        const unreadConditions = [
+          eq(messages.conversationId, conv.id),
+          ne(messages.senderId, userId),
+          isNull(messages.deletedAt),
+          ...lastReadAt ? [gt(messages.createdAt, lastReadAt)] : []
+        ];
+        const [unreadResult] = await db.select({ c: count() }).from(messages).where(and(...unreadConditions));
+        let jobData = null;
+        if (conv.jobId) {
+          const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
+          jobData = j || null;
+        }
+        const other = participants.find((p) => p.id !== userId);
+        const otherName = other ? `${other.firstName} ${other.lastName}`.trim() : "Unknown";
+        return {
+          ...conv,
+          // Flatten for easy frontend use
+          jobTitle: jobData?.title || otherName,
+          lastMessage: lastMsg?.content || null,
+          lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
+          unreadCount: unreadResult?.c ?? 0,
+          // Full objects also available
+          participants,
+          job: jobData
+        };
+      }));
+      return res.json(result);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.get("/api/chat/conversations/:id/messages", requireAuth, async (req, res) => {
-    const userId = req.user.userId;
-    const convId = req.params.id;
-    const { page = "1", limit = "50" } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
-    if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
-    const msgs = await db.select().from(messages).where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt))).orderBy(asc(messages.createdAt)).limit(parseInt(limit)).offset(offset);
-    await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
-    return res.json(msgs);
+    try {
+      const userId = req.user.userId;
+      const convId = req.params.id;
+      const { page = "1", limit = "50" } = req.query;
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+      const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
+      if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
+      const msgs = await db.select().from(messages).where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt))).orderBy(asc(messages.createdAt)).limit(parseInt(limit)).offset(offset);
+      await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
+      return res.json(msgs);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.post("/api/chat/conversations/:id/messages", requireAuth, async (req, res) => {
     try {
@@ -50241,19 +50263,39 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.get("/api/chat/unread-count", requireAuth, async (req, res) => {
-    const userId = req.user.userId;
-    const myConvIds = await db.select({ convId: conversationParticipants.conversationId }).from(conversationParticipants).where(eq(conversationParticipants.userId, userId));
-    const ids = myConvIds.map((r) => r.convId);
-    if (ids.length === 0) return res.json({ count: 0 });
-    const [result] = await db.select({ c: count() }).from(messages).where(and(inArray(messages.conversationId, ids), ne(messages.senderId, userId), isNull(messages.deletedAt)));
-    return res.json({ count: result.c });
+    try {
+      const userId = req.user.userId;
+      const myParticipations = await db.select({
+        convId: conversationParticipants.conversationId,
+        lastReadAt: conversationParticipants.lastReadAt
+      }).from(conversationParticipants).where(eq(conversationParticipants.userId, userId));
+      if (myParticipations.length === 0) return res.json({ count: 0 });
+      let totalUnread = 0;
+      for (const p of myParticipations) {
+        const conditions = [
+          eq(messages.conversationId, p.convId),
+          ne(messages.senderId, userId),
+          isNull(messages.deletedAt),
+          ...p.lastReadAt ? [gt(messages.createdAt, p.lastReadAt)] : []
+        ];
+        const [r] = await db.select({ c: count() }).from(messages).where(and(...conditions));
+        totalUnread += r?.c ?? 0;
+      }
+      return res.json({ count: totalUnread });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.patch("/api/chat/conversations/:id/read", requireAuth, async (req, res) => {
-    await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(
-      eq(conversationParticipants.conversationId, req.params.id),
-      eq(conversationParticipants.userId, req.user.userId)
-    ));
-    return res.json({ success: true });
+    try {
+      await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(
+        eq(conversationParticipants.conversationId, req.params.id),
+        eq(conversationParticipants.userId, req.user.userId)
+      ));
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.get("/api/credits/packages", async (_req, res) => {
     const pkgs = await db.select().from(creditPackages).where(eq(creditPackages.isActive, true));
