@@ -33080,10 +33080,10 @@ function pgEnumWithSchema(enumName, values, schema) {
 // node_modules/drizzle-orm/subquery.js
 var Subquery = class {
   static [entityKind] = "Subquery";
-  constructor(sql3, selection, alias, isWith = false) {
+  constructor(sql2, selection, alias, isWith = false) {
     this._ = {
       brand: "Subquery",
-      sql: sql3,
+      sql: sql2,
       selectedFields: selection,
       alias,
       isWith
@@ -33473,19 +33473,19 @@ function sql(strings, ...params) {
   }
   return new SQL(queryChunks);
 }
-((sql22) => {
+((sql2) => {
   function empty() {
     return new SQL([]);
   }
-  sql22.empty = empty;
+  sql2.empty = empty;
   function fromList(list) {
     return new SQL(list);
   }
-  sql22.fromList = fromList;
+  sql2.fromList = fromList;
   function raw(str) {
     return new SQL([new StringChunk(str)]);
   }
-  sql22.raw = raw;
+  sql2.raw = raw;
   function join(chunks, separator) {
     const result = [];
     for (const [i, chunk] of chunks.entries()) {
@@ -33496,24 +33496,24 @@ function sql(strings, ...params) {
     }
     return new SQL(result);
   }
-  sql22.join = join;
+  sql2.join = join;
   function identifier(value) {
     return new Name(value);
   }
-  sql22.identifier = identifier;
+  sql2.identifier = identifier;
   function placeholder2(name2) {
     return new Placeholder(name2);
   }
-  sql22.placeholder = placeholder2;
+  sql2.placeholder = placeholder2;
   function param2(value, encoder) {
     return new Param(value, encoder);
   }
-  sql22.param = param2;
+  sql2.param = param2;
 })(sql || (sql = {}));
 ((SQL2) => {
   class Aliased {
-    constructor(sql22, fieldAlias) {
-      this.sql = sql22;
+    constructor(sql2, fieldAlias) {
+      this.sql = sql2;
       this.fieldAlias = fieldAlias;
     }
     static [entityKind] = "SQL.Aliased";
@@ -36199,8 +36199,8 @@ var PgDialect = class {
       return "none";
     }
   }
-  sqlToQuery(sql22, invokeSource) {
-    return sql22.toQuery({
+  sqlToQuery(sql2, invokeSource) {
+    return sql2.toQuery({
       casing: this.casing,
       escapeName: this.escapeName,
       escapeParam: this.escapeParam,
@@ -38353,10 +38353,10 @@ var PgRelationalQuery = class extends QueryPromise {
 
 // node_modules/drizzle-orm/pg-core/query-builders/raw.js
 var PgRaw = class extends QueryPromise {
-  constructor(execute, sql3, query, mapBatchResult) {
+  constructor(execute, sql2, query, mapBatchResult) {
     super();
     this.execute = execute;
-    this.sql = sql3;
+    this.sql = sql2;
     this.query = query;
     this.mapBatchResult = mapBatchResult;
   }
@@ -38817,8 +38817,8 @@ var PgSession = class {
     ).all();
   }
   /** @internal */
-  async count(sql22, token) {
-    const res = await this.execute(sql22, token);
+  async count(sql2, token) {
+    const res = await this.execute(sql2, token);
     return Number(
       res[0]["count"]
     );
@@ -38999,8 +38999,8 @@ var NodePgSession = class _NodePgSession extends PgSession {
       }
     }
   }
-  async count(sql22) {
-    const res = await this.execute(sql22);
+  async count(sql2) {
+    const res = await this.execute(sql2);
     return Number(
       res["rows"][0]["count"]
     );
@@ -50605,8 +50605,108 @@ async function registerRoutes(httpServer, app2) {
     return res.json({ jobs: result, total: c });
   });
   app2.get("/api/admin/chat", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    const flaggedMessages = await db.select().from(messages).where(and(eq(messages.isFiltered, true), isNull(messages.deletedAt))).orderBy(desc(messages.createdAt)).limit(50);
-    return res.json(flaggedMessages);
+    try {
+      const flaggedMessages = await db.select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        senderId: messages.senderId,
+        content: messages.content,
+        originalContent: messages.originalContent,
+        filterFlags: messages.filterFlags,
+        isFiltered: messages.isFiltered,
+        createdAt: messages.createdAt,
+        senderName: sql`(select concat(first_name, ' ', last_name) from users where id = ${messages.senderId})`,
+        senderEmail: sql`(select email from users where id = ${messages.senderId})`
+      }).from(messages).where(and(eq(messages.isFiltered, true), isNull(messages.deletedAt))).orderBy(desc(messages.createdAt)).limit(100);
+      return res.json(flaggedMessages);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/conversations", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { search = "", status = "" } = req.query;
+      const allConvs = await db.select().from(conversations).orderBy(desc(conversations.lastMessageAt)).limit(200);
+      const result = await Promise.all(allConvs.map(async (conv) => {
+        const participants = await db.select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          email: users.email,
+          role: users.role
+        }).from(conversationParticipants).innerJoin(users, eq(conversationParticipants.userId, users.id)).where(eq(conversationParticipants.conversationId, conv.id));
+        const [lastMsg] = await db.select({ content: messages.content, createdAt: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt))).orderBy(desc(messages.createdAt)).limit(1);
+        const [msgCount] = await db.select({ c: count() }).from(messages).where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt)));
+        const [flagCount] = await db.select({ c: count() }).from(messages).where(and(eq(messages.conversationId, conv.id), eq(messages.isFiltered, true), isNull(messages.deletedAt)));
+        let jobTitle = null;
+        if (conv.jobId) {
+          const [j] = await db.select({ title: jobs.title }).from(jobs).where(eq(jobs.id, conv.jobId));
+          jobTitle = j?.title || null;
+        }
+        return {
+          ...conv,
+          jobTitle,
+          participants,
+          lastMessage: lastMsg?.content || null,
+          lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
+          messageCount: msgCount?.c ?? 0,
+          flaggedCount: flagCount?.c ?? 0
+        };
+      }));
+      const filtered = result.filter((c) => {
+        if (search) {
+          const s = search.toLowerCase();
+          const matchJob = c.jobTitle?.toLowerCase().includes(s);
+          const matchParticipant = c.participants.some(
+            (p) => `${p.firstName} ${p.lastName}`.toLowerCase().includes(s) || p.email.toLowerCase().includes(s)
+          );
+          if (!matchJob && !matchParticipant) return false;
+        }
+        if (status && c.status !== status) return false;
+        return true;
+      });
+      return res.json(filtered);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/conversations/:id/messages", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const convId = req.params.id;
+      const msgs = await db.select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        senderId: messages.senderId,
+        type: messages.type,
+        content: messages.content,
+        originalContent: messages.originalContent,
+        isFiltered: messages.isFiltered,
+        filterFlags: messages.filterFlags,
+        createdAt: messages.createdAt,
+        deletedAt: messages.deletedAt,
+        senderName: sql`(select concat(first_name, ' ', last_name) from users where id = ${messages.senderId})`,
+        senderRole: sql`(select role from users where id = ${messages.senderId})`
+      }).from(messages).where(eq(messages.conversationId, convId)).orderBy(asc(messages.createdAt));
+      return res.json(msgs);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/messages/:id/dismiss-flag", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const [msg] = await db.update(messages).set({ isFiltered: false, filterFlags: [] }).where(eq(messages.id, req.params.id)).returning();
+      return res.json(msg);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.delete("/api/admin/messages/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      await db.update(messages).set({ deletedAt: /* @__PURE__ */ new Date() }).where(eq(messages.id, req.params.id));
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.get("/api/admin/audit-logs", requireAuth, requireRole("ADMIN"), async (req, res) => {
     const logs = await db.select().from(adminAuditLogs).orderBy(desc(adminAuditLogs.createdAt)).limit(100);

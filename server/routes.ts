@@ -1369,11 +1369,131 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ jobs: result, total: c });
   });
 
+  // GET /api/admin/chat — flagged messages only (legacy)
   app.get("/api/admin/chat", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    const flaggedMessages = await db.select().from(messages)
-      .where(and(eq(messages.isFiltered, true), isNull(messages.deletedAt)))
-      .orderBy(desc(messages.createdAt)).limit(50);
-    return res.json(flaggedMessages);
+    try {
+      const flaggedMessages = await db.select({
+        id: messages.id, conversationId: messages.conversationId, senderId: messages.senderId,
+        content: messages.content, originalContent: messages.originalContent,
+        filterFlags: messages.filterFlags, isFiltered: messages.isFiltered,
+        createdAt: messages.createdAt,
+        senderName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${messages.senderId})`,
+        senderEmail: sql<string>`(select email from users where id = ${messages.senderId})`,
+      }).from(messages)
+        .where(and(eq(messages.isFiltered, true), isNull(messages.deletedAt)))
+        .orderBy(desc(messages.createdAt)).limit(100);
+      return res.json(flaggedMessages);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/conversations — all conversations with participant + job info
+  app.get("/api/admin/conversations", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { search = "", status = "" } = req.query as any;
+      const allConvs = await db.select().from(conversations)
+        .orderBy(desc(conversations.lastMessageAt))
+        .limit(200);
+
+      const result = await Promise.all(allConvs.map(async (conv) => {
+        const participants = await db.select({
+          id: users.id, firstName: users.firstName, lastName: users.lastName,
+          email: users.email, role: users.role
+        }).from(conversationParticipants)
+          .innerJoin(users, eq(conversationParticipants.userId, users.id))
+          .where(eq(conversationParticipants.conversationId, conv.id));
+
+        const [lastMsg] = await db.select({ content: messages.content, createdAt: messages.createdAt })
+          .from(messages)
+          .where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt)))
+          .orderBy(desc(messages.createdAt)).limit(1);
+
+        const [msgCount] = await db.select({ c: count() }).from(messages)
+          .where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt)));
+
+        const [flagCount] = await db.select({ c: count() }).from(messages)
+          .where(and(eq(messages.conversationId, conv.id), eq(messages.isFiltered, true), isNull(messages.deletedAt)));
+
+        let jobTitle: string | null = null;
+        if (conv.jobId) {
+          const [j] = await db.select({ title: jobs.title }).from(jobs).where(eq(jobs.id, conv.jobId));
+          jobTitle = j?.title || null;
+        }
+
+        return {
+          ...conv,
+          jobTitle,
+          participants,
+          lastMessage: lastMsg?.content || null,
+          lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
+          messageCount: msgCount?.c ?? 0,
+          flaggedCount: flagCount?.c ?? 0,
+        };
+      }));
+
+      // Apply search filter in memory
+      const filtered = result.filter(c => {
+        if (search) {
+          const s = (search as string).toLowerCase();
+          const matchJob = c.jobTitle?.toLowerCase().includes(s);
+          const matchParticipant = c.participants.some(
+            (p: any) => `${p.firstName} ${p.lastName}`.toLowerCase().includes(s) || p.email.toLowerCase().includes(s)
+          );
+          if (!matchJob && !matchParticipant) return false;
+        }
+        if (status && c.status !== status) return false;
+        return true;
+      });
+
+      return res.json(filtered);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/conversations/:id/messages — full thread for admin
+  app.get("/api/admin/conversations/:id/messages", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const convId = req.params.id;
+      const msgs = await db.select({
+        id: messages.id, conversationId: messages.conversationId,
+        senderId: messages.senderId, type: messages.type,
+        content: messages.content, originalContent: messages.originalContent,
+        isFiltered: messages.isFiltered, filterFlags: messages.filterFlags,
+        createdAt: messages.createdAt, deletedAt: messages.deletedAt,
+        senderName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${messages.senderId})`,
+        senderRole: sql<string>`(select role from users where id = ${messages.senderId})`,
+      }).from(messages)
+        .where(eq(messages.conversationId, convId))
+        .orderBy(asc(messages.createdAt));
+      return res.json(msgs);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/admin/messages/:id/dismiss-flag — admin clears the filter flag
+  app.patch("/api/admin/messages/:id/dismiss-flag", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const [msg] = await db.update(messages)
+        .set({ isFiltered: false, filterFlags: [] })
+        .where(eq(messages.id, req.params.id))
+        .returning();
+      return res.json(msg);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/admin/messages/:id — admin hard-deletes a message
+  app.delete("/api/admin/messages/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      await db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, req.params.id));
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/admin/audit-logs", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
