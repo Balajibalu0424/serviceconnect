@@ -30244,8 +30244,8 @@ var require_lte = __commonJS({
   "node_modules/jsonwebtoken/node_modules/semver/functions/lte.js"(exports, module) {
     "use strict";
     var compare = require_compare();
-    var lte3 = (a, b, loose) => compare(a, b, loose) <= 0;
-    module.exports = lte3;
+    var lte2 = (a, b, loose) => compare(a, b, loose) <= 0;
+    module.exports = lte2;
   }
 });
 
@@ -30258,7 +30258,7 @@ var require_cmp = __commonJS({
     var gt2 = require_gt();
     var gte3 = require_gte();
     var lt3 = require_lt();
-    var lte3 = require_lte();
+    var lte2 = require_lte();
     var cmp = (a, op, b, loose) => {
       switch (op) {
         case "===":
@@ -30290,7 +30290,7 @@ var require_cmp = __commonJS({
         case "<":
           return lt3(a, b, loose);
         case "<=":
-          return lte3(a, b, loose);
+          return lte2(a, b, loose);
         default:
           throw new TypeError(`Invalid operator: ${op}`);
       }
@@ -31044,7 +31044,7 @@ var require_outside = __commonJS({
     var satisfies = require_satisfies();
     var gt2 = require_gt();
     var lt3 = require_lt();
-    var lte3 = require_lte();
+    var lte2 = require_lte();
     var gte3 = require_gte();
     var outside = (version2, range, hilo, options) => {
       version2 = new SemVer(version2, options);
@@ -31053,7 +31053,7 @@ var require_outside = __commonJS({
       switch (hilo) {
         case ">":
           gtfn = gt2;
-          ltefn = lte3;
+          ltefn = lte2;
           ltfn = lt3;
           comp = ">";
           ecomp = ">=";
@@ -31376,7 +31376,7 @@ var require_semver2 = __commonJS({
     var eq2 = require_eq();
     var neq = require_neq();
     var gte3 = require_gte();
-    var lte3 = require_lte();
+    var lte2 = require_lte();
     var cmp = require_cmp();
     var coerce2 = require_coerce();
     var Comparator = require_comparator();
@@ -31414,7 +31414,7 @@ var require_semver2 = __commonJS({
       eq: eq2,
       neq,
       gte: gte3,
-      lte: lte3,
+      lte: lte2,
       cmp,
       coerce: coerce2,
       Comparator,
@@ -50047,14 +50047,24 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.get("/api/quotes", requireAuth, async (req, res) => {
-    const userId = req.user.userId;
-    const user = await db.select().from(users).where(eq(users.id, userId));
-    if (!user[0]) return res.status(404).json({ error: "User not found" });
-    let conditions = [];
-    if (user[0].role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
-    else conditions.push(eq(quotes.professionalId, userId));
-    const result = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
-    return res.json(result);
+    try {
+      const userId = req.user.userId;
+      const [userRow] = await db.select().from(users).where(eq(users.id, userId));
+      if (!userRow) return res.status(404).json({ error: "User not found" });
+      let conditions = [];
+      if (userRow.role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
+      else conditions.push(eq(quotes.professionalId, userId));
+      const rawQuotes = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
+      const enriched = await Promise.all(rawQuotes.map(async (q) => {
+        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId }).from(jobs).where(eq(jobs.id, q.jobId));
+        const [cat] = job?.categoryId ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId)) : [null];
+        const [conv] = await db.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.jobId, q.jobId))).limit(1);
+        return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null };
+      }));
+      return res.json(enriched);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.post("/api/quotes/:id/accept", requireAuth, async (req, res) => {
     try {
@@ -50727,12 +50737,75 @@ async function registerRoutes(httpServer, app2) {
     return res.json(flag);
   });
   app2.get("/api/admin/metrics", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    const metrics = await db.select().from(platformMetrics).orderBy(desc(platformMetrics.recordedAt)).limit(100);
-    return res.json(metrics);
+    try {
+      const now = /* @__PURE__ */ new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1e3);
+      const dailyJobs = await db.execute(sql`
+        SELECT date_trunc('day', created_at)::date as day, count(*)::int as count
+        FROM jobs WHERE created_at >= ${thirtyDaysAgo}
+        GROUP BY 1 ORDER BY 1
+      `);
+      const dailyRevenue = await db.execute(sql`
+        SELECT date_trunc('day', created_at)::date as day, sum(amount::numeric)::float as total
+        FROM payments WHERE status = 'COMPLETED' AND created_at >= ${thirtyDaysAgo}
+        GROUP BY 1 ORDER BY 1
+      `);
+      const dailyUsers = await db.execute(sql`
+        SELECT date_trunc('day', created_at)::date as day, count(*)::int as count
+        FROM users WHERE created_at >= ${thirtyDaysAgo}
+        GROUP BY 1 ORDER BY 1
+      `);
+      const [totalUsers] = await db.select({ c: count() }).from(users);
+      const [totalJobs] = await db.select({ c: count() }).from(jobs);
+      const [totalBookings] = await db.select({ c: count() }).from(bookings);
+      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED")));
+      const [totalUnlocks] = await db.select({ c: count() }).from(jobUnlocks);
+      const jobsByStatus = await db.select({ status: jobs.status, c: count() }).from(jobs).groupBy(jobs.status);
+      const rawMetrics = await db.select().from(platformMetrics).orderBy(desc(platformMetrics.recordedAt)).limit(50);
+      return res.json({
+        dailyJobs: dailyJobs.rows,
+        dailyRevenue: dailyRevenue.rows,
+        dailyUsers: dailyUsers.rows,
+        summary: {
+          totalUsers: totalUsers.c,
+          totalJobs: totalJobs.c,
+          activeJobs: activeJobs.c,
+          totalBookings: totalBookings.c,
+          totalRevenue: totalRevenue.s || "0",
+          totalUnlocks: totalUnlocks.c
+        },
+        jobsByStatus,
+        rawMetrics
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.get("/api/admin/payments", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    const result = await db.select().from(payments).orderBy(desc(payments.createdAt)).limit(100);
-    return res.json(result);
+    try {
+      const { from, to, type } = req.query;
+      let conditions = [];
+      if (from) conditions.push(gte(payments.createdAt, new Date(from)));
+      if (to) conditions.push(lte(payments.createdAt, /* @__PURE__ */ new Date(to + "T23:59:59Z")));
+      if (type) conditions.push(eq(payments.paymentMethod, type));
+      const result = await db.select({
+        id: payments.id,
+        userId: payments.userId,
+        amount: payments.amount,
+        currency: payments.currency,
+        status: payments.status,
+        paymentMethod: payments.paymentMethod,
+        description: payments.description,
+        stripePaymentId: payments.stripePaymentId,
+        createdAt: payments.createdAt,
+        userName: sql`(select concat(first_name, ' ', last_name) from users where id = ${payments.userId})`,
+        userEmail: sql`(select email from users where id = ${payments.userId})`
+      }).from(payments).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(payments.createdAt)).limit(500);
+      return res.json(result);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.post("/api/admin/credits/grant", requireAuth, requireRole("ADMIN"), async (req, res) => {
     const { userId, amount, reason } = req.body;

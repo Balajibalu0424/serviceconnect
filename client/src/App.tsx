@@ -13,6 +13,7 @@ import Register from "@/pages/public/Register";
 import AdminLogin from "@/pages/public/AdminLogin";
 import Services from "@/pages/public/Services";
 import ProOnboarding from "@/pages/public/ProOnboarding";
+import ProPublicProfile from "@/pages/public/ProProfile";
 
 // Customer pages
 import CustomerDashboard from "@/pages/customer/Dashboard";
@@ -65,6 +66,7 @@ function AppRoutes() {
       <Route path="/services" component={Services} />
       <Route path="/post-job" component={PostJob} />
       <Route path="/pro/onboarding" component={ProOnboarding} />
+      <Route path="/pro/:id/profile" component={ProPublicProfile} />
 
       {/* Customer */}
       <Route path="/dashboard">

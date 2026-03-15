@@ -713,16 +713,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/quotes", requireAuth, async (req: AuthRequest, res: Response) => {
-    const userId = req.user!.userId;
-    const user = await db.select().from(users).where(eq(users.id, userId));
-    if (!user[0]) return res.status(404).json({ error: "User not found" });
+    try {
+      const userId = req.user!.userId;
+      const [userRow] = await db.select().from(users).where(eq(users.id, userId));
+      if (!userRow) return res.status(404).json({ error: "User not found" });
 
-    let conditions: any[] = [];
-    if (user[0].role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
-    else conditions.push(eq(quotes.professionalId, userId));
+      let conditions: any[] = [];
+      if (userRow.role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
+      else conditions.push(eq(quotes.professionalId, userId));
 
-    const result = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
-    return res.json(result);
+      const rawQuotes = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
+
+      // Enrich with job + category + conversation
+      const enriched = await Promise.all(rawQuotes.map(async (q) => {
+        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId })
+          .from(jobs).where(eq(jobs.id, q.jobId));
+        const [cat] = job?.categoryId
+          ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId))
+          : [null];
+        const [conv] = await db.select({ id: conversations.id }).from(conversations)
+          .where(and(eq(conversations.jobId, q.jobId)))
+          .limit(1);
+        return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null };
+      }));
+
+      return res.json(enriched);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/quotes/:id/accept", requireAuth, async (req: AuthRequest, res: Response) => {
@@ -1517,14 +1535,90 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/admin/metrics", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    const metrics = await db.select().from(platformMetrics)
-      .orderBy(desc(platformMetrics.recordedAt)).limit(100);
-    return res.json(metrics);
+    try {
+      // Return computed live stats for charts (last 30 days, daily)
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      // Daily jobs created (last 30 days)
+      const dailyJobs = await db.execute(sql`
+        SELECT date_trunc('day', created_at)::date as day, count(*)::int as count
+        FROM jobs WHERE created_at >= ${thirtyDaysAgo}
+        GROUP BY 1 ORDER BY 1
+      `);
+
+      // Daily revenue (last 30 days)
+      const dailyRevenue = await db.execute(sql`
+        SELECT date_trunc('day', created_at)::date as day, sum(amount::numeric)::float as total
+        FROM payments WHERE status = 'COMPLETED' AND created_at >= ${thirtyDaysAgo}
+        GROUP BY 1 ORDER BY 1
+      `);
+
+      // Daily new users (last 30 days)
+      const dailyUsers = await db.execute(sql`
+        SELECT date_trunc('day', created_at)::date as day, count(*)::int as count
+        FROM users WHERE created_at >= ${thirtyDaysAgo}
+        GROUP BY 1 ORDER BY 1
+      `);
+
+      // Summary totals
+      const [totalUsers] = await db.select({ c: count() }).from(users);
+      const [totalJobs] = await db.select({ c: count() }).from(jobs);
+      const [totalBookings] = await db.select({ c: count() }).from(bookings);
+      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"))!);
+      const [totalUnlocks] = await db.select({ c: count() }).from(jobUnlocks);
+
+      // Jobs by status breakdown
+      const jobsByStatus = await db.select({ status: jobs.status, c: count() }).from(jobs).groupBy(jobs.status);
+
+      // Platform metrics table rows (historical)
+      const rawMetrics = await db.select().from(platformMetrics).orderBy(desc(platformMetrics.recordedAt)).limit(50);
+
+      return res.json({
+        dailyJobs: dailyJobs.rows,
+        dailyRevenue: dailyRevenue.rows,
+        dailyUsers: dailyUsers.rows,
+        summary: {
+          totalUsers: totalUsers.c,
+          totalJobs: totalJobs.c,
+          activeJobs: activeJobs.c,
+          totalBookings: totalBookings.c,
+          totalRevenue: totalRevenue.s || "0",
+          totalUnlocks: totalUnlocks.c,
+        },
+        jobsByStatus,
+        rawMetrics,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/admin/payments", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    const result = await db.select().from(payments).orderBy(desc(payments.createdAt)).limit(100);
-    return res.json(result);
+    try {
+      const { from, to, type } = req.query as any;
+      let conditions: any[] = [];
+      if (from) conditions.push(gte(payments.createdAt, new Date(from)));
+      if (to) conditions.push(lte(payments.createdAt, new Date(to + 'T23:59:59Z')));
+      if (type) conditions.push(eq(payments.paymentMethod, type));
+
+      const result = await db.select({
+        id: payments.id, userId: payments.userId, amount: payments.amount,
+        currency: payments.currency, status: payments.status, paymentMethod: payments.paymentMethod,
+        description: payments.description, stripePaymentId: payments.stripePaymentId,
+        createdAt: payments.createdAt,
+        userName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${payments.userId})`,
+        userEmail: sql<string>`(select email from users where id = ${payments.userId})`,
+      }).from(payments)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(payments.createdAt))
+        .limit(500);
+
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/admin/credits/grant", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {

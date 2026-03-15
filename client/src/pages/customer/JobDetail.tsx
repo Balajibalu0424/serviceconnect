@@ -251,6 +251,15 @@ export default function JobDetail() {
                             Est. {q.estimatedDays} day{q.estimatedDays !== 1 ? "s" : ""}
                           </p>
                         )}
+                        {q.professionalId && (
+                          <a
+                            href={`/#/pro/${q.professionalId}/profile`}
+                            className="text-xs text-primary hover:underline mt-1 inline-block"
+                            data-testid={`link-pro-profile-${q.id}`}
+                          >
+                            View professional profile →
+                          </a>
+                        )}
                       </div>
                       {q.status === "PENDING" && job.status === "OPEN" && (
                         <div className="flex gap-2 flex-shrink-0">

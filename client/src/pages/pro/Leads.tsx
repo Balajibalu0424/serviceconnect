@@ -2,31 +2,147 @@ import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, Lock, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Users, MessageSquare, Briefcase, Euro, Clock, Tag } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { Link } from "wouter";
+
+const STATUS_VARIANT: Record<string, string> = {
+  PENDING: "secondary",
+  ACCEPTED: "default",
+  REJECTED: "destructive",
+  EXPIRED: "outline",
+};
 
 export default function ProLeads() {
-  const { data: quotes = [] } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
+  const { data: quotes = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
+
+  const pending = (quotes as any[]).filter(q => q.status === "PENDING");
+  const accepted = (quotes as any[]).filter(q => q.status === "ACCEPTED");
+  const rejected = (quotes as any[]).filter(q => q.status === "REJECTED");
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-4">
-        <h1 className="text-xl font-bold">My Leads</h1>
-        {(quotes as any[]).length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground">
+      <div className="p-6 space-y-5">
+        <div>
+          <h1 className="text-xl font-bold">My Leads</h1>
+          <p className="text-sm text-muted-foreground">Quotes you've submitted for jobs</p>
+        </div>
+
+        {/* Summary */}
+        {(quotes as any[]).length > 0 && (
+          <div className="flex gap-4">
+            <div className="text-center">
+              <p className="text-xl font-bold text-yellow-600">{pending.length}</p>
+              <p className="text-xs text-muted-foreground">Pending</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-emerald-600">{accepted.length}</p>
+              <p className="text-xs text-muted-foreground">Accepted</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-muted-foreground">{rejected.length}</p>
+              <p className="text-xs text-muted-foreground">Rejected</p>
+            </div>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => <div key={i} className="h-28 rounded-lg bg-muted animate-pulse" />)}
+          </div>
+        ) : (quotes as any[]).length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Users className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p>No leads yet — unlock jobs from your matchbooked list</p>
+            <p className="font-medium">No leads yet</p>
+            <p className="text-sm mt-1">Unlock jobs from your matchbooked list to start quoting</p>
+            <Link href="/pro/matchbooked">
+              <Button variant="outline" size="sm" className="mt-3">View Matchbooked</Button>
+            </Link>
           </div>
         ) : (
           <div className="space-y-3">
             {(quotes as any[]).map((q: any) => (
-              <Card key={q.id} data-testid={`lead-${q.id}`}>
+              <Card key={q.id} data-testid={`lead-${q.id}`} className="hover:shadow-sm transition-shadow">
                 <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-sm">Quote: €{q.amount}</p>
-                      <p className="text-xs text-muted-foreground">{q.message}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      {/* Job title + status */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <Briefcase className="w-3.5 h-3.5 text-muted-foreground" />
+                          <p className="font-semibold text-sm">
+                            {q.job?.title || "Unknown job"}
+                          </p>
+                        </div>
+                        {q.category?.name && (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Tag className="w-3 h-3" />
+                            {q.category.name}
+                          </div>
+                        )}
+                        {q.job?.status && (
+                          <Badge variant="outline" className="text-xs px-1.5 py-0">
+                            Job: {q.job.status}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Quote amount + message */}
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-1">
+                          <Euro className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="font-bold text-sm text-emerald-700">€{parseFloat(q.amount).toFixed(2)}</span>
+                        </div>
+                        {q.estimatedDuration && (
+                          <span className="text-xs text-muted-foreground">{q.estimatedDuration}</span>
+                        )}
+                      </div>
+
+                      {q.message && (
+                        <p className="text-xs text-muted-foreground line-clamp-2 italic">"{q.message}"</p>
+                      )}
+
+                      {/* Time */}
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="w-3 h-3" />
+                        {formatDistanceToNow(new Date(q.createdAt), { addSuffix: true })}
+                      </div>
                     </div>
-                    <Badge>{q.status}</Badge>
+
+                    {/* Right: status + chat link */}
+                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                      <Badge variant={STATUS_VARIANT[q.status] as any} className="text-xs">
+                        {q.status}
+                      </Badge>
+
+                      {q.conversationId && (
+                        <Link href="/pro/chat">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-7 px-2"
+                            data-testid={`btn-chat-${q.id}`}
+                          >
+                            <MessageSquare className="w-3 h-3 mr-1" />
+                            Chat
+                          </Button>
+                        </Link>
+                      )}
+
+                      {q.job?.id && (
+                        <Link href={`/pro/matchbooked`}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs h-7 px-2"
+                            data-testid={`btn-view-job-${q.id}`}
+                          >
+                            View job
+                          </Button>
+                        </Link>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
