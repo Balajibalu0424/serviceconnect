@@ -19,7 +19,7 @@ import {
   comparePassword, verifyRefreshToken, type AuthRequest
 } from "./auth";
 import { processMessageContent } from "./profanityFilter";
-import { startAftercareScheduler } from "./scheduler";
+import { startAftercareScheduler, runAftercareCheck } from "./scheduler";
 import { z } from "zod";
 import Stripe from "stripe";
 
@@ -1829,6 +1829,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .orderBy(asc(ticketMessages.createdAt));
       return res.json(msgs);
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VERCEL CRON ENDPOINT — called hourly by Vercel Cron in production
+  // This replaces the node-cron scheduler which cannot run in serverless
+  // ═══════════════════════════════════════════════════════════════════════════
+  app.get("/api/cron/aftercare", async (req: Request, res: Response) => {
+    // Verify secret to prevent unauthorized manual triggers
+    const secret = req.headers["x-cron-secret"] || req.query.secret;
+    if (process.env.NODE_ENV === "production" && secret !== process.env.CRON_SECRET) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    try {
+      await runAftercareCheck(createNotification);
+      return res.json({ success: true, ran: new Date().toISOString() });
+    } catch (err: any) {
+      console.error("[Cron] Aftercare check failed:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   // Admin: stats endpoint  

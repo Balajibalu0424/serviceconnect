@@ -105,13 +105,27 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
   );
 }
 
+const PAGE_SIZE = 20;
+
 export default function ProJobFeed() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [unlockJob, setUnlockJob] = useState<any | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
 
-  const { data: jobs = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/jobs/feed"] });
+  const { data: pageData = [], isLoading, isFetching } = useQuery<any[]>({
+    queryKey: ["/api/jobs/feed", categoryFilter, page],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
+      if (categoryFilter !== "all") params.set("categoryId", categoryFilter);
+      const res = await apiRequest("GET", `/api/jobs/feed?${params}`);
+      if (!res.ok) throw new Error("Failed to load jobs");
+      return res.json();
+    },
+  });
+
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/categories"] });
 
   const matchbook = useMutation({
@@ -120,11 +134,51 @@ export default function ProJobFeed() {
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] }); toast({ title: "Matchbooked!" }); },
+    onSuccess: () => {
+      setPage(1);
+      setHasMore(true);
+      qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] });
+      toast({ title: "Matchbooked!" });
+    },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
   });
 
-  const filteredJobs = categoryFilter === "all" ? jobs : (jobs as any[]).filter(j => j.category?.id === categoryFilter);
+  // Accumulate page results — use the simplest approach: track loaded pages in state
+  const [loadedPages, setLoadedPages] = useState<Record<string, any[]>>({});
+
+  const cacheKey = `${categoryFilter}:${page}`;
+  if (pageData.length > 0 && !loadedPages[cacheKey]) {
+    setLoadedPages(prev => ({ ...prev, [cacheKey]: pageData }));
+    if (pageData.length < PAGE_SIZE) setHasMore(false);
+  } else if (pageData.length === 0 && !isLoading && !isFetching && page > 1) {
+    setHasMore(false);
+  }
+
+  // Flatten all loaded pages in order for this filter
+  const displayedJobs: any[] = [];
+  for (let p = 1; p <= page; p++) {
+    const key = `${categoryFilter}:${p}`;
+    if (loadedPages[key]) displayedJobs.push(...loadedPages[key]);
+  }
+
+  // Deduplicate by id
+  const seen = new Set<string>();
+  const filteredJobs = displayedJobs.filter(j => {
+    if (seen.has(j.id)) return false;
+    seen.add(j.id);
+    return true;
+  });
+
+  const handleCategoryChange = (value: string) => {
+    setCategoryFilter(value);
+    setPage(1);
+    setHasMore(true);
+    setLoadedPages({});
+  };
+
+  const handleLoadMore = () => {
+    setPage(p => p + 1);
+  };
 
   const URGENCY_COLORS: Record<string, string> = { LOW: "secondary", NORMAL: "outline", HIGH: "default", URGENT: "destructive" };
 
@@ -133,7 +187,7 @@ export default function ProJobFeed() {
       <div className="p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Job Feed</h1>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select value={categoryFilter} onValueChange={handleCategoryChange}>
             <SelectTrigger className="w-40"><SelectValue placeholder="All categories" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All categories</SelectItem>
@@ -142,52 +196,71 @@ export default function ProJobFeed() {
           </Select>
         </div>
 
-        {isLoading ? (
+        {isLoading && page === 1 ? (
           <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-24 rounded-lg bg-muted animate-pulse" />)}</div>
         ) : filteredJobs.length === 0 ? (
           <div className="text-center py-16 text-muted-foreground">No jobs available</div>
         ) : (
-          <div className="space-y-3">
-            {(filteredJobs as any[]).map((job: any) => (
-              <Card key={job.id} className={cn("job-card transition-all", job.isBoosted && "border-primary/40 ring-1 ring-primary/20")} data-testid={`feed-job-${job.id}`}>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        {job.isBoosted && <Badge className="text-xs bg-amber-500">Boosted</Badge>}
-                        <Badge variant={URGENCY_COLORS[job.urgency] as any} className="text-xs">{job.urgency}</Badge>
-                        <Badge variant="outline" className="text-xs">{job.category?.name}</Badge>
+          <>
+            <div className="space-y-3">
+              {filteredJobs.map((job: any) => (
+                <Card key={job.id} className={cn("job-card transition-all", job.isBoosted && "border-primary/40 ring-1 ring-primary/20")} data-testid={`feed-job-${job.id}`}>
+                  <CardContent className="pt-4 pb-4">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {job.isBoosted && <Badge className="text-xs bg-amber-500">Boosted</Badge>}
+                          <Badge variant={URGENCY_COLORS[job.urgency] as any} className="text-xs">{job.urgency}</Badge>
+                          <Badge variant="outline" className="text-xs">{job.category?.name}</Badge>
+                        </div>
+                        <h3 className="font-semibold">{job.title}</h3>
+                        <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{job.description}</p>
                       </div>
-                      <h3 className="font-semibold">{job.title}</h3>
-                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{job.description}</p>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground mb-3">
-                    {job.locationText && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{job.locationText}</span>}
-                    {job.budgetMin && <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />€{job.budgetMin}–€{job.budgetMax}</span>}
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
-                    <span className="flex items-center gap-1"><Users className="w-3 h-3" />{String(job.matchbookCount || 0)} interested</span>
-                  </div>
-                  <div className="flex gap-2">
-                    {job.unlock ? (
-                      <Badge variant="outline" className="gap-1"><Lock className="w-3 h-3" /> Unlocked ({job.unlock.tier})</Badge>
-                    ) : job.isMatchbooked ? (
-                      <Button size="sm" className="gap-1" onClick={() => setUnlockJob(job)} data-testid={`button-unlock-${job.id}`}>
-                        <Lock className="w-3 h-3" /> Unlock ({job.creditCost}cr)
-                      </Button>
-                    ) : (
-                      <>
-                        <Button size="sm" variant="outline" className="gap-1" onClick={() => matchbook.mutate(job.id)} disabled={matchbook.isPending} data-testid={`button-matchbook-${job.id}`}>
-                          <Star className="w-3 h-3" /> Matchbook
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground mb-3">
+                      {job.locationText && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{job.locationText}</span>}
+                      {job.budgetMin && <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />€{job.budgetMin}–€{job.budgetMax}</span>}
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
+                      <span className="flex items-center gap-1"><Users className="w-3 h-3" />{String(job.matchbookCount || 0)} interested</span>
+                    </div>
+                    <div className="flex gap-2">
+                      {job.unlock ? (
+                        <Badge variant="outline" className="gap-1"><Lock className="w-3 h-3" /> Unlocked ({job.unlock.tier})</Badge>
+                      ) : job.isMatchbooked ? (
+                        <Button size="sm" className="gap-1" onClick={() => setUnlockJob(job)} data-testid={`button-unlock-${job.id}`}>
+                          <Lock className="w-3 h-3" /> Unlock ({job.creditCost}cr)
                         </Button>
-                        <Button size="sm" variant="ghost" className="text-muted-foreground">Skip</Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" className="gap-1" onClick={() => matchbook.mutate(job.id)} disabled={matchbook.isPending} data-testid={`button-matchbook-${job.id}`}>
+                            <Star className="w-3 h-3" /> Matchbook
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-muted-foreground">Skip</Button>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Load More */}
+            {hasMore && (
+              <div className="pt-2 flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={handleLoadMore}
+                  disabled={isFetching}
+                  data-testid="button-load-more-jobs"
+                >
+                  {isFetching ? "Loading..." : `Load more jobs`}
+                </Button>
+              </div>
+            )}
+            {!hasMore && filteredJobs.length > PAGE_SIZE && (
+              <p className="text-center text-xs text-muted-foreground pt-2">All jobs loaded</p>
+            )}
+          </>
         )}
       </div>
       {unlockJob && <UnlockModal job={unlockJob} onClose={() => setUnlockJob(null)} />}

@@ -30234,8 +30234,8 @@ var require_gte = __commonJS({
   "node_modules/jsonwebtoken/node_modules/semver/functions/gte.js"(exports, module) {
     "use strict";
     var compare = require_compare();
-    var gte3 = (a, b, loose) => compare(a, b, loose) >= 0;
-    module.exports = gte3;
+    var gte2 = (a, b, loose) => compare(a, b, loose) >= 0;
+    module.exports = gte2;
   }
 });
 
@@ -30256,7 +30256,7 @@ var require_cmp = __commonJS({
     var eq2 = require_eq();
     var neq = require_neq();
     var gt2 = require_gt();
-    var gte3 = require_gte();
+    var gte2 = require_gte();
     var lt3 = require_lt();
     var lte2 = require_lte();
     var cmp = (a, op, b, loose) => {
@@ -30286,7 +30286,7 @@ var require_cmp = __commonJS({
         case ">":
           return gt2(a, b, loose);
         case ">=":
-          return gte3(a, b, loose);
+          return gte2(a, b, loose);
         case "<":
           return lt3(a, b, loose);
         case "<=":
@@ -31045,7 +31045,7 @@ var require_outside = __commonJS({
     var gt2 = require_gt();
     var lt3 = require_lt();
     var lte2 = require_lte();
-    var gte3 = require_gte();
+    var gte2 = require_gte();
     var outside = (version2, range, hilo, options) => {
       version2 = new SemVer(version2, options);
       range = new Range(range, options);
@@ -31060,7 +31060,7 @@ var require_outside = __commonJS({
           break;
         case "<":
           gtfn = lt3;
-          ltefn = gte3;
+          ltefn = gte2;
           ltfn = gt2;
           comp = "<";
           ecomp = "<=";
@@ -31375,7 +31375,7 @@ var require_semver2 = __commonJS({
     var lt3 = require_lt();
     var eq2 = require_eq();
     var neq = require_neq();
-    var gte3 = require_gte();
+    var gte2 = require_gte();
     var lte2 = require_lte();
     var cmp = require_cmp();
     var coerce2 = require_coerce();
@@ -31413,7 +31413,7 @@ var require_semver2 = __commonJS({
       lt: lt3,
       eq: eq2,
       neq,
-      gte: gte3,
+      gte: gte2,
       lte: lte2,
       cmp,
       coerce: coerce2,
@@ -43948,102 +43948,103 @@ function processMessageContent(content, shouldMaskContacts) {
 
 // server/scheduler.ts
 import cron from "node-cron";
+async function runAftercareCheck(createNotification2) {
+  console.log("[Aftercare] Running check...");
+  const now = /* @__PURE__ */ new Date();
+  const twoDayThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1e3);
+  const twoDayCandidates = await db.select().from(jobs).where(and(
+    eq(jobs.status, "LIVE"),
+    eq(jobs.hasTokenPurchases, false),
+    lt(jobs.createdAt, twoDayThreshold)
+  ));
+  for (const job of twoDayCandidates) {
+    const existing = await db.select().from(jobAftercares).where(and(eq(jobAftercares.jobId, job.id), eq(jobAftercares.branch, "TWO_DAY")));
+    if (existing.length > 0) continue;
+    await db.transaction(async (tx) => {
+      await tx.update(jobs).set({ status: "AFTERCARE_2D", aftercareBranch: "TWO_DAY", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
+      await tx.insert(jobAftercares).values({
+        jobId: job.id,
+        branch: "TWO_DAY",
+        triggeredAt: /* @__PURE__ */ new Date()
+      });
+    });
+    await createNotification2(
+      job.customerId,
+      "AFTERCARE_2D",
+      "Did you get sorted?",
+      `How did your job listing "${job.title}" go? Did someone get the job sorted for you?`,
+      { jobId: job.id, branch: "TWO_DAY" }
+    );
+    console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_2D`);
+  }
+  const fiveDayThreshold = new Date(now.getTime() - 120 * 60 * 60 * 1e3);
+  const fiveDayCandidates = await db.select().from(jobs).where(and(
+    or(eq(jobs.status, "LIVE"), eq(jobs.status, "IN_DISCUSSION")),
+    eq(jobs.hasTokenPurchases, true),
+    lt(jobs.createdAt, fiveDayThreshold)
+  ));
+  for (const job of fiveDayCandidates) {
+    const existing = await db.select().from(jobAftercares).where(and(eq(jobAftercares.jobId, job.id), eq(jobAftercares.branch, "FIVE_DAY")));
+    if (existing.length > 0) continue;
+    await db.transaction(async (tx) => {
+      await tx.update(jobs).set({ status: "AFTERCARE_5D", aftercareBranch: "FIVE_DAY", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
+      await tx.insert(jobAftercares).values({
+        jobId: job.id,
+        branch: "FIVE_DAY",
+        triggeredAt: /* @__PURE__ */ new Date()
+      });
+    });
+    await createNotification2(
+      job.customerId,
+      "AFTERCARE_5D",
+      "Did you get sorted?",
+      `How's your job "${job.title}" going? Did a professional sort it out for you?`,
+      { jobId: job.id, branch: "FIVE_DAY" }
+    );
+    console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_5D`);
+  }
+  const reminderThreshold = new Date(now.getTime() - 24 * 60 * 60 * 1e3);
+  const needReminder = await db.select({ aftercare: jobAftercares, job: jobs }).from(jobAftercares).innerJoin(jobs, eq(jobAftercares.jobId, jobs.id)).where(and(
+    isNull(jobAftercares.customerResponse),
+    isNull(jobAftercares.closedAt),
+    isNull(jobAftercares.reminderSentAt),
+    lt(jobAftercares.triggeredAt, reminderThreshold)
+  ));
+  for (const { aftercare, job } of needReminder) {
+    await db.update(jobAftercares).set({ reminderSentAt: /* @__PURE__ */ new Date() }).where(eq(jobAftercares.id, aftercare.id));
+    await createNotification2(
+      job.customerId,
+      "AFTERCARE_REMINDER",
+      "Reminder: Did you get sorted?",
+      `Just checking in \u2014 did someone help with your job "${job.title}"?`,
+      { jobId: job.id }
+    );
+  }
+  const autoCloseThreshold = new Date(now.getTime() - 72 * 60 * 60 * 1e3);
+  const toAutoClose = await db.select({ aftercare: jobAftercares, job: jobs }).from(jobAftercares).innerJoin(jobs, eq(jobAftercares.jobId, jobs.id)).where(and(
+    isNull(jobAftercares.customerResponse),
+    isNull(jobAftercares.closedAt),
+    isNull(jobAftercares.autoClosedAt),
+    lt(jobAftercares.triggeredAt, autoCloseThreshold)
+  ));
+  for (const { aftercare, job } of toAutoClose) {
+    await db.transaction(async (tx) => {
+      await tx.update(jobAftercares).set({ autoClosedAt: /* @__PURE__ */ new Date(), closedAt: /* @__PURE__ */ new Date() }).where(eq(jobAftercares.id, aftercare.id));
+      await tx.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
+    });
+    await createNotification2(
+      job.customerId,
+      "JOB_AUTO_CLOSED",
+      "Job automatically closed",
+      `Your job "${job.title}" has been automatically closed after no response.`,
+      { jobId: job.id }
+    );
+    console.log(`[Aftercare] Job ${job.id} auto-closed`);
+  }
+  console.log("[Aftercare] Check complete");
+}
 function startAftercareScheduler(createNotification2, io) {
-  cron.schedule("0 * * * *", async () => {
-    console.log("[Aftercare Scheduler] Running check...");
-    const now = /* @__PURE__ */ new Date();
-    const twoDayThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1e3);
-    const twoDayCandidates = await db.select().from(jobs).where(and(
-      eq(jobs.status, "LIVE"),
-      eq(jobs.hasTokenPurchases, false),
-      lt(jobs.createdAt, twoDayThreshold)
-    ));
-    for (const job of twoDayCandidates) {
-      const existing = await db.select().from(jobAftercares).where(and(eq(jobAftercares.jobId, job.id), eq(jobAftercares.branch, "TWO_DAY")));
-      if (existing.length > 0) continue;
-      await db.transaction(async (tx) => {
-        await tx.update(jobs).set({ status: "AFTERCARE_2D", aftercareBranch: "TWO_DAY", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
-        await tx.insert(jobAftercares).values({
-          jobId: job.id,
-          branch: "TWO_DAY",
-          triggeredAt: /* @__PURE__ */ new Date()
-        });
-      });
-      await createNotification2(
-        job.customerId,
-        "AFTERCARE_2D",
-        "Did you get sorted?",
-        `How did your job listing "${job.title}" go? Did someone get the job sorted for you?`,
-        { jobId: job.id, branch: "TWO_DAY" }
-      );
-      console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_2D`);
-    }
-    const fiveDayThreshold = new Date(now.getTime() - 120 * 60 * 60 * 1e3);
-    const fiveDayCandidates = await db.select().from(jobs).where(and(
-      or(eq(jobs.status, "LIVE"), eq(jobs.status, "IN_DISCUSSION")),
-      eq(jobs.hasTokenPurchases, true),
-      lt(jobs.createdAt, fiveDayThreshold)
-    ));
-    for (const job of fiveDayCandidates) {
-      const existing = await db.select().from(jobAftercares).where(and(eq(jobAftercares.jobId, job.id), eq(jobAftercares.branch, "FIVE_DAY")));
-      if (existing.length > 0) continue;
-      await db.transaction(async (tx) => {
-        await tx.update(jobs).set({ status: "AFTERCARE_5D", aftercareBranch: "FIVE_DAY", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
-        await tx.insert(jobAftercares).values({
-          jobId: job.id,
-          branch: "FIVE_DAY",
-          triggeredAt: /* @__PURE__ */ new Date()
-        });
-      });
-      await createNotification2(
-        job.customerId,
-        "AFTERCARE_5D",
-        "Did you get sorted?",
-        `How's your job "${job.title}" going? Did a professional sort it out for you?`,
-        { jobId: job.id, branch: "FIVE_DAY" }
-      );
-      console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_5D`);
-    }
-    const reminderThreshold = new Date(now.getTime() - 24 * 60 * 60 * 1e3);
-    const needReminder = await db.select({ aftercare: jobAftercares, job: jobs }).from(jobAftercares).innerJoin(jobs, eq(jobAftercares.jobId, jobs.id)).where(and(
-      isNull(jobAftercares.customerResponse),
-      isNull(jobAftercares.closedAt),
-      isNull(jobAftercares.reminderSentAt),
-      lt(jobAftercares.triggeredAt, reminderThreshold)
-    ));
-    for (const { aftercare, job } of needReminder) {
-      await db.update(jobAftercares).set({ reminderSentAt: /* @__PURE__ */ new Date() }).where(eq(jobAftercares.id, aftercare.id));
-      await createNotification2(
-        job.customerId,
-        "AFTERCARE_REMINDER",
-        "Reminder: Did you get sorted?",
-        `Just checking in \u2014 did someone help with your job "${job.title}"?`,
-        { jobId: job.id }
-      );
-    }
-    const autoCloseThreshold = new Date(now.getTime() - 72 * 60 * 60 * 1e3);
-    const toAutoClose = await db.select({ aftercare: jobAftercares, job: jobs }).from(jobAftercares).innerJoin(jobs, eq(jobAftercares.jobId, jobs.id)).where(and(
-      isNull(jobAftercares.customerResponse),
-      isNull(jobAftercares.closedAt),
-      isNull(jobAftercares.autoClosedAt),
-      lt(jobAftercares.triggeredAt, autoCloseThreshold)
-    ));
-    for (const { aftercare, job } of toAutoClose) {
-      await db.transaction(async (tx) => {
-        await tx.update(jobAftercares).set({ autoClosedAt: /* @__PURE__ */ new Date(), closedAt: /* @__PURE__ */ new Date() }).where(eq(jobAftercares.id, aftercare.id));
-        await tx.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
-      });
-      await createNotification2(
-        job.customerId,
-        "JOB_AUTO_CLOSED",
-        "Job automatically closed",
-        `Your job "${job.title}" has been automatically closed after no response.`,
-        { jobId: job.id }
-      );
-      console.log(`[Aftercare] Job ${job.id} auto-closed`);
-    }
-    console.log("[Aftercare Scheduler] Check complete");
-  });
+  cron.schedule("0 * * * *", () => runAftercareCheck(createNotification2));
   console.log("[Aftercare Scheduler] Started \u2014 runs every hour");
 }
 
@@ -50998,6 +50999,19 @@ async function registerRoutes(httpServer, app2) {
       const msgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, req.params.id)).orderBy(asc(ticketMessages.createdAt));
       return res.json(msgs);
     } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/cron/aftercare", async (req, res) => {
+    const secret = req.headers["x-cron-secret"] || req.query.secret;
+    if (secret !== process.env.CRON_SECRET) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    try {
+      await runAftercareCheck(createNotification);
+      return res.json({ success: true, ran: (/* @__PURE__ */ new Date()).toISOString() });
+    } catch (err) {
+      console.error("[Cron] Aftercare check failed:", err.message);
       return res.status(500).json({ error: err.message });
     }
   });
