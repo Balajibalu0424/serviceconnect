@@ -45821,6 +45821,77 @@ Return ONLY valid JSON:
     return { enhanced: currentBio, improvements: [] };
   }
 }
+async function handleOnboardingChat(messages2, mode, availableCategories) {
+  const catList = availableCategories.map((c) => `- ${c.name} (ID: ${c.id})`).join("\n");
+  const customerPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a CUSTOMER post a new job.
+You need to collect the following information conversationally:
+1. What they need done (Job title/description)
+2. Location
+3. Urgency (Low, Normal, High, Urgent)
+4. Budget (optional, but good to ask)
+5. The most appropriate category ID from this list:
+${catList}
+
+Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
+If you have collected enough information to post the job (at least what they need done, location, and you can infer the category ID), you MUST set "isComplete" to true and populate "extractedData".
+
+Return ONLY valid JSON in this format:
+{
+  "reply": "Your next conversational response to the user",
+  "isComplete": boolean,
+  "extractedData": {
+    "title": "Short title",
+    "description": "Detailed description",
+    "categoryId": "number or uuid",
+    "locationText": "string",
+    "urgency": "LOW|NORMAL|HIGH|URGENT",
+    "budgetMin": null,
+    "budgetMax": null
+  }
+}`;
+  const proPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a PROFESSIONAL sign up to the platform.
+You need to collect the following information conversationally:
+1. What services they offer (to map to category IDs)
+2. Their location and service radius
+3. Years of experience
+4. A short bio/description of their business
+Here are the available categories:
+${catList}
+
+Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
+If you have collected enough information (services, location, experience, bio), you MUST set "isComplete" to true and populate "extractedData".
+
+Return ONLY valid JSON in this format:
+{
+  "reply": "Your next conversational response to the user",
+  "isComplete": boolean,
+  "extractedData": {
+    "categoryIds": ["array of category IDs"],
+    "bio": "Extracted bio",
+    "location": "string",
+    "yearsExperience": number,
+    "serviceRadius": 25
+  }
+}`;
+  const systemPrompt = mode === "CUSTOMER" ? customerPrompt : proPrompt;
+  const history = messages2.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
+  const finalPrompt = `${systemPrompt}
+
+Conversation so far:
+${history}
+
+Analyse the conversation and respond with the JSON object:`;
+  try {
+    return await askJSON(finalPrompt);
+  } catch (e) {
+    console.error("Onboarding chat error", e);
+    return {
+      reply: "I'm sorry, I'm having trouble processing that right now. Could you try rephrasing?",
+      isComplete: false,
+      extractedData: null
+    };
+  }
+}
 function isGeminiAvailable() {
   return !!genAI;
 }
@@ -51398,6 +51469,17 @@ async function registerRoutes(httpServer, app2) {
       );
     }
     return res.json({ success: true });
+  });
+  app2.post("/api/ai/onboarding-chat", async (req, res) => {
+    try {
+      const { messages: messages2, mode } = req.body;
+      if (!messages2 || !mode) return res.status(400).json({ error: "Missing messages or mode" });
+      const allCats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
+      const result = await handleOnboardingChat(messages2, mode, allCats);
+      return res.json(result);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   });
   app2.post("/api/onboarding/customer", async (req, res) => {
     try {

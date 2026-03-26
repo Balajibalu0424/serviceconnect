@@ -17,7 +17,7 @@ import {
   Shield, Star, CreditCard, BadgeCheck, Users, TrendingUp, Wifi, Trophy
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
+import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
 const ICON_MAP: Record<string, any> = {
   Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen,
   Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator
@@ -63,6 +63,18 @@ export default function ProOnboarding() {
         ? f.categoryIds.filter(c => c !== id)
         : [...f.categoryIds, id],
     }));
+  };
+
+  const handleAiOnboardingComplete = (data: AiOnboardingData) => {
+    setForm(f => ({
+      ...f,
+      categoryIds: data.categoryIds && data.categoryIds.length > 0 ? data.categoryIds : f.categoryIds,
+      bio: data.bio || f.bio,
+      location: data.location || data.locationText || f.location,
+      yearsExperience: data.yearsExperience || f.yearsExperience,
+      serviceRadius: data.serviceRadius || f.serviceRadius,
+    }));
+    setStep(2); // Skip straight to account creation
   };
 
   const handleSubmit = async () => {
@@ -149,8 +161,27 @@ export default function ProOnboarding() {
               </div>
             )}
 
-            {/* Step 0: Trade Selection — Bark-style big tiles */}
+            {/* Step 0: Conversational Onboarding */}
             {step === 0 && (
+              <div className="space-y-6">
+                <div className="mb-6">
+                  <h1 className="text-2xl sm:text-3xl font-bold mb-1">Let's build your profile</h1>
+                  <p className="text-muted-foreground mb-4">Chat with our AI assistant to set up your professional profile in seconds.</p>
+                  
+                  <AiOnboardingFlow 
+                    mode="PROFESSIONAL" 
+                    onComplete={handleAiOnboardingComplete}
+                  />
+                </div>
+                
+                <p className="text-center text-xs text-muted-foreground mt-4">
+                  Prefer the old way? <button className="text-primary hover:underline font-medium" onClick={() => setStep(0.5)}>Use classic form</button>
+                </p>
+              </div>
+            )}
+
+            {/* Step 0.5: Trade Selection (classic form fallback) */}
+            {step === 0.5 && (
               <div className="space-y-6">
                 <div>
                   <h1 className="text-2xl sm:text-3xl font-bold mb-2">What services do you offer?</h1>
@@ -205,7 +236,7 @@ export default function ProOnboarding() {
               </div>
             )}
 
-            {/* Step 1: About You */}
+            {/* Step 1: About You (classic form fallback) */}
             {step === 1 && (
               <div className="space-y-6">
                 <div>
@@ -301,7 +332,7 @@ export default function ProOnboarding() {
                 </div>
 
                 <div className="flex gap-3">
-                  <Button variant="outline" onClick={() => setStep(0)} className="gap-1.5">
+                  <Button variant="outline" onClick={() => setStep(0.5)} className="gap-1.5">
                     <ChevronLeft className="w-4 h-4" /> Back
                   </Button>
                   <Button className="flex-1 gap-2 h-12" onClick={() => setStep(2)} disabled={!canProceedStep1}>
@@ -378,7 +409,7 @@ export default function ProOnboarding() {
                 </div>
 
                 <div className="flex gap-3">
-                  <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5">
+                  <Button variant="outline" onClick={() => setStep(0)} className="gap-1.5">
                     <ChevronLeft className="w-4 h-4" /> Back
                   </Button>
                   <Button

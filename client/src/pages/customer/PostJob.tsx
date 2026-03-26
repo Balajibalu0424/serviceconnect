@@ -13,7 +13,7 @@ import { apiRequest, setTokens } from "@/lib/queryClient";
 import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, Lightbulb, Flame, Clock, Users, Star, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
-
+import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
 const ICON_MAP: Record<string, any> = { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator };
 
 type Step = 1 | 1.5 | 2 | 2.5 | 3 | 4;
@@ -24,7 +24,8 @@ interface AiAnalysis {
   urgency: { isUrgent: boolean; detectedKeywords: string[] };
 }
 
-// Bark-style category-specific questionnaires
+type CategoryQuestion = { label: string; type: "radio" | "select" | "checkbox" | "input"; options?: string[] };
+
 const CATEGORY_QUESTIONS: Record<string, { label: string; type: "radio" | "select" | "checkbox" | "input"; options?: string[] }[]> = {
   "house-cleaning": [
     { label: "Type of property", type: "radio", options: ["House", "Apartment / Flat", "Office / Commercial"] },
@@ -249,6 +250,20 @@ export default function PostJob() {
   const debouncedDescription = useDebounce(job.description, 600);
   const debouncedLocation = useDebounce(job.locationText, 600);
 
+  const handleAiOnboardingComplete = (data: AiOnboardingData) => {
+    setJob({
+      ...job,
+      title: data.title || "",
+      description: data.description || "",
+      categoryId: data.categoryId?.toString() || "",
+      locationText: data.locationText || "",
+      urgency: data.urgency || "NORMAL",
+      budgetMin: data.budgetMin?.toString() || "",
+      budgetMax: data.budgetMax?.toString() || "",
+    });
+    setStep(2);
+  };
+
   useEffect(() => {
     if (!debouncedTitle && !debouncedDescription) return;
     if (debouncedTitle.length < 3 && debouncedDescription.length < 10) return;
@@ -395,26 +410,36 @@ export default function PostJob() {
       </nav>
 
       <div className="max-w-2xl mx-auto px-4 py-8">
-        {/* Progress — hide on processing and done screens */}
-        {step !== 2.5 && step !== 4 && (
-          <div className="mb-8">
-            <div className="flex justify-between text-xs text-muted-foreground mb-2">
-              <span>Step {stepNum} of {totalSteps}</span>
-              <span>{Math.round(progressPct)}% complete</span>
+        <div className="mb-4">
+          <Badge variant="outline" className="mb-2 bg-primary/5 text-primary border-primary/20">
+            Step {stepNum} of {totalSteps}
+          </Badge>
+        </div>
+
+        {/* Step 1: Conversational Details */}
+        {step === 1 && (
+          <div className="space-y-6">
+            <div className="mb-6">
+              <h1 className="text-2xl font-bold mb-1">Let's get your job sorted</h1>
+              <p className="text-muted-foreground mb-4">Chat with our AI assistant to quickly post your request. It's completely free.</p>
+              
+              <AiOnboardingFlow 
+                mode="CUSTOMER" 
+                onComplete={handleAiOnboardingComplete}
+                initialMessage={preselectedCategory 
+                  ? `Hi there! I see you need help with ${preselectedCategory.replace(/-/g, ' ')}. Could you describe exactly what you need done?`
+                  : undefined}
+              />
             </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
-            </div>
-            <div className="flex justify-between mt-2">
-              {["Job Details", !isLoggedIn ? "Your Account" : "Confirm", !isLoggedIn ? "Verify" : "", "Done"].filter(Boolean).map((label, i) => (
-                <span key={i} className={cn("text-xs", i + 1 === stepNum ? "text-primary font-medium" : "text-muted-foreground")}>{label}</span>
-              ))}
-            </div>
+            
+            <p className="text-center text-xs text-muted-foreground mt-4">
+              Prefer the old way? <button className="text-primary hover:underline font-medium" onClick={() => setStep(1.5)}>Use classic form</button>
+            </p>
           </div>
         )}
 
-        {/* Step 1: Job Details */}
-        {step === 1 && (
+        {/* Step 1.5: Classic Form Fallback (hidden by default) */}
+        {step === 1.5 && (
           <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-bold mb-1">What do you need done?</h1>
@@ -546,8 +571,8 @@ export default function PostJob() {
           </div>
         )}
 
-        {/* Step 1.5: Category-Specific Questionnaire */}
-        {step === 1.5 && categoryQuestions.length > 0 && (
+        {/* Step 1.5: Category-Specific Questionnaire (classic form fallback) */}
+        {step === 1.5 && (
           <div className="space-y-6">
             <div>
               <Badge variant="secondary" className="mb-2">{selectedCat?.name}</Badge>
@@ -663,7 +688,7 @@ export default function PostJob() {
 
             <div className="flex gap-3 pt-2">
               <Button variant="outline" className="gap-2" onClick={() => setStep(1)}>
-                <ArrowLeft className="w-4 h-4" /> Back
+                <ArrowLeft className="w-4 h-4" /> Back to Chat
               </Button>
               <Button className="flex-1 gap-2" onClick={handleQuestionsNext} data-testid="button-questions-next">
                 Continue <ArrowRight className="w-4 h-4" />

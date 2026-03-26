@@ -26,7 +26,8 @@ import {
 import {
   enhanceJobDescription, smartCategoryDetect, deepFakeAnalysis,
   generateQuoteSuggestion, aiChatAssistant, smartProMatch,
-  generateReviewSummary, enhanceProBio, isGeminiAvailable
+  generateReviewSummary, enhanceProBio, isGeminiAvailable,
+  handleOnboardingChat
 } from "./geminiService";
 import { z } from "zod";
 import Stripe from "stripe";
@@ -217,6 +218,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   // ONBOARDING
   // ═══════════════════════════════════════════════════════════════════════════
+  app.post("/api/ai/onboarding-chat", async (req: Request, res: Response) => {
+    try {
+      const { messages, mode } = req.body;
+      if (!messages || !mode) return res.status(400).json({ error: "Missing messages or mode" });
+
+      const allCats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
+      const result = await handleOnboardingChat(messages, mode, allCats);
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/onboarding/customer", async (req: Request, res: Response) => {
     try {
       const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;

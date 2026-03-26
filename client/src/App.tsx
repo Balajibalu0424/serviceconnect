@@ -5,7 +5,7 @@ import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AiAssistantWidget from "@/components/ai/AiAssistantWidget";
-import PerplexityAttribution from "@/components/PerplexityAttribution";
+
 
 // Public pages
 import Home from "@/pages/public/Home";
@@ -174,7 +174,7 @@ export default function App() {
         <AppRoutes />
         <AiAssistantWidget />
         <Toaster />
-        <PerplexityAttribution />
+
       </AuthProvider>
     </QueryClientProvider>
   );
