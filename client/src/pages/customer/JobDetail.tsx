@@ -276,7 +276,7 @@ export default function JobDetail() {
                           )}
                         </div>
                       </div>
-                      {q.status === "PENDING" && job.status === "OPEN" && (
+                      {q.status === "PENDING" && job.status === "LIVE" && (
                         <div className="flex flex-row md:flex-col gap-2 shrink-0 w-full md:w-auto mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 border-border/30">
                           <Button size="sm" className="gap-2 rounded-xl h-10 px-5 flex-1 md:flex-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all w-full"
                             onClick={() => acceptQuote.mutate(q.id)} disabled={acceptQuote.isPending}
