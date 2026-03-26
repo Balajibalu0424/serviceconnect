@@ -23,6 +23,11 @@ import { startAftercareScheduler, runAftercareCheck } from "./scheduler";
 import {
   scoreJobQuality, detectCategory, detectFakeJob, detectUrgency, nerMaskObfuscated
 } from "./aiEngine";
+import {
+  enhanceJobDescription, smartCategoryDetect, deepFakeAnalysis,
+  generateQuoteSuggestion, aiChatAssistant, smartProMatch,
+  generateReviewSummary, enhanceProBio, isGeminiAvailable
+} from "./geminiService";
 import { z } from "zod";
 import Stripe from "stripe";
 
@@ -2070,6 +2075,105 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         totalRevenue: totalRevenue.total || "0"
       });
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AI-POWERED ENDPOINTS (Gemini)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Health check
+  app.get("/api/ai/status", (req, res) => {
+    res.json({ available: isGeminiAvailable(), model: "gemini-2.0-flash" });
+  });
+
+  // AI: Enhance job description
+  app.post("/api/ai/enhance-description", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { title, description, category } = req.body;
+      if (!title || !description) return res.status(400).json({ error: "title and description required" });
+      const result = await enhanceJobDescription(title, description, category || "general");
+      return res.json(result);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // AI: Smart category detection
+  app.post("/api/ai/detect-category", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { title, description } = req.body;
+      if (!title || !description) return res.status(400).json({ error: "title and description required" });
+      const allCats = await db.select({ slug: serviceCategories.slug, name: serviceCategories.name }).from(serviceCategories);
+      const result = await smartCategoryDetect(title, description, allCats);
+      return res.json(result);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // AI: Quote suggestion for pros
+  app.post("/api/ai/suggest-quote", requireAuth, requireRole("PROFESSIONAL", "ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { jobId } = req.body;
+      if (!jobId) return res.status(400).json({ error: "jobId required" });
+
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+
+      const [cat] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
+      const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.user!.userId));
+      const [user] = await db.select().from(users).where(eq(users.id, req.user!.userId));
+
+      const result = await generateQuoteSuggestion(
+        job.title, job.description, cat?.name || "service",
+        `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
+        (profile?.skills as string[]) || []
+      );
+      return res.json(result);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // AI: Chat assistant
+  app.post("/api/ai/chat", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { message, history } = req.body;
+      if (!message) return res.status(400).json({ error: "message required" });
+      const userRole = req.user!.role as "CUSTOMER" | "PROFESSIONAL" | "ADMIN";
+      const reply = await aiChatAssistant(message, userRole, history || []);
+      return res.json({ reply });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // AI: Enhance pro bio
+  app.post("/api/ai/enhance-bio", requireAuth, requireRole("PROFESSIONAL", "ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { bio, skills } = req.body;
+      if (!bio) return res.status(400).json({ error: "bio required" });
+      const [user] = await db.select().from(users).where(eq(users.id, req.user!.userId));
+      const result = await enhanceProBio(bio, skills || [], `${user?.firstName || ""} ${user?.lastName || ""}`.trim());
+      return res.json(result);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // AI: Review summary for a pro
+  app.get("/api/ai/review-summary/:proId", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { proId } = req.params;
+      const proReviews = await db.select({
+        rating: reviews.rating,
+        comment: reviews.comment,
+      }).from(reviews).where(eq(reviews.professionalId, proId)).orderBy(desc(reviews.createdAt)).limit(10);
+
+      if (proReviews.length === 0) return res.json({ summary: "" });
+
+      const [proUser] = await db.select().from(users).where(eq(users.id, proId));
+      const proName = `${proUser?.firstName || ""} ${proUser?.lastName || ""}`.trim();
+
+      const reviewsForAI = proReviews.map(r => ({
+        rating: r.rating,
+        comment: r.comment || "",
+        customerName: "Customer"
+      }));
+
+      const summary = await generateReviewSummary(proName, reviewsForAI);
+      return res.json({ summary, reviewCount: proReviews.length });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 
   return httpServer;

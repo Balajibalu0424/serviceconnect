@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import AiAssistantWidget from "@/components/ai/AiAssistantWidget";
 import PerplexityAttribution from "@/components/PerplexityAttribution";
 
 // Public pages
@@ -171,6 +172,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AppRoutes />
+        <AiAssistantWidget />
         <Toaster />
         <PerplexityAttribution />
       </AuthProvider>

@@ -1,6 +1,11 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -75,7 +80,7 @@ async function buildAll() {
     logLevel: "info",
     // Resolve @shared/* path alias from tsconfig
     alias: {
-      "@shared": new URL("../shared", import.meta.url).pathname,
+      "@shared": path.resolve(__dirname, "..", "shared"),
     },
     banner: {
       // Needed for CJS compat in ESM bundle

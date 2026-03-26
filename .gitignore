@@ -15,3 +15,5 @@ vite.config.ts.*
 
 # TypeScript build info
 *.tsbuildinfo
+
+.vercel
