@@ -20,7 +20,7 @@ export default function Settings() {
   // Profile state
   const [firstName, setFirstName] = useState(user?.firstName || "");
   const [lastName, setLastName] = useState(user?.lastName || "");
-  const [phone, setPhone] = useState(user?.phone || "");
+  const [phone, setPhone] = useState((user as any)?.phone || "");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [profileLoading, setProfileLoading] = useState(false);
 
@@ -86,20 +86,23 @@ export default function Settings() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-2xl">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold">Settings</h1>
-          <Badge variant="outline" className="capitalize">{user?.role?.toLowerCase()}</Badge>
+      <div className="p-4 md:p-6 space-y-6 max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">Account Settings</h1>
+            <p className="text-sm text-muted-foreground mt-1">Manage your profile, password, and preferences</p>
+          </div>
+          <Badge variant="outline" className="capitalize bg-white/50 dark:bg-black/50 backdrop-blur shadow-sm px-3 py-1 text-sm border-white/40 dark:border-white/10">{user?.role?.toLowerCase()}</Badge>
         </div>
 
         {/* Profile Edit */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <User className="w-4 h-4" /> Profile
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80 flex items-center gap-2">
+              <User className="w-4 h-4 text-primary/70" /> Profile Information
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             <form onSubmit={handleProfileSave} className="space-y-5">
               {/* Avatar */}
               <div className="flex items-center gap-4">
@@ -187,7 +190,7 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">Email cannot be changed.</p>
               </div>
 
-              <Button type="submit" disabled={profileLoading} data-testid="button-save-profile">
+              <Button type="submit" disabled={profileLoading} className="rounded-xl px-6 h-11 w-full sm:w-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all" data-testid="button-save-profile">
                 {profileLoading ? "Saving..." : "Save changes"}
               </Button>
             </form>
@@ -195,13 +198,13 @@ export default function Settings() {
         </Card>
 
         {/* Change Password */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Lock className="w-4 h-4" /> Change Password
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80 flex items-center gap-2">
+              <Lock className="w-4 h-4 text-primary/70" /> Security
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div className="space-y-1">
                 <Label htmlFor="currentPassword">Current password</Label>
@@ -238,7 +241,7 @@ export default function Settings() {
                   data-testid="input-confirm-password"
                 />
               </div>
-              <Button type="submit" variant="outline" disabled={pwLoading} data-testid="button-update-password">
+              <Button type="submit" variant="outline" disabled={pwLoading} className="rounded-xl px-6 h-11 w-full sm:w-auto hover:bg-primary/5 hover:text-primary transition-colors" data-testid="button-update-password">
                 {pwLoading ? "Updating..." : "Update password"}
               </Button>
             </form>
@@ -246,11 +249,11 @@ export default function Settings() {
         </Card>
 
         {/* Account Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Account Info</CardTitle>
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80">System Info</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <CardContent className="space-y-4 text-sm pt-6">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Account ID</span>
               <span className="font-mono text-xs">{user?.id}</span>

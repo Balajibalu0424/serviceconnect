@@ -47,57 +47,63 @@ export default function MyJobs() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold">My Jobs</h1>
-            <p className="text-sm text-muted-foreground">{(jobs as any[]).length} total jobs</p>
+            <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">My Jobs</h1>
+            <p className="text-sm text-muted-foreground mt-1">{(jobs as any[]).length} total jobs</p>
           </div>
-          <Link href="/post-job"><Button size="sm" className="gap-1"><PlusCircle className="w-4 h-4" /> Post Job</Button></Link>
+          <Link href="/post-job">
+            <Button size="sm" className="gap-2 h-10 px-4 rounded-xl shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all">
+              <PlusCircle className="w-4 h-4" /> Post Job
+            </Button>
+          </Link>
         </div>
 
         {isLoading ? (
-          <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-20 rounded-lg bg-muted animate-pulse"/>)}</div>
+          <div className="space-y-4">{[1,2,3].map(i=><div key={i} className="h-24 rounded-2xl bg-white/40 dark:bg-white/5 animate-pulse"/>)}</div>
         ) : (jobs as any[]).length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground">
-            <Briefcase className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p>You haven't posted any jobs yet</p>
-            <Link href="/post-job"><Button className="mt-4">Post your first job</Button></Link>
+          <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
+            <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
+              <Briefcase className="w-8 h-8 opacity-50" />
+            </div>
+            <p className="font-heading font-medium text-lg text-foreground">You haven't posted any jobs yet</p>
+            <Link href="/post-job"><Button className="mt-6 rounded-xl shadow-lg">Post your first job</Button></Link>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {/* Draft jobs — prominent banner to publish */}
             {draftJobs.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20 py-2 px-3 rounded-xl border border-amber-200/50 dark:border-amber-900/50 w-fit">
                   <AlertCircle className="w-4 h-4" />
                   <span className="font-medium">{draftJobs.length} draft job{draftJobs.length > 1 ? "s" : ""} — publish to go live</span>
                 </div>
                 {draftJobs.map((job: any) => (
-                  <Card key={job.id} className="border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20" data-testid={`job-${job.id}`}>
-                    <CardContent className="pt-4 pb-4">
-                      <div className="flex items-start justify-between gap-3">
+                  <Card key={job.id} className="border-amber-200/60 dark:border-amber-900/60 bg-gradient-to-br from-amber-50/50 to-white/60 dark:from-amber-950/20 dark:to-black/40 backdrop-blur-xl rounded-2xl shadow-sm overflow-hidden" data-testid={`job-${job.id}`}>
+                    <CardContent className="p-5">
+                      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-medium truncate">{job.title}</h3>
-                            <Badge variant="secondary" className="shrink-0 text-xs">Draft</Badge>
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="font-heading font-bold text-lg truncate">{job.title}</h3>
+                            <Badge variant="secondary" className="shrink-0 text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900">Draft</Badge>
                           </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">{job.description}</p>
-                          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                            {job.locationText && <span className="flex items-center gap-1"><MapPin className="w-3 h-3"/>{job.locationText}</span>}
-                            <span className="flex items-center gap-1"><Clock className="w-3 h-3"/>{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
+                          <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{job.description}</p>
+                          <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
+                            {job.locationText && <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-primary/70"/>{job.locationText}</span>}
+                            <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-muted-foreground/70"/>{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
                           </div>
                         </div>
-                        <div className="flex flex-col gap-2 shrink-0">
+                        <div className="flex md:flex-col gap-2 shrink-0 w-full md:w-auto mt-4 md:mt-0">
                           <Button
                             size="sm"
-                            className="gap-1"
+                            className="gap-2 rounded-xl flex-1 md:flex-none shadow-sm"
                             onClick={() => publish.mutate(job.id)}
                             disabled={publish.isPending}
                             data-testid={`button-publish-${job.id}`}
                           >
-                            <Zap className="w-3 h-3" />
+                            <Zap className="w-4 h-4" />
                             {publish.isPending ? "Publishing..." : "Publish"}
                           </Button>
-                          <Link href={`/jobs/${job.id}`}>
-                            <Button size="sm" variant="outline" className="w-full">View</Button>
+                          <Link href={`/jobs/${job.id}`} className="flex-1 md:flex-none">
+                            <Button size="sm" variant="outline" className="w-full rounded-xl bg-white/50 dark:bg-black/50 backdrop-blur-sm">View</Button>
                           </Link>
                         </div>
                       </div>
@@ -109,24 +115,24 @@ export default function MyJobs() {
 
             {/* Active/completed jobs */}
             {activeJobs.length > 0 && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {activeJobs.map((job: any) => (
                   <Link key={job.id} href={`/jobs/${job.id}`}>
-                    <Card className="cursor-pointer hover:shadow-sm transition-all" data-testid={`job-${job.id}`}>
-                      <CardContent className="pt-4 pb-4">
-                        <div className="flex items-start justify-between gap-3">
+                    <Card className="cursor-pointer transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] bg-white/60 dark:bg-black/40 backdrop-blur-xl border-white/40 dark:border-white/10 rounded-2xl overflow-hidden group mb-4 block" data-testid={`job-${job.id}`}>
+                      <CardContent className="p-5 md:p-6">
+                        <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="font-medium truncate">{job.title}</h3>
-                              <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 text-xs">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-heading font-bold text-lg truncate group-hover:text-primary transition-colors">{job.title}</h3>
+                              <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 text-xs bg-white/50 dark:bg-black/50 backdrop-blur shadow-sm">
                                 {STATUS_LABELS[job.status] || job.status}
                               </Badge>
                             </div>
-                            <p className="text-sm text-muted-foreground line-clamp-2">{job.description}</p>
-                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                              {job.locationText && <span className="flex items-center gap-1"><MapPin className="w-3 h-3"/>{job.locationText}</span>}
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3"/>{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
-                              {job.budgetMin && <span>€{job.budgetMin}–€{job.budgetMax}</span>}
+                            <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{job.description}</p>
+                            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-xs text-muted-foreground bg-white/40 dark:bg-white/5 backdrop-blur-sm p-3 rounded-xl border border-white/20 dark:border-white/5 w-fit">
+                              {job.locationText && <span className="flex items-center gap-1.5 font-medium text-foreground/80"><MapPin className="w-4 h-4 text-primary/70"/>{job.locationText}</span>}
+                              <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-muted-foreground/70"/>{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
+                              {job.budgetMin && <span className="flex items-center gap-1.5 font-medium text-foreground/80"><Zap className="w-4 h-4 text-green-500/70" />€{job.budgetMin}–€{job.budgetMax}</span>}
                             </div>
                           </div>
                         </div>

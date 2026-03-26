@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   MapPin, Clock, Star, Lock, Zap, Users, DollarSign, MessageCircle,
-  Phone, CheckCircle, Flame, Send, ChevronDown, ChevronUp, Euro
+  Phone, CheckCircle, Flame, Send, ChevronDown, ChevronUp, Euro, Briefcase
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -46,20 +46,22 @@ function UnlockModal({ job, onClose, onUnlocked }: { job: any; onClose: () => vo
   if (unlockResult) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-card rounded-xl max-w-md w-full p-6 shadow-xl space-y-4">
+        <div className="bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
           <div className="text-center">
-            <div className="w-14 h-14 bg-green-100 dark:bg-green-950 rounded-full flex items-center justify-center mx-auto mb-3">
+            <div className="w-14 h-14 bg-green-100/50 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-3 ring-4 ring-green-500/10">
               <CheckCircle className="w-7 h-7 text-green-600 dark:text-green-400" />
             </div>
-            <h2 className="text-lg font-bold">Lead Unlocked!</h2>
+            <h2 className="text-xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">Lead Unlocked!</h2>
             <p className="text-sm text-muted-foreground">{job.title}</p>
           </div>
           {chosenTier === "STANDARD" && unlockResult.customerPhone && (
-            <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-3">
-              <Phone className="w-4 h-4 text-primary shrink-0" />
+            <div className="bg-primary/5 dark:bg-primary/10 rounded-xl p-4 flex items-center gap-3 border border-primary/10">
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <Phone className="w-4 h-4 text-primary shrink-0" />
+              </div>
               <div>
-                <p className="text-xs text-muted-foreground">Customer's phone number</p>
-                <p className="font-bold">{unlockResult.customerPhone}</p>
+                <p className="text-xs text-muted-foreground font-medium">Customer's phone number</p>
+                <p className="font-bold text-lg tracking-wide">{unlockResult.customerPhone}</p>
               </div>
             </div>
           )}
@@ -80,27 +82,27 @@ function UnlockModal({ job, onClose, onUnlocked }: { job: any; onClose: () => vo
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-card rounded-xl max-w-md w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-1">Unlock Lead</h2>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white/90 dark:bg-black/80 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-2xl font-heading font-bold mb-1 bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">Unlock Lead</h2>
         <p className="text-sm text-muted-foreground mb-1">Choose your access level for this job</p>
-        <p className="text-xs bg-primary/10 text-primary rounded px-2 py-1 mb-5 inline-block font-medium">{job.title}</p>
+        <p className="text-xs bg-primary/10 text-primary rounded-full px-3 py-1 mb-6 inline-block font-medium border border-primary/20">{job.title}</p>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-4 mb-6">
           {/* Free tier */}
           <button
             onClick={() => unlock.mutate("FREE")}
             disabled={unlock.isPending}
-            className="p-4 rounded-xl border-2 border-border hover:border-primary/40 transition-all text-left"
+            className="p-5 rounded-2xl border-2 border-muted/50 dark:border-white/5 bg-white/50 dark:bg-white/5 hover:border-primary/40 hover:bg-white/80 dark:hover:bg-white/10 hover:shadow-lg transition-all text-left group"
             data-testid="button-unlock-free"
           >
-            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center mb-3">
-              <Lock className="w-4 h-4 text-muted-foreground" />
+            <div className="w-10 h-10 rounded-xl bg-muted/60 dark:bg-white/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <Lock className="w-5 h-5 text-muted-foreground" />
             </div>
-            <p className="font-semibold text-sm">Free</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Chat only · contact masked</p>
-            <p className="text-xl font-bold mt-2 text-green-600">0 credits</p>
-            <p className="text-xs text-muted-foreground mt-1">Good for introductions</p>
+            <p className="font-heading font-bold text-base">Free</p>
+            <p className="text-xs text-muted-foreground mt-1">Chat only · contact masked</p>
+            <p className="text-2xl font-bold mt-3 text-green-600 dark:text-green-400">0 <span className="text-sm font-normal text-muted-foreground">credits</span></p>
+            <p className="text-xs text-muted-foreground mt-1.5 font-medium">Good for introductions</p>
           </button>
 
           {/* Standard tier */}
@@ -108,23 +110,24 @@ function UnlockModal({ job, onClose, onUnlocked }: { job: any; onClose: () => vo
             onClick={() => unlock.mutate("STANDARD")}
             disabled={unlock.isPending || (user?.creditBalance || 0) < job.creditCost}
             className={cn(
-              "p-4 rounded-xl border-2 transition-all text-left relative overflow-hidden",
+              "p-5 rounded-2xl border-2 transition-all text-left relative overflow-hidden group",
               (user?.creditBalance || 0) >= job.creditCost
-                ? "border-primary bg-primary/5 hover:bg-primary/10"
+                ? "border-primary/50 bg-gradient-to-b from-primary/10 to-transparent hover:border-primary hover:shadow-[0_0_20px_rgba(var(--primary),0.2)]"
                 : "border-border opacity-50 cursor-not-allowed"
             )}
             data-testid="button-unlock-standard"
           >
-            <div className="absolute top-2 right-2">
-              <Badge className="text-[10px] px-1.5 py-0">Best</Badge>
+            <div className="absolute top-0 right-0 h-16 w-16 bg-primary/10 blur-xl rounded-full" />
+            <div className="absolute top-3 right-3">
+              <Badge className="text-[10px] px-2 py-0.5 bg-primary/20 text-primary hover:bg-primary/30 border-none">Best value</Badge>
             </div>
-            <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center mb-3">
-              <Zap className="w-4 h-4 text-primary" />
+            <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10">
+              <Zap className="w-5 h-5 text-primary" />
             </div>
-            <p className="font-semibold text-sm">Standard</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Chat + phone number</p>
-            <p className="text-xl font-bold mt-2 text-primary">{job.creditCost} credits</p>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="font-heading font-bold text-base relative z-10">Standard</p>
+            <p className="text-xs text-muted-foreground mt-1 relative z-10">Chat + phone number</p>
+            <p className="text-2xl font-bold mt-3 text-primary relative z-10">{job.creditCost} <span className="text-sm font-normal opacity-70">credits</span></p>
+            <p className="text-xs text-muted-foreground mt-1.5 font-medium relative z-10">
               {(user?.creditBalance || 0) < job.creditCost
                 ? `Need ${job.creditCost - (user?.creditBalance || 0)} more`
                 : "Full contact access"}
@@ -132,7 +135,7 @@ function UnlockModal({ job, onClose, onUnlocked }: { job: any; onClose: () => vo
           </button>
         </div>
 
-        <Button variant="outline" className="w-full" onClick={onClose} disabled={unlock.isPending}>
+        <Button variant="outline" className="w-full rounded-xl h-11" onClick={onClose} disabled={unlock.isPending}>
           {unlock.isPending ? "Processing…" : "Cancel"}
         </Button>
       </div>
@@ -308,14 +311,16 @@ export default function ProJobFeed() {
     <DashboardLayout>
       <div className="p-6 space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold">Job Feed</h1>
-            <p className="text-sm text-muted-foreground">Browse live jobs and send quotes to win work</p>
+            <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">Job Feed</h1>
+            <p className="text-muted-foreground mt-1">Browse live jobs and send quotes to win work</p>
           </div>
           <Select value={categoryFilter} onValueChange={handleCategoryChange}>
-            <SelectTrigger className="w-40"><SelectValue placeholder="All categories" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="w-full md:w-56 h-11 bg-white/60 dark:bg-black/40 backdrop-blur-md border-white/40 dark:border-white/10 rounded-xl">
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-white/20 backdrop-blur-xl bg-white/90 dark:bg-black/90">
               <SelectItem value="all">All categories</SelectItem>
               {(categories as any[]).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
@@ -323,105 +328,110 @@ export default function ProJobFeed() {
         </div>
 
         {/* How it works — shown when no jobs unlocked yet */}
-        <Card className="bg-muted/20 border-dashed">
-          <CardContent className="pt-3 pb-3">
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-full bg-primary text-white text-[10px] flex items-center justify-center font-bold">1</span> Browse jobs below</span>
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-full bg-primary text-white text-[10px] flex items-center justify-center font-bold">2</span> Matchbook ones you like (free)</span>
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-full bg-primary text-white text-[10px] flex items-center justify-center font-bold">3</span> Unlock to see contact details</span>
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-full bg-primary text-white text-[10px] flex items-center justify-center font-bold">4</span> Send a quote — customer accepts or declines</span>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="bg-gradient-to-r from-primary/5 to-transparent rounded-2xl border border-primary/10 overflow-hidden relative">
+          <div className="absolute inset-0 bg-[url('/noise.png')] opacity-20 mix-blend-overlay"></div>
+          <div className="p-4 relative z-10 flex flex-wrap gap-x-6 gap-y-3 text-sm text-muted-foreground">
+            <span className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold">1</span> Browse jobs below</span>
+            <span className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold">2</span> Matchbook ones you like</span>
+            <span className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold">3</span> Unlock to claim</span>
+            <span className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-primary text-white text-xs flex items-center justify-center font-bold shadow-[0_0_10px_rgba(var(--primary),0.5)]">4</span> Win the job</span>
+          </div>
+        </div>
 
         {isLoading && page === 1 ? (
-          <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-32 rounded-xl bg-muted animate-pulse" />)}</div>
+          <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 rounded-2xl bg-white/40 dark:bg-white/5 animate-pulse" />)}</div>
         ) : filteredJobs.length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground">
-            <p className="font-medium">No jobs available right now</p>
-            <p className="text-sm mt-1">New jobs are posted every day. Check back soon.</p>
+          <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
+            <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
+              <Briefcase className="w-8 h-8 opacity-50" />
+            </div>
+            <p className="font-heading font-medium text-lg text-foreground">No jobs available right now</p>
+            <p className="text-sm mt-1 max-w-sm mx-auto">New jobs are posted every day. Check back soon or adjust your category filter.</p>
           </div>
         ) : (
           <>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {filteredJobs.map((job: any) => (
                 <Card
                   key={job.id}
-                  className={cn("transition-all", job.isBoosted && "border-amber-300/60 ring-1 ring-amber-200/40")}
+                  className={cn(
+                    "transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] bg-white/60 dark:bg-black/40 backdrop-blur-xl border-white/40 dark:border-white/10 rounded-2xl overflow-hidden group",
+                    job.isBoosted && "border-amber-300/60 ring-1 ring-amber-200/40 bg-gradient-to-br from-amber-50/50 to-white/60 dark:from-amber-950/20 dark:to-black/40"
+                  )}
                   data-testid={`feed-job-${job.id}`}
                 >
-                  <CardContent className="pt-4 pb-4">
+                  <CardContent className="p-5 md:p-6">
                     {/* Top: badges + title */}
-                    <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex items-start justify-between gap-4 mb-4">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
-                          {job.isBoosted && <Badge className="text-xs bg-amber-500 hover:bg-amber-500">⚡ Boosted</Badge>}
+                        <div className="flex items-center flex-wrap gap-2 mb-2">
+                          {job.isBoosted && <Badge className="text-xs font-semibold bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 border-none shadow-sm shadow-amber-500/20 text-amber-950">⚡ Boosted</Badge>}
                           {job.aiIsUrgent && (
-                            <Badge className="text-xs bg-red-600 text-white gap-1">
-                              <Flame className="w-2.5 h-2.5" /> Urgent
+                            <Badge className="text-xs font-semibold bg-gradient-to-r from-red-500 to-red-600 text-white border-none shadow-sm shadow-red-500/20 px-2 py-0.5 gap-1">
+                              <Flame className="w-3 h-3" /> Urgent
                             </Badge>
                           )}
-                          <Badge variant={URGENCY_COLORS[job.urgency] as any} className="text-xs">{job.urgency}</Badge>
-                          <Badge variant="outline" className="text-xs">{job.category?.name}</Badge>
+                          <Badge variant={URGENCY_COLORS[job.urgency] as any} className="text-xs bg-white/50 dark:bg-black/50 backdrop-blur">{job.urgency}</Badge>
+                          <Badge variant="outline" className="text-[10px] uppercase tracking-wider bg-white/50 dark:bg-black/50 backdrop-blur text-muted-foreground">{job.category?.name}</Badge>
                         </div>
-                        <h3 className="font-semibold text-base">{job.title}</h3>
-                        <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{job.description}</p>
+                        <h3 className="font-heading font-bold text-lg md:text-xl group-hover:text-primary transition-colors">{job.title}</h3>
+                        <p className="text-sm text-muted-foreground line-clamp-2 mt-2 leading-relaxed">{job.description}</p>
                       </div>
                     </div>
 
                     {/* Meta row */}
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground mb-3">
-                      {job.locationText && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{job.locationText}</span>}
-                      {job.budgetMin && <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />€{job.budgetMin}–€{job.budgetMax}</span>}
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
-                      <span className="flex items-center gap-1"><Users className="w-3 h-3" />{String(job.matchbookCount || 0)} interested</span>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground mb-5 bg-white/40 dark:bg-white/5 backdrop-blur-sm p-3 rounded-xl border border-white/20 dark:border-white/5">
+                      {job.locationText && <span className="flex items-center gap-1.5 font-medium text-foreground/80"><MapPin className="w-4 h-4 text-primary/70" />{job.locationText}</span>}
+                      {job.budgetMin && <span className="flex items-center gap-1.5 font-medium text-foreground/80"><DollarSign className="w-4 h-4 text-green-500/70" />€{job.budgetMin}–€{job.budgetMax}</span>}
+                      <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-muted-foreground/70" />{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
+                      <span className="flex items-center gap-1.5"><Users className="w-4 h-4 text-blue-500/70" />{String(job.matchbookCount || 0)} interested</span>
                     </div>
 
                     {/* CTA row */}
-                    <div className="flex gap-2 items-center">
+                    <div className="flex gap-3 items-center pt-2">
                       {job.unlock ? (
                         // Already unlocked — show actions
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="outline" className="gap-1 text-xs border-green-300 text-green-700 dark:text-green-400">
-                            <CheckCircle className="w-3 h-3" /> Unlocked ({job.unlock.tier})
+                        <div className="flex items-center gap-3 flex-wrap p-2 px-3 rounded-xl bg-green-50/50 dark:bg-green-950/20 border border-green-200/50 dark:border-green-900/50 w-full md:w-auto">
+                          <Badge variant="outline" className="gap-1.5 text-xs border-green-300 text-green-700 dark:text-green-400 bg-white dark:bg-black/50 shadow-sm">
+                            <CheckCircle className="w-3.5 h-3.5" /> Unlocked ({job.unlock.tier})
                           </Badge>
                           {job.unlock.tier === "STANDARD" && job.unlock.customerPhone && (
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Phone className="w-3 h-3 text-primary" /> {job.unlock.customerPhone}
+                            <span className="flex items-center gap-1.5 text-xs font-semibold">
+                              <Phone className="w-3.5 h-3.5 text-green-600 dark:text-green-500" /> {job.unlock.customerPhone}
                             </span>
                           )}
-                          <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs"
+                          <Button size="sm" variant="default" className="gap-1.5 h-8 text-xs ml-auto rounded-lg shadow-sm"
                             onClick={() => setLocation("/pro/chat")} data-testid={`button-chat-${job.id}`}>
-                            <MessageCircle className="w-3 h-3" /> Chat
+                            <MessageCircle className="w-3.5 h-3.5" /> Chat
                           </Button>
                         </div>
                       ) : job.isMatchbooked ? (
                         // Matchbooked — ready to unlock
                         <Button
                           size="sm"
-                          className="gap-1.5"
+                          className="gap-2 rounded-xl h-10 px-5 shadow-sm bg-primary/10 hover:bg-primary/20 text-primary w-full md:w-auto"
                           onClick={() => setUnlockJob(job)}
                           data-testid={`button-unlock-${job.id}`}
                         >
-                          <Lock className="w-3.5 h-3.5" /> Unlock Lead ({job.creditCost} cr)
+                          <Lock className="w-4 h-4" /> Unlock Lead ({job.creditCost} cr)
                         </Button>
                       ) : (
                         // Default — matchbook or skip
                         <>
                           <Button
-                            size="sm" variant="outline" className="gap-1.5"
+                            size="sm" variant="outline" className="gap-2 rounded-xl h-10 px-4 border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 w-full md:w-auto"
                             onClick={() => matchbook.mutate(job.id)}
                             disabled={matchbook.isPending}
                             data-testid={`button-matchbook-${job.id}`}
                           >
-                            <Star className="w-3.5 h-3.5" /> Matchbook (free)
+                            <Star className="w-4 h-4" /> Matchbook
                           </Button>
                           <Button
-                            size="sm" className="gap-1.5 bg-primary/90 hover:bg-primary"
+                            size="sm" className="gap-2 rounded-xl h-10 px-6 shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all w-full md:w-auto"
                             onClick={() => setUnlockJob(job)}
                             data-testid={`button-unlock-direct-${job.id}`}
                           >
-                            <Zap className="w-3.5 h-3.5" /> Unlock Now ({job.creditCost} cr)
+                            <Zap className="w-4 h-4 fill-current" /> Claim Lead ({job.creditCost} cr)
                           </Button>
                         </>
                       )}

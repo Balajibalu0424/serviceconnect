@@ -94,17 +94,17 @@ export default function AdminDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 md:p-6 space-y-6">
-        <div>
-          <h1 className="text-xl font-bold">Admin Dashboard</h1>
-          <p className="text-sm text-muted-foreground">ServiceConnect platform overview</p>
+      <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-4xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">Admin Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-2 font-medium">Platform overview and real-time metrics</p>
         </div>
 
         {/* Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {statCards.map((s) => (
-            <Card key={s.label}>
-              <CardContent className="pt-5 pb-5">
+            <Card key={s.label} className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-all">
+              <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{s.label}</p>
                   <div className={`w-8 h-8 rounded-lg ${s.bg} flex items-center justify-center`}>
@@ -123,15 +123,15 @@ export default function AdminDashboard() {
 
         {/* Quick stats row from dashboard */}
         {dashboard && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: "Open Jobs", value: dashboard.jobs?.open ?? "—", icon: Briefcase },
               { label: "Active Chats", value: dashboard.conversations?.active ?? "—", icon: MessageSquare },
               { label: "Avg Rating", value: dashboard.reviews?.averageRating ?? "—", icon: Star },
               { label: "Active Users (7d)", value: dashboard.users?.activeLastWeek ?? "—", icon: TrendingUp },
             ].map(s => (
-              <Card key={s.label}>
-                <CardContent className="pt-4 pb-4">
+              <Card key={s.label} className="bg-white/40 dark:bg-black/20 backdrop-blur-sm border border-white/20 dark:border-white/5 rounded-2xl shadow-sm">
+                <CardContent className="p-5">
                   <div className="flex items-center gap-2">
                     <s.icon className="w-4 h-4 text-muted-foreground" />
                     <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -146,9 +146,11 @@ export default function AdminDashboard() {
         {/* Charts */}
         {chartData.length > 0 && (
           <div className="grid md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader><CardTitle className="text-sm">User & Job Growth (7 days)</CardTitle></CardHeader>
-              <CardContent>
+            <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+              <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+                <CardTitle className="text-sm font-heading font-semibold text-foreground/80">User & Job Growth (7 days)</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -162,9 +164,11 @@ export default function AdminDashboard() {
                 </ResponsiveContainer>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-sm">Revenue Trend</CardTitle></CardHeader>
-              <CardContent>
+            <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+              <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+                <CardTitle className="text-sm font-heading font-semibold text-foreground/80">Revenue Trend</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -182,9 +186,11 @@ export default function AdminDashboard() {
 
         {/* Recent activity */}
         <div className="grid md:grid-cols-2 gap-4">
-          <Card>
-            <CardHeader><CardTitle className="text-sm">Recent Users</CardTitle></CardHeader>
-            <CardContent>
+          <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <CardTitle className="text-sm font-heading font-semibold text-foreground/80">Recent Users</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4">
               {(recentUsers as any[]).length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">No users</p>
               ) : (
@@ -208,9 +214,11 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader><CardTitle className="text-sm">Recent Jobs</CardTitle></CardHeader>
-            <CardContent>
+          <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <CardTitle className="text-sm font-heading font-semibold text-foreground/80">Recent Jobs</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4">
               {(recentJobs as any[]).length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">No jobs</p>
               ) : (

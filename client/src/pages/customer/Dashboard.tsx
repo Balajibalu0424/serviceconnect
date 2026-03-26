@@ -84,233 +84,237 @@ export default function CustomerDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-8 space-y-8 max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">Welcome back, {user?.firstName}!</h1>
-            <p className="text-sm text-muted-foreground">Here's what's happening with your jobs</p>
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div className="space-y-1.5">
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight font-outfit text-foreground">
+              Welcome back, <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-indigo-600 dark:from-primary dark:to-indigo-400">{user?.firstName}</span>!
+            </h1>
+            <p className="text-muted-foreground text-sm max-w-xl">
+              Here is your service command center. Manage jobs, stay updated, and connect with professionals seamlessly.
+            </p>
           </div>
           <Link href="/post-job">
-            <Button size="sm" className="gap-1.5" data-testid="button-post-job">
-              <PlusCircle className="w-4 h-4" /> Post a Job
+            <Button className="gap-2 shadow-lg shadow-primary/20 rounded-xl px-6" size="lg" data-testid="button-post-job">
+              <PlusCircle className="w-5 h-5" /> Post a New Job
             </Button>
           </Link>
         </div>
 
         {/* Draft job banner */}
         {draftJobs.length > 0 && (
-          <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-sm">
-                      {draftJobs.length} unpublished job{draftJobs.length > 1 ? "s" : ""}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {draftJobs[0]?.aiQualityScore < 40
-                        ? "Your job needs improvements before going live — check the feedback"
-                        : "Publish now and start receiving quotes from professionals"}
-                    </p>
-                  </div>
+          <div className="relative overflow-hidden group rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/40 shadow-sm p-5 md:p-6">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-400/10 dark:bg-amber-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+            <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 flex items-center justify-center shrink-0 shadow-sm">
+                  <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-500" />
                 </div>
-                <Link href="/my-jobs">
-                  <Button size="sm" className="gap-1.5 shrink-0" data-testid="button-publish-draft">
-                    <Zap className="w-3 h-3" /> Review & Publish
-                  </Button>
-                </Link>
+                <div>
+                  <h3 className="font-semibold text-amber-900 dark:text-amber-100 text-base font-outfit">
+                    {draftJobs.length} unpublished job{draftJobs.length > 1 ? "s" : ""}
+                  </h3>
+                  <p className="text-sm text-amber-700 dark:text-amber-400/80 mt-0.5">
+                    {draftJobs[0]?.aiQualityScore < 40
+                      ? "Your job needs improvements before going live — check the feedback"
+                      : "Publish now and start receiving quotes from professionals"}
+                  </p>
+                </div>
               </div>
-            </CardContent>
-          </Card>
+              <Link href="/my-jobs">
+                <Button className="gap-2 shrink-0 bg-amber-500 hover:bg-amber-600 text-white shadow-md shadow-amber-500/20 rounded-xl" data-testid="button-publish-draft">
+                  <Zap className="w-4 h-4" /> Review & Publish
+                </Button>
+              </Link>
+            </div>
+          </div>
         )}
 
         {/* Aftercare alerts — most important, shown prominently */}
         {aftercareJobs.length > 0 && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {aftercareJobs.map((job: any) => <AftercareCard key={job.id} job={job} />)}
           </div>
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
           {[
             {
               label: "Active Jobs", value: activeJobs.length, icon: Briefcase,
-              color: "text-primary", bg: "bg-primary/5",
+              color: "text-indigo-600 dark:text-indigo-400", bg: "from-indigo-500/10 to-blue-500/10",
               sub: "live & in discussion", href: "/my-jobs"
             },
             {
               label: "Bookings", value: activeBookings.length, icon: BadgeCheck,
-              color: "text-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30",
+              color: "text-blue-500 dark:text-blue-400", bg: "from-blue-500/10 to-cyan-500/10",
               sub: "confirmed", href: "/bookings"
             },
             {
               label: "Notifications", value: notifData?.unreadCount || 0, icon: AlertCircle,
-              color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-950/30",
+              color: "text-orange-500 dark:text-orange-400", bg: "from-orange-500/10 to-amber-500/10",
               sub: "unread", href: "/notifications"
             },
             {
               label: "Jobs Done", value: completedBookings.length, icon: CheckCircle,
-              color: "text-green-600", bg: "bg-green-50 dark:bg-green-950/30",
+              color: "text-emerald-600 dark:text-emerald-400", bg: "from-emerald-500/10 to-green-500/10",
               sub: "completed", href: "/bookings"
             },
           ].map((stat) => (
-            <Link key={stat.label} href={stat.href || "#"}>
-              <Card className="cursor-pointer hover:shadow-sm hover:border-border/80 transition-all">
-                <CardContent className="pt-4 pb-4">
-                  <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center mb-3`}>
-                    <stat.icon className={`w-4 h-4 ${stat.color}`} />
-                  </div>
-                  <p className="text-2xl font-bold" data-testid={`stat-${stat.label.toLowerCase().replace(" ", "-")}`}>{stat.value}</p>
-                  <p className="text-xs text-muted-foreground">{stat.label}</p>
-                  <p className="text-[10px] text-muted-foreground/70 mt-0.5">{stat.sub}</p>
-                </CardContent>
-              </Card>
+            <Link key={stat.label} href={stat.href || "#"} className="block group">
+              <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 p-5 rounded-2xl shadow-sm group-hover:shadow-md group-hover:border-primary/20 transition-all duration-300 relative overflow-hidden">
+                <div className={`absolute -right-4 -top-4 w-24 h-24 bg-gradient-to-br ${stat.bg} rounded-full blur-2xl opacity-50 group-hover:opacity-100 transition-opacity`} />
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.bg} flex items-center justify-center mb-4 relative z-10 border border-white/20 dark:border-white/5`}>
+                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                </div>
+                <div className="relative z-10">
+                  <p className="text-3xl font-bold font-outfit" data-testid={`stat-${stat.label.toLowerCase().replace(" ", "-")}`}>{stat.value}</p>
+                  <p className="text-sm font-medium text-muted-foreground mt-1 text-foreground/80">{stat.label}</p>
+                  <p className="text-xs text-muted-foreground/60 mt-0.5">{stat.sub}</p>
+                </div>
+              </div>
             </Link>
           ))}
         </div>
 
         {/* Two column: Jobs pipeline + Recent messages */}
-        <div className="grid lg:grid-cols-2 gap-5">
+        <div className="grid lg:grid-cols-2 gap-6 md:gap-8">
           {/* Active job pipeline */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-primary" /> Job Pipeline
-                </CardTitle>
-                <Link href="/my-jobs">
-                  <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                    All jobs <ChevronRight className="w-3 h-3" />
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent>
+          <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+            <div className="p-5 md:p-6 border-b border-border/50 bg-white/40 dark:bg-white/5 flex items-center justify-between">
+              <h2 className="text-lg font-bold font-outfit flex items-center gap-2">
+                <Briefcase className="w-5 h-5 text-primary" /> Job Pipeline
+              </h2>
+              <Link href="/my-jobs">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs rounded-xl hover:bg-white/50 dark:hover:bg-white/10">
+                  View all <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+            </div>
+            <div className="p-3 md:p-4 flex-1">
               {(jobs as any[]).length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No jobs yet</p>
-                  <p className="text-xs mt-1 mb-3">Post a job and professionals will quote you</p>
-                  <Link href="/post-job">
-                    <Button size="sm" variant="outline" className="gap-1.5">
-                      <PlusCircle className="w-3.5 h-3.5" /> Post your first job
+                <div className="h-full flex flex-col items-center justify-center text-center py-10 md:py-16 px-4">
+                  <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center mb-4">
+                    <Briefcase className="w-8 h-8 text-primary/40" />
+                  </div>
+                  <h3 className="text-md font-semibold font-outfit mb-1 relative z-10">No jobs yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-xs mb-6 relative z-10">Post your first job and start receiving quotes from our verified professionals.</p>
+                  <Link href="/post-job" className="relative z-10">
+                    <Button className="gap-2 rounded-xl shadow-md shadow-primary/20">
+                      <PlusCircle className="w-4 h-4" /> Post a Job
                     </Button>
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {(jobs as any[]).slice(0, 5).map((job: any) => (
                     <Link key={job.id} href={`/jobs/${job.id}`}>
                       <div
-                        className="flex items-center justify-between p-2.5 rounded-lg border border-transparent hover:border-border/50 hover:bg-muted/50 transition-all cursor-pointer"
+                        className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-transparent hover:border-border/60 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer"
                         data-testid={`job-card-${job.id}`}
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{job.title}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" />
+                          <p className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{job.title}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
+                            <Clock className="w-3 h-3" />
                             {formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}
                           </p>
                         </div>
-                        <Badge variant={STATUS_COLORS[job.status] as any} className="ml-2 shrink-0 text-xs">
+                        <Badge variant={STATUS_COLORS[job.status] as any} className="sm:ml-2 shrink-0 py-1 text-[11px] font-semibold w-fit">
                           {STATUS_LABELS[job.status] || job.status}
                         </Badge>
                       </div>
                     </Link>
                   ))}
                   {(jobs as any[]).length > 5 && (
-                    <Link href="/my-jobs">
-                      <p className="text-xs text-primary text-center pt-1 hover:underline cursor-pointer">
-                        +{(jobs as any[]).length - 5} more jobs →
-                      </p>
-                    </Link>
+                    <div className="pt-2 px-4 pb-1">
+                      <Link href="/my-jobs">
+                        <Button variant="ghost" className="w-full text-xs text-primary hover:bg-primary/5 rounded-xl">
+                          +{ (jobs as any[]).length - 5 } more jobs <ArrowRight className="w-3 h-3 ml-1.5" />
+                        </Button>
+                      </Link>
+                    </div>
                   )}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Recent conversations */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-primary" /> Messages
-                </CardTitle>
-                <Link href="/chat">
-                  <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                    All chats <ChevronRight className="w-3 h-3" />
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent>
+          <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+            <div className="p-5 md:p-6 border-b border-border/50 bg-white/40 dark:bg-white/5 flex items-center justify-between">
+              <h2 className="text-lg font-bold font-outfit flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-indigo-500" /> Recent Messages
+              </h2>
+              <Link href="/chat">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs rounded-xl hover:bg-white/50 dark:hover:bg-white/10">
+                  Open chat <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+            </div>
+            <div className="p-3 md:p-4 flex-1">
               {(conversations as any[]).length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No messages yet</p>
-                  <p className="text-xs mt-1">Conversations with professionals will appear here</p>
+                <div className="h-full flex flex-col items-center justify-center text-center py-10 md:py-16 px-4">
+                  <div className="w-16 h-16 rounded-full bg-indigo-500/5 flex items-center justify-center mb-4">
+                    <MessageSquare className="w-8 h-8 text-indigo-500/40" />
+                  </div>
+                  <h3 className="text-md font-semibold font-outfit mb-1 relative z-10">Your inbox is empty</h3>
+                  <p className="text-sm text-muted-foreground max-w-xs relative z-10">When you connect with professionals, your conversations will appear right here.</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {(conversations as any[]).slice(0, 4).map((conv: any) => (
                     <Link key={conv.id} href={`/chat?conv=${conv.id}`}>
-                      <div className="flex items-center gap-3 p-2.5 rounded-lg border border-transparent hover:border-border/50 hover:bg-muted/50 transition-all cursor-pointer">
-                        <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-                          <MessageSquare className="w-3.5 h-3.5 text-primary" />
+                      <div className="flex items-center gap-4 p-3.5 rounded-xl border border-transparent hover:border-border/60 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer">
+                        <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
+                          <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{conv.jobTitle || "Job conversation"}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" />
+                          <p className="text-sm font-semibold truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{conv.jobTitle || "Job conversation"}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                            <Clock className="w-3 h-3" />
                             {conv.lastMessageAt
                               ? formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: true })
-                              : "No messages yet"}
+                              : "Started recently"}
                           </p>
                         </div>
                         {conv.unreadCount > 0 && (
-                          <Badge variant="destructive" className="text-xs h-5 min-w-5 shrink-0">{conv.unreadCount}</Badge>
+                          <Badge variant="destructive" className="px-2 py-0.5 h-auto text-xs font-bold rounded-full">{conv.unreadCount}</Badge>
                         )}
                       </div>
                     </Link>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
 
         {/* Quick actions footer */}
-        <Card className="bg-muted/30 border-dashed">
-          <CardContent className="pt-4 pb-4">
-            <p className="text-xs font-medium text-muted-foreground mb-3">Quick actions</p>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/post-job">
-                <Button size="sm" variant="outline" className="gap-1.5 text-xs">
-                  <PlusCircle className="w-3 h-3" /> Post a Job
-                </Button>
-              </Link>
-              <Link href="/my-jobs">
-                <Button size="sm" variant="outline" className="gap-1.5 text-xs">
-                  <Briefcase className="w-3 h-3" /> My Jobs
-                </Button>
-              </Link>
-              <Link href="/bookings">
-                <Button size="sm" variant="outline" className="gap-1.5 text-xs">
-                  <CheckCircle className="w-3 h-3" /> Bookings
-                </Button>
-              </Link>
-              <Link href="/support">
-                <Button size="sm" variant="outline" className="gap-1.5 text-xs">
-                  <MessageSquare className="w-3 h-3" /> Get Support
-                </Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-border/40">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-2">Quick actions:</span>
+          <Link href="/post-job" className="relative z-10">
+            <Button size="sm" variant="outline" className="gap-2 rounded-xl bg-white/50 dark:bg-black/20 hover:bg-white dark:hover:bg-white/10 hover:text-primary transition-all shadow-sm">
+              <PlusCircle className="w-3.5 h-3.5" /> Post Job
+            </Button>
+          </Link>
+          <Link href="/my-jobs" className="relative z-10">
+            <Button size="sm" variant="outline" className="gap-2 rounded-xl bg-white/50 dark:bg-black/20 hover:bg-white dark:hover:bg-white/10 transition-all shadow-sm">
+              <Briefcase className="w-3.5 h-3.5" /> Jobs
+            </Button>
+          </Link>
+          <Link href="/bookings" className="relative z-10">
+            <Button size="sm" variant="outline" className="gap-2 rounded-xl bg-white/50 dark:bg-black/20 hover:bg-white dark:hover:bg-white/10 transition-all shadow-sm">
+              <CheckCircle className="w-3.5 h-3.5" /> Bookings
+            </Button>
+          </Link>
+          <Link href="/support" className="relative z-10">
+            <Button size="sm" variant="outline" className="gap-2 rounded-xl bg-white/50 dark:bg-black/20 hover:bg-white dark:hover:bg-white/10 transition-all shadow-sm">
+              <MessageSquare className="w-3.5 h-3.5" /> Support
+            </Button>
+          </Link>
+        </div>
       </div>
     </DashboardLayout>
   );

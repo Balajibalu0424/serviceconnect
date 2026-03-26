@@ -92,11 +92,14 @@ export default function ProProfileEditor() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 max-w-2xl space-y-6">
-        <h1 className="text-xl font-bold">My Profile</h1>
+      <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">My Profile</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage your professional presence and details</p>
+        </div>
 
         {/* Header card */}
-        <Card>
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
           <CardContent className="pt-4 pb-4 flex items-center gap-4">
             <Avatar className="w-14 h-14">
               <AvatarImage src={user?.avatarUrl} alt={user?.firstName} />
@@ -111,9 +114,11 @@ export default function ProProfileEditor() {
         </Card>
 
         {/* Personal info */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">Personal Info</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80">Personal Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-6">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>First name</Label>
@@ -132,16 +137,18 @@ export default function ProProfileEditor() {
               <Label>Email</Label>
               <Input value={user?.email || ""} disabled className="opacity-60 cursor-not-allowed" />
             </div>
-            <Button onClick={() => updateName.mutate()} disabled={updateName.isPending} data-testid="button-save-personal">
+            <Button onClick={() => updateName.mutate()} disabled={updateName.isPending} className="rounded-xl px-6 h-11 w-full sm:w-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all" data-testid="button-save-personal">
               {updateName.isPending ? "Saving..." : "Save Personal Info"}
             </Button>
           </CardContent>
         </Card>
 
         {/* Business info */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">Business Info</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80">Professional Setup</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-6">
             {isLoading ? (
               <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-9 rounded bg-muted animate-pulse"/>)}</div>
             ) : (
@@ -187,7 +194,7 @@ export default function ProProfileEditor() {
                     data-testid="input-bio"
                   />
                 </div>
-                <Button onClick={() => updateProfile.mutate()} disabled={updateProfile.isPending} data-testid="button-save-business">
+                <Button onClick={() => updateProfile.mutate()} disabled={updateProfile.isPending} className="rounded-xl px-6 h-11 w-full sm:w-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all mt-2" data-testid="button-save-business">
                   {updateProfile.isPending ? "Saving..." : "Save Business Info"}
                 </Button>
               </>
@@ -197,27 +204,29 @@ export default function ProProfileEditor() {
 
         {/* Stats */}
         {profile && (
-          <Card>
-            <CardHeader><CardTitle className="text-base">Performance Stats</CardTitle></CardHeader>
-            <CardContent>
+          <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <CardTitle className="text-base font-heading font-semibold text-foreground/80">Performance Metrics</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div className="space-y-1">
                   <div className="flex items-center justify-center gap-1">
-                    <Star className="w-4 h-4 text-amber-400" />
-                    <p className="text-2xl font-bold">{profile.ratingAvg ? Number(profile.ratingAvg).toFixed(1) : "–"}</p>
+                    <Star className="w-5 h-5 text-amber-500 fill-amber-500/20" />
+                    <p className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">{profile.ratingAvg ? Number(profile.ratingAvg).toFixed(1) : "–"}</p>
                   </div>
                   <p className="text-xs text-muted-foreground">Avg rating</p>
                 </div>
                 <div className="space-y-1">
-                  <div className="flex items-center justify-center">
-                    <p className="text-2xl font-bold">{profile.totalReviews ?? 0}</p>
+                  <div className="flex items-center justify-center h-[32px]">
+                    <p className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">{profile.totalReviews ?? 0}</p>
                   </div>
                   <p className="text-xs text-muted-foreground">Reviews</p>
                 </div>
                 <div className="space-y-1">
-                  <div className="flex items-center justify-center gap-1">
-                    <TrendingUp className="w-4 h-4 text-primary" />
-                    <p className="text-2xl font-bold">{profile.spinStreak ?? 0}</p>
+                  <div className="flex items-center justify-center gap-1.5 h-[32px]">
+                    <TrendingUp className="w-5 h-5 text-primary/80" />
+                    <p className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">{profile.spinStreak ?? 0}</p>
                   </div>
                   <p className="text-xs text-muted-foreground">Spin streak</p>
                 </div>
