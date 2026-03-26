@@ -955,8 +955,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     let conditions: any[] =
       user.role === "CUSTOMER" ? [eq(bookings.customerId, userId)] : [eq(bookings.professionalId, userId)];
-    const result = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
-    return res.json(result);
+    
+    const rawBookings = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
+    
+    // Enrich bookings with nested Job and User data
+    const enrichedBookings = await Promise.all(rawBookings.map(async (b) => {
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, b.jobId));
+      const [customer] = await db.select().from(users).where(eq(users.id, b.customerId));
+      const [professional] = await db.select().from(users).where(eq(users.id, b.professionalId));
+      return { 
+        ...b, 
+        job, 
+        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone, avatarUrl: customer.avatarUrl } : null,
+        professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: professional.businessName } : null
+      };
+    }));
+
+    return res.json(enrichedBookings);
+  });
+
+  app.post("/api/bookings/:id/in-progress", requireAuth, async (req: AuthRequest, res: Response) => {
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+    if (booking.professionalId !== req.user!.userId) {
+      return res.status(403).json({ error: "Forbidden. Only the assigned professional can mark this in progress." });
+    }
+    await db.update(bookings).set({ status: "IN_PROGRESS", updatedAt: new Date() })
+      .where(eq(bookings.id, req.params.id));
+    return res.json({ success: true });
   });
 
   app.get("/api/bookings/:id", requireAuth, async (req: AuthRequest, res: Response) => {
