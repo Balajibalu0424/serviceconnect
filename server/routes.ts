@@ -220,11 +220,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   app.post("/api/ai/onboarding-chat", async (req: Request, res: Response) => {
     try {
-      const { messages, mode } = req.body;
+      const { messages, mode, isLoggedIn } = req.body;
       if (!messages || !mode) return res.status(400).json({ error: "Missing messages or mode" });
 
       const allCats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
-      const result = await handleOnboardingChat(messages, mode, allCats);
+      const result = await handleOnboardingChat(messages, mode, allCats, isLoggedIn);
       return res.json(result);
     } catch (e: any) {
       return res.status(500).json({ error: e.message });

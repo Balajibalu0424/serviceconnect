@@ -11,6 +11,7 @@ import AiAssistantWidget from "@/components/ai/AiAssistantWidget";
 import Home from "@/pages/public/Home";
 import Login from "@/pages/public/Login";
 import Register from "@/pages/public/Register";
+import RegisterCustomer from "@/pages/public/RegisterCustomer";
 import AdminLogin from "@/pages/public/AdminLogin";
 import Services from "@/pages/public/Services";
 import ProOnboarding from "@/pages/public/ProOnboarding";
@@ -64,6 +65,7 @@ function AppRoutes() {
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
+      <Route path="/register/customer" component={RegisterCustomer} />
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/services" component={Services} />
       <Route path="/post-job" component={PostJob} />

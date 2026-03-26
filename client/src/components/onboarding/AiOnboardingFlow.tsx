@@ -19,12 +19,17 @@ export interface AiOnboardingData {
   location?: string;
   yearsExperience?: number;
   serviceRadius?: number;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
 }
 
 interface AiOnboardingFlowProps {
   mode: "CUSTOMER" | "PROFESSIONAL";
   onComplete: (data: AiOnboardingData) => void;
   initialMessage?: string;
+  isLoggedIn?: boolean;
 }
 
 interface Message {
@@ -32,7 +37,7 @@ interface Message {
   content: string;
 }
 
-export default function AiOnboardingFlow({ mode, onComplete, initialMessage }: AiOnboardingFlowProps) {
+export default function AiOnboardingFlow({ mode, onComplete, initialMessage, isLoggedIn = true }: AiOnboardingFlowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -71,7 +76,8 @@ export default function AiOnboardingFlow({ mode, onComplete, initialMessage }: A
     try {
       const res = await apiRequest("POST", "/api/ai/onboarding-chat", {
         messages: newMessages,
-        mode
+        mode,
+        isLoggedIn
       });
       
       const data = await res.json();

@@ -45821,7 +45821,7 @@ Return ONLY valid JSON:
     return { enhanced: currentBio, improvements: [] };
   }
 }
-async function handleOnboardingChat(messages2, mode, availableCategories) {
+async function handleOnboardingChat(messages2, mode, availableCategories, isLoggedIn = true) {
   const catList = availableCategories.map((c) => `- ${c.name} (ID: ${c.id})`).join("\n");
   const customerPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a CUSTOMER post a new job.
 You need to collect the following information conversationally:
@@ -45831,9 +45831,14 @@ You need to collect the following information conversationally:
 4. Budget (optional, but good to ask)
 5. The most appropriate category ID from this list:
 ${catList}
+${!isLoggedIn ? `6. First Name
+7. Last Name
+8. Email address
+9. Phone Number (optional)
+(Since the user is not logged in, ask for their name and contact info so we can set up their account.)` : ""}
 
-Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
-If you have collected enough information to post the job (at least what they need done, location, and you can infer the category ID), you MUST set "isComplete" to true and populate "extractedData".
+Ask ONE question at a time if information is missing. Be brief, friendly, and professional. You do NOT have to ask about budget or phone number if they provide everything else, but you must ask for Name and Email if they are not logged in.
+If you have collected enough information to post the job, you MUST set "isComplete" to true and populate "extractedData".
 
 Return ONLY valid JSON in this format:
 {
@@ -45846,7 +45851,11 @@ Return ONLY valid JSON in this format:
     "locationText": "string",
     "urgency": "LOW|NORMAL|HIGH|URGENT",
     "budgetMin": null,
-    "budgetMax": null
+    "budgetMax": null${!isLoggedIn ? `,
+    "firstName": "string",
+    "lastName": "string",
+    "email": "string",
+    "phone": "string"` : ""}
   }
 }`;
   const proPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a PROFESSIONAL sign up to the platform.
@@ -51472,10 +51481,10 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.post("/api/ai/onboarding-chat", async (req, res) => {
     try {
-      const { messages: messages2, mode } = req.body;
+      const { messages: messages2, mode, isLoggedIn } = req.body;
       if (!messages2 || !mode) return res.status(400).json({ error: "Missing messages or mode" });
       const allCats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
-      const result = await handleOnboardingChat(messages2, mode, allCats);
+      const result = await handleOnboardingChat(messages2, mode, allCats, isLoggedIn);
       return res.json(result);
     } catch (e) {
       return res.status(500).json({ error: e.message });

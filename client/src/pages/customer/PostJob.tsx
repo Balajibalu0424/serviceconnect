@@ -261,6 +261,15 @@ export default function PostJob() {
       budgetMin: data.budgetMin?.toString() || "",
       budgetMax: data.budgetMax?.toString() || "",
     });
+    if (!isLoggedIn) {
+      setAccount(a => ({
+        ...a,
+        firstName: data.firstName || a.firstName,
+        lastName: data.lastName || a.lastName,
+        email: data.email || a.email,
+        phone: data.phone || a.phone,
+      }));
+    }
     setStep(2);
   };
 
@@ -298,22 +307,7 @@ export default function PostJob() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedTitle, debouncedDescription, debouncedLocation]);
 
-  const handleJobSubmit = async () => {
-    if (!job.categoryId || !job.title || !job.description) {
-      toast({ title: "Please fill in all required fields", variant: "destructive" });
-      return;
-    }
-    // If we have category-specific questions, go to step 1.5
-    if (categoryQuestions.length > 0) {
-      setStep(1.5);
-    } else {
-      setStep(2);
-    }
-  };
 
-  const handleQuestionsNext = () => {
-    setStep(2);
-  };
 
   const handleAccountSubmit = async () => {
     setLoading(true);
@@ -425,277 +419,17 @@ export default function PostJob() {
               
               <AiOnboardingFlow 
                 mode="CUSTOMER" 
+                isLoggedIn={isLoggedIn}
                 onComplete={handleAiOnboardingComplete}
                 initialMessage={preselectedCategory 
                   ? `Hi there! I see you need help with ${preselectedCategory.replace(/-/g, ' ')}. Could you describe exactly what you need done?`
                   : undefined}
               />
             </div>
-            
-            <p className="text-center text-xs text-muted-foreground mt-4">
-              Prefer the old way? <button className="text-primary hover:underline font-medium" onClick={() => setStep(1.5)}>Use classic form</button>
-            </p>
           </div>
         )}
 
-        {/* Step 1.5: Classic Form Fallback (hidden by default) */}
-        {step === 1.5 && (
-          <div className="space-y-6">
-            <div>
-              <h1 className="text-2xl font-bold mb-1">What do you need done?</h1>
-              <p className="text-muted-foreground">Tell us about your job — it's free to post</p>
-            </div>
 
-            {/* Social proof banner */}
-            {categorySlug && (
-              <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 text-xs text-primary">
-                <Users className="w-3.5 h-3.5 shrink-0" />
-                <span><strong>{socialProof.available} pros</strong> available in your area · <strong>{socialProof.recent} people</strong> requested this in the last hour</span>
-              </div>
-            )}
-
-            <div>
-              <Label className="text-sm font-medium mb-3 block">Select a category</Label>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {(categories as any[]).map((cat: any) => {
-                  const Icon = ICON_MAP[cat.icon] || Wrench;
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => setJob(j => ({ ...j, categoryId: cat.id }))}
-                      className={cn(
-                        "p-3 rounded-lg border-2 text-center transition-all",
-                        job.categoryId === cat.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
-                      )}
-                      data-testid={`category-${cat.slug}`}
-                    >
-                      <Icon className={cn("w-5 h-5 mx-auto mb-1", job.categoryId === cat.id ? "text-primary" : "text-muted-foreground")} />
-                      <div className="text-xs font-medium leading-tight">{cat.name}</div>
-                    </button>
-                  );
-                })}
-              </div>
-              {!job.categoryId && aiAnalysis?.category.categorySlug && aiAnalysis.category.confidence !== "LOW" && (
-                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Lightbulb className="w-3 h-3 text-yellow-500 shrink-0" />
-                  <span>AI suggests: <strong>{aiAnalysis.category.categorySlug}</strong> — select above to confirm</span>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="title">Job title</Label>
-              <Input id="title" value={job.title} onChange={e => setJob(j => ({...j, title: e.target.value}))}
-                placeholder="e.g. Fix leaking tap in kitchen" required data-testid="input-title" />
-            </div>
-
-            <div>
-              <Label htmlFor="description">
-                <span>Describe the job</span>
-                {analyzing && <span className="ml-2 text-xs text-muted-foreground animate-pulse">analysing…</span>}
-              </Label>
-              <Textarea id="description" value={job.description} onChange={e => setJob(j => ({...j, description: e.target.value}))}
-                placeholder="Provide as much detail as possible — size, material, location in property, any relevant history…" rows={4} required data-testid="input-description" />
-              {aiAnalysis && (job.title.length > 3 || job.description.length > 10) && (
-                <div className="mt-2 space-y-2">
-                  <QualityBar score={aiAnalysis.quality.score} passed={aiAnalysis.quality.passed} />
-                  {!aiAnalysis.quality.passed && aiAnalysis.quality.prompt && (
-                    <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-50 border border-yellow-200 text-xs text-yellow-800">
-                      <Lightbulb className="w-3.5 h-3.5 mt-0.5 shrink-0 text-yellow-600" />
-                      <span>{aiAnalysis.quality.prompt}</span>
-                    </div>
-                  )}
-                  {aiAnalysis.urgency.isUrgent && (
-                    <div className="flex items-center gap-2 p-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-700">
-                      <Flame className="w-3.5 h-3.5 shrink-0" />
-                      <span>Urgent job detected — pros will be notified immediately.</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="budgetMin">Budget from (€)</Label>
-                <Input id="budgetMin" type="number" value={job.budgetMin} onChange={e => setJob(j => ({...j, budgetMin: e.target.value}))} placeholder="50" data-testid="input-budget-min" />
-              </div>
-              <div>
-                <Label htmlFor="budgetMax">Budget to (€)</Label>
-                <Input id="budgetMax" type="number" value={job.budgetMax} onChange={e => setJob(j => ({...j, budgetMax: e.target.value}))} placeholder="200" data-testid="input-budget-max" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Urgency</Label>
-                <Select value={job.urgency} onValueChange={v => setJob(j => ({...j, urgency: v}))}>
-                  <SelectTrigger data-testid="select-urgency"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="LOW">Low — flexible</SelectItem>
-                    <SelectItem value="NORMAL">Normal</SelectItem>
-                    <SelectItem value="HIGH">High — this week</SelectItem>
-                    <SelectItem value="URGENT">Urgent — ASAP</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Preferred date</Label>
-                <Input type="date" value={job.preferredDate} onChange={e => setJob(j => ({...j, preferredDate: e.target.value}))} data-testid="input-date" />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="location">Your location</Label>
-              <Input id="location" value={job.locationText} onChange={e => setJob(j => ({...j, locationText: e.target.value}))}
-                placeholder="e.g. Ranelagh, Dublin 6" data-testid="input-location" />
-            </div>
-
-            {aiAnalysis && !aiAnalysis.quality.passed && job.description.length > 20 && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                <div><strong>Improve your description</strong> to get better quotes. Jobs with quality above 40 go live instantly.</div>
-              </div>
-            )}
-
-            <Button className="w-full gap-2" onClick={handleJobSubmit} data-testid="button-next">
-              Continue <ArrowRight className="w-4 h-4" />
-            </Button>
-
-            {categoryQuestions.length > 0 && (
-              <p className="text-center text-xs text-muted-foreground">
-                A few quick questions about your {selectedCat?.name} job next →
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Step 1.5: Category-Specific Questionnaire (classic form fallback) */}
-        {step === 1.5 && (
-          <div className="space-y-6">
-            <div>
-              <Badge variant="secondary" className="mb-2">{selectedCat?.name}</Badge>
-              <h1 className="text-2xl font-bold mb-1">A few more details</h1>
-              <p className="text-muted-foreground">These help pros give you accurate quotes</p>
-            </div>
-
-            {/* Social proof */}
-            <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 text-xs text-primary">
-              <Users className="w-3.5 h-3.5 shrink-0" />
-              <span><strong>{socialProof.available} pros</strong> are available in your area right now</span>
-            </div>
-
-            <div className="space-y-6">
-              {categoryQuestions.map((q, qi) => (
-                <div key={qi} className="space-y-3">
-                  <Label className="text-sm font-semibold">{q.label}</Label>
-
-                  {q.type === "radio" && q.options && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {q.options.map(opt => (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => setCatAnswers(a => ({ ...a, [q.label]: opt }))}
-                          className={cn(
-                            "p-3 rounded-lg border-2 text-left text-sm transition-all",
-                            catAnswers[q.label] === opt ? "border-primary bg-primary/5 text-primary font-medium" : "border-border hover:border-primary/40"
-                          )}
-                        >
-                          <span className={cn("w-4 h-4 rounded-full border-2 inline-block mr-2 align-middle",
-                            catAnswers[q.label] === opt ? "border-primary bg-primary" : "border-muted-foreground"
-                          )} />
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {q.type === "select" && q.options && (
-                    <Select value={(catAnswers[q.label] as string) || ""} onValueChange={v => setCatAnswers(a => ({ ...a, [q.label]: v }))}>
-                      <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
-                      <SelectContent>
-                        {q.options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  )}
-
-                  {q.type === "checkbox" && q.options && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {q.options.map(opt => {
-                        const selected = (catAnswers[q.label] as string[] || []).includes(opt);
-                        return (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              const curr = (catAnswers[q.label] as string[]) || [];
-                              setCatAnswers(a => ({
-                                ...a,
-                                [q.label]: selected ? curr.filter(x => x !== opt) : [...curr, opt]
-                              }));
-                            }}
-                            className={cn(
-                              "p-2.5 rounded-lg border-2 text-left text-sm transition-all flex items-center gap-2",
-                              selected ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/40"
-                            )}
-                          >
-                            <div className={cn("w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center",
-                              selected ? "border-primary bg-primary" : "border-muted-foreground"
-                            )}>
-                              {selected && <CheckCircle className="w-3 h-3 text-white" />}
-                            </div>
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {q.type === "input" && (
-                    <Input
-                      value={(catAnswers[q.label] as string) || ""}
-                      onChange={e => setCatAnswers(a => ({ ...a, [q.label]: e.target.value }))}
-                      placeholder="Type your answer…"
-                    />
-                  )}
-                </div>
-              ))}
-
-              {/* Hiring intent question */}
-              <div className="space-y-3 pt-2 border-t border-border">
-                <Label className="text-sm font-semibold">How soon do you need this done?</Label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {["Within 24 hours", "This week", "In the next 2 weeks", "Next month or later", "I'm just getting quotes"].map(opt => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setHiringIntent(opt)}
-                      className={cn(
-                        "p-3 rounded-lg border-2 text-left text-sm transition-all",
-                        hiringIntent === opt ? "border-primary bg-primary/5 text-primary font-medium" : "border-border hover:border-primary/40"
-                      )}
-                    >
-                      {opt === "Within 24 hours" && <Flame className="w-3.5 h-3.5 text-red-500 inline mr-1.5" />}
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">This helps pros prioritise your job and respond faster</p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <Button variant="outline" className="gap-2" onClick={() => setStep(1)}>
-                <ArrowLeft className="w-4 h-4" /> Back to Chat
-              </Button>
-              <Button className="flex-1 gap-2" onClick={handleQuestionsNext} data-testid="button-questions-next">
-                Continue <ArrowRight className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        )}
 
         {/* Step 2: Account */}
         {step === 2 && (
@@ -732,13 +466,30 @@ export default function PostJob() {
 
             {!isLoggedIn && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Label>First Name</Label><Input value={account.firstName} onChange={e => setAccount(a => ({...a, firstName: e.target.value}))} required data-testid="input-firstname" /></div>
-                  <div><Label>Last Name</Label><Input value={account.lastName} onChange={e => setAccount(a => ({...a, lastName: e.target.value}))} required data-testid="input-lastname" /></div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <Label className="text-muted-foreground">First Name</Label>
+                    <p className="font-medium">{account.firstName || "Not provided"}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Last Name</Label>
+                    <p className="font-medium">{account.lastName || "Not provided"}</p>
+                  </div>
                 </div>
-                <div><Label>Email address</Label><Input type="email" value={account.email} onChange={e => setAccount(a => ({...a, email: e.target.value}))} required data-testid="input-email" /></div>
-                <div><Label>Phone number</Label><Input type="tel" value={account.phone} onChange={e => setAccount(a => ({...a, phone: e.target.value}))} placeholder="+353..." data-testid="input-phone" /></div>
-                <div><Label>Create password</Label><Input type="password" value={account.password} onChange={e => setAccount(a => ({...a, password: e.target.value}))} minLength={8} required data-testid="input-password" /></div>
+                <div className="mb-3">
+                  <Label className="text-muted-foreground">Email</Label>
+                  <p className="font-medium">{account.email || "Not provided"}</p>
+                </div>
+                {account.phone && (
+                  <div className="mb-4">
+                    <Label className="text-muted-foreground">Phone</Label>
+                    <p className="font-medium">{account.phone}</p>
+                  </div>
+                )}
+                <div className="pt-2 border-t border-border">
+                  <Label>Create password to secure your account</Label>
+                  <Input type="password" value={account.password} onChange={e => setAccount(a => ({...a, password: e.target.value}))} minLength={8} required data-testid="input-password" placeholder="••••••••" className="mt-1" />
+                </div>
               </>
             )}
             {isLoggedIn && (
@@ -754,8 +505,8 @@ export default function PostJob() {
             )}
 
             <div className="flex gap-3">
-              <Button variant="outline" className="gap-2" onClick={() => setStep(categoryQuestions.length > 0 ? 1.5 : 1)}>
-                <ArrowLeft className="w-4 h-4" /> Back
+              <Button variant="outline" className="gap-2" onClick={() => setStep(1)}>
+                <ArrowLeft className="w-4 h-4" /> Back to Chat
               </Button>
               <Button className="flex-1 gap-2" onClick={handleAccountSubmit} disabled={loading} data-testid="button-submit">
                 {loading ? "Processing..." : isLoggedIn ? "Post Job" : "Create Account & Post"} <ArrowRight className="w-4 h-4" />
