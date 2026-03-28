@@ -420,6 +420,25 @@ export const featureFlags = pgTable("feature_flags", {
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
 });
 
+// ─── Call Requests (replaces phone sharing) ───────────────────────────────────
+export const callRequestStatusEnum = pgEnum("call_request_status", ["PENDING", "ACCEPTED", "DECLINED", "EXPIRED", "COMPLETED"]);
+
+export const callRequests = pgTable("call_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requesterId: varchar("requester_id").notNull().references(() => users.id),
+  targetId: varchar("target_id").notNull().references(() => users.id),
+  jobId: varchar("job_id").references(() => jobs.id),
+  bookingId: varchar("booking_id").references(() => bookings.id),
+  status: callRequestStatusEnum("status").notNull().default("PENDING"),
+  reason: text("reason"),
+  respondedAt: timestamp("responded_at"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("call_req_requester_idx").on(t.requesterId),
+  index("call_req_target_idx").on(t.targetId),
+]);
+
 // ─── Insert Schemas ───────────────────────────────────────────────────────────
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true, updatedAt: true });
@@ -456,3 +475,4 @@ export type Notification = typeof notifications.$inferSelect;
 export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
 export type PlatformMetric = typeof platformMetrics.$inferSelect;
 export type FeatureFlag = typeof featureFlags.$inferSelect;
+export type CallRequest = typeof callRequests.$inferSelect;

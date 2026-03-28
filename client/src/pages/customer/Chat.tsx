@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { MessageSquare, Send, Loader2, ArrowLeft } from "lucide-react";
+import { MessageSquare, Send, Loader2, ArrowLeft, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +54,20 @@ export default function Chat() {
       qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       setMessage("");
     },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const requestCall = useMutation({
+    mutationFn: async (targetId: string) => {
+      const res = await apiRequest("POST", "/api/call-requests", {
+        targetId,
+        jobId: activeConv?.jobId,
+        reason: "Would like to discuss the project details",
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: () => toast({ title: "📞 Call requested", description: "The other party will be notified. They can accept or decline." }),
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
@@ -172,10 +186,26 @@ export default function Chat() {
                     {activeConv?.jobTitle?.[0] || "J"}
                   </AvatarFallback>
                 </Avatar>
-                <div>
+                <div className="flex-1">
                   <p className="font-semibold text-sm">{activeConv?.jobTitle || "Conversation"}</p>
                   <p className="text-xs text-muted-foreground">Active now</p>
                 </div>
+                {/* Request Call button */}
+                {activeConv?.participants?.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    disabled={requestCall.isPending}
+                    onClick={() => {
+                      const otherParticipant = activeConv.participants.find((p: any) => p.id !== user?.id);
+                      if (otherParticipant) requestCall.mutate(otherParticipant.id);
+                    }}
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    {requestCall.isPending ? "Requesting..." : "Request Call"}
+                  </Button>
+                )}
               </div>
 
               {/* Messages */}

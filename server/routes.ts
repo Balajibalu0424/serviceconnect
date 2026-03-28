@@ -8,7 +8,7 @@ import {
   quotes, bookings, reviews, conversations, conversationParticipants,
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
-  adminAuditLogs, platformMetrics, featureFlags
+  adminAuditLogs, platformMetrics, featureFlags, callRequests
 } from "@shared/schema";
 import {
   eq, and, ne, or, sql, lt, gt, gte, lte, desc, asc,
@@ -687,8 +687,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ]);
 
         const systemMsg = tier === "FREE"
-          ? `A professional has unlocked your job. They are using the free tier — contact details are hidden from them.`
-          : `A professional has unlocked your job with full access.`;
+          ? `A professional has unlocked your job and can now message you directly.`
+          : `A professional has unlocked your job with priority access and can now message you directly.`;
 
         await tx.insert(messages).values({
           conversationId: conv.id, senderId: proId, type: "SYSTEM",
@@ -696,17 +696,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       });
 
-      // Get customer phone if STANDARD
-      let customerPhone = null;
-      if (tier === "STANDARD") {
-        const [cust] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-        customerPhone = cust?.phone;
-      }
-
       await createNotification(job.customerId, "JOB_UNLOCK", "Professional interested in your job",
         `A professional has unlocked your job: ${job.title}`, { jobId });
 
-      return res.status(201).json({ success: true, customerPhone });
+      return res.status(201).json({ success: true });
     } catch (e: any) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -745,14 +738,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (conv) {
           await tx.insert(messages).values({
             conversationId: conv.id, senderId: proId, type: "SYSTEM",
-            content: "This professional has upgraded to Standard tier — full contact details are now available.",
+            content: "This professional has upgraded to Standard tier — priority messaging enabled. Use in-app chat or request a call.",
             isFiltered: false
           });
         }
       });
 
-      const [cust] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-      return res.json({ success: true, customerPhone: cust?.phone });
+      return res.json({ success: true });
     } catch (e: any) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -975,7 +967,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return { 
         ...b, 
         job, 
-        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone, avatarUrl: customer.avatarUrl } : null,
+        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl } : null,
         professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: professional.businessName } : null
       };
     }));
@@ -1051,6 +1043,122 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       return res.status(201).json(review);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CALL REQUESTS (replaces phone sharing)
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // Create a call request
+  app.post("/api/call-requests", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { targetId, jobId, bookingId, reason } = req.body;
+
+      if (!targetId) return res.status(400).json({ error: "Target user is required" });
+
+      // Check if there's already a pending call request
+      const [existing] = await db.select().from(callRequests)
+        .where(and(
+          eq(callRequests.requesterId, userId),
+          eq(callRequests.targetId, targetId),
+          eq(callRequests.status, "PENDING")
+        ));
+      if (existing) return res.status(409).json({ error: "You already have a pending call request with this user" });
+
+      // Create the call request (expires in 24 hours)
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const [callReq] = await db.insert(callRequests).values({
+        requesterId: userId,
+        targetId,
+        jobId: jobId || null,
+        bookingId: bookingId || null,
+        reason: reason || "Would like to discuss the project",
+        expiresAt,
+      }).returning();
+
+      // Get requester name for notification
+      const [requester] = await db.select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users).where(eq(users.id, userId));
+
+      await createNotification(targetId, "CALL_REQUEST", "📞 Call request received",
+        `${requester.firstName} ${requester.lastName} would like to have a call with you: "${reason || "Discuss the project"}"`, 
+        { callRequestId: callReq.id, requesterId: userId, jobId, bookingId });
+
+      return res.status(201).json(callReq);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Respond to a call request (accept/decline)
+  app.patch("/api/call-requests/:id", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { status } = req.body;
+      
+      if (!["ACCEPTED", "DECLINED"].includes(status)) {
+        return res.status(400).json({ error: "Status must be ACCEPTED or DECLINED" });
+      }
+
+      const [callReq] = await db.select().from(callRequests).where(eq(callRequests.id, req.params.id));
+      if (!callReq) return res.status(404).json({ error: "Call request not found" });
+      if (callReq.targetId !== userId) return res.status(403).json({ error: "Not authorized" });
+      if (callReq.status !== "PENDING") return res.status(409).json({ error: "Call request already responded to" });
+
+      const [updated] = await db.update(callRequests)
+        .set({ status: status as any, respondedAt: new Date() })
+        .where(eq(callRequests.id, callReq.id))
+        .returning();
+
+      // Get responder name
+      const [responder] = await db.select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users).where(eq(users.id, userId));
+
+      if (status === "ACCEPTED") {
+        await createNotification(callReq.requesterId, "CALL_ACCEPTED", "✅ Call request accepted",
+          `${responder.firstName} ${responder.lastName} accepted your call request! You can now coordinate a call time through in-app chat.`,
+          { callRequestId: callReq.id });
+      } else {
+        await createNotification(callReq.requesterId, "CALL_DECLINED", "Call request declined",
+          `${responder.firstName} ${responder.lastName} declined your call request. You can continue communicating via in-app chat.`,
+          { callRequestId: callReq.id });
+      }
+
+      return res.json(updated);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // List call requests for current user
+  app.get("/api/call-requests", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const sent = await db.select().from(callRequests)
+        .where(eq(callRequests.requesterId, userId))
+        .orderBy(desc(callRequests.createdAt));
+      const received = await db.select().from(callRequests)
+        .where(eq(callRequests.targetId, userId))
+        .orderBy(desc(callRequests.createdAt));
+
+      // Enrich with user info
+      const enrichSent = await Promise.all(sent.map(async (cr) => {
+        const [target] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+          .from(users).where(eq(users.id, cr.targetId));
+        return { ...cr, target };
+      }));
+
+      const enrichReceived = await Promise.all(received.map(async (cr) => {
+        const [requester] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+          .from(users).where(eq(users.id, cr.requesterId));
+        return { ...cr, requester };
+      }));
+
+      return res.json({ sent: enrichSent, received: enrichReceived });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -1157,20 +1265,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant" });
 
-      // Determine if contact masking needed
-      let shouldMask = false;
-      const [senderUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
-      if (senderUser.role === "PROFESSIONAL" && conv.jobId) {
-        const [unlock] = await db.select({ tier: jobUnlocks.tier }).from(jobUnlocks)
-          .where(and(eq(jobUnlocks.jobId, conv.jobId), eq(jobUnlocks.professionalId, userId)));
-        if (unlock?.tier === "FREE") shouldMask = true;
-      }
+      // Contact masking is ALWAYS enabled platform-wide — no phone sharing allowed
+      const shouldMask = true;
 
-      let { content: processedContent, originalContent, isFiltered, filterFlags } = processMessageContent(content, shouldMask);
+      let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(content, shouldMask);
 
-      // NER Layer 2: If FREE-tier mask active AND regex found nothing, run HuggingFace NER
+      // NER Layer 2: If regex found no contacts, run HuggingFace NER
       // to catch obfuscated contact-sharing (spoken numbers, social handles, etc.)
-      if (shouldMask && !isFiltered && process.env.HUGGINGFACE_API_KEY) {
+      if (contactCount === 0 && process.env.HUGGINGFACE_API_KEY) {
         try {
           const nerResult = await nerMaskObfuscated(processedContent, process.env.HUGGINGFACE_API_KEY);
           if (nerResult.caught) {
@@ -1192,10 +1294,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, convId));
 
-      // Auto-flag in moderation queue if 2+ filter hits
-      if (isFiltered && filterFlags.length >= 2) {
+      // Severity-based auto-flagging for admin attention
+      if (severity === "CRITICAL") {
+        // Hate speech / slurs — immediate admin alert
+        await createNotification("admin", "MESSAGE_FLAGGED", "🚨 Hate speech detected",
+          `Critical content flagged for immediate review (${profanityCount} violations)`, { messageId: msg.id, conversationId: convId, severity: "CRITICAL" });
+      } else if (severity === "SEVERE" || (isFiltered && filterFlags.length >= 2)) {
+        // Strong profanity or multiple filter hits — standard moderation
         await createNotification("admin", "MESSAGE_FLAGGED", "Message flagged for review",
-          "A message has been auto-flagged for moderation", { messageId: msg.id, conversationId: convId });
+          `Auto-flagged: ${filterFlags.join(", ")}`, { messageId: msg.id, conversationId: convId, severity: severity || "INFO" });
+      }
+      
+      // Notify user if contact info was blocked
+      if (contactCount > 0) {
+        await createNotification(userId, "SYSTEM", "Contact sharing blocked",
+          "Phone numbers, emails, and social media handles are not allowed in messages. Please use in-app messaging to communicate.", {});
       }
 
       // Emit via socket (only available in persistent server mode, not serverless)
