@@ -11,7 +11,7 @@ export const userRoleEnum = pgEnum("user_role", ["CUSTOMER", "PROFESSIONAL", "AD
 export const userStatusEnum = pgEnum("user_status", ["ACTIVE", "SUSPENDED", "BANNED", "PENDING"]);
 export const urgencyEnum = pgEnum("urgency", ["LOW", "NORMAL", "HIGH", "URGENT"]);
 export const jobStatusEnum = pgEnum("job_status", [
-  "DRAFT", "LIVE", "IN_DISCUSSION", "AFTERCARE_2D", "AFTERCARE_5D",
+  "DRAFT", "LIVE", "IN_DISCUSSION", "MATCHED", "BOOKED", "AFTERCARE_2D", "AFTERCARE_5D",
   "BOOSTED", "COMPLETED", "CLOSED"
 ]);
 export const unlockTierEnum = pgEnum("unlock_tier", ["FREE", "STANDARD"]);

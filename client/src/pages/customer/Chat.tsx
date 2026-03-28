@@ -223,14 +223,18 @@ export default function Chat() {
                 />
                 <Button
                   type="submit"
-                  size="icon"
+                  size="sm"
+                  className="gap-2 px-4 h-10"
                   disabled={!message.trim() || sendMessage.isPending}
                   data-testid="button-send"
                 >
                   {sendMessage.isPending ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <Send className="w-4 h-4" />
+                    <>
+                      Send
+                      <Send className="w-4 h-4" />
+                    </>
                   )}
                 </Button>
               </form>

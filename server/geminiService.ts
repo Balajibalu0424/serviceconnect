@@ -217,15 +217,35 @@ Return ONLY valid JSON:
 
 // ─── 5. AI CHAT ASSISTANT ───────────────────────────────────────────────────
 
+export interface AiChatResponse {
+  reply: string;
+  action?: "create_ticket";
+  ticketData?: { subject: string; description: string; category: string; priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT" };
+}
+
 export async function aiChatAssistant(
   userMessage: string,
   userRole: "CUSTOMER" | "PROFESSIONAL" | "ADMIN",
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = []
-): Promise<string> {
+): Promise<AiChatResponse> {
   const contextMessages = conversationHistory
     .slice(-6) // keep last 6 messages for context
     .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
     .join("\n");
+
+  const roleGuidelines: Record<string, string> = {
+    CUSTOMER: `- Help with posting jobs, understanding the process, how quotes work, and finding professionals.
+- IMPORTANT: You CANNOT actually "hire" or "accept quotes" for the user. If they ask you to hire someone, explain that they must click the "Accept Quote" button on the Job Details page.
+- If the user reports a problem, billing issue, or complaint, offer to create a support ticket.
+- Do NOT discuss professional-side features like credits, lead costs, or pro dashboards.`,
+    PROFESSIONAL: `- Help with credits, bidding strategy, profile tips, optimising quotes, and understanding lead costs.
+- Give advice on how to win more jobs, write better quotes, and improve their profile.
+- If the user reports a technical issue or billing problem, offer to create a support ticket.
+- Do NOT discuss customer-side features like posting jobs or how quotes appear to customers.`,
+    ADMIN: `- Help with platform management, metrics interpretation, user moderation, and feature flags.
+- Provide guidance on handling flagged content, suspended users, and support tickets.
+- You may discuss any aspect of the platform.`
+  };
 
   const prompt = `You are ServiceConnect AI Assistant, a helpful chatbot for an Irish home services marketplace (similar to Bark.com).
 
@@ -237,20 +257,42 @@ User's message: "${userMessage}"
 
 Guidelines:
 - Be friendly, concise, and helpful
-- For CUSTOMER: help with posting jobs, understanding the process, finding pros
-- For PROFESSIONAL: help with credits, bidding, profile tips, understanding the platform
-- For ADMIN: help with platform management, metrics, user issues
+${roleGuidelines[userRole]}
 - If asked something unrelated to ServiceConnect, politely redirect
 - Use Irish/UK English spellings
 - Keep responses under 150 words
 - NEVER share personal data or make up specific prices
 
-Respond naturally:`;
+IMPORTANT: If the user is reporting a problem, complaint, or technical issue and seems frustrated or needs formal help, respond with a JSON object like this:
+{
+  "reply": "your friendly response explaining you'll create a ticket",
+  "action": "create_ticket",
+  "ticketData": {
+    "subject": "brief subject line",
+    "description": "detailed description of the issue",
+    "category": "one of: billing, technical, account, general",
+    "priority": "LOW, MEDIUM, HIGH, or URGENT"
+  }
+}
+
+Otherwise, respond with just a JSON object:
+{ "reply": "your helpful response" }
+
+Return ONLY valid JSON — no markdown fences.`;
 
   try {
-    return await ask(prompt);
+    const raw = await ask(prompt);
+    // Try to parse as JSON
+    try {
+      const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
+      const cleaned = (jsonMatch[1] || raw).trim();
+      return JSON.parse(cleaned) as AiChatResponse;
+    } catch {
+      // If AI didn't return valid JSON, wrap the raw text
+      return { reply: raw };
+    }
   } catch {
-    return "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment, or contact our support team for help.";
+    return { reply: "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment, or contact our support team for help." };
   }
 }
 

@@ -585,7 +585,18 @@ export default function PostJob() {
             </div>
             <div className="flex flex-col gap-3 max-w-sm mx-auto">
               <Link href="/dashboard"><Button className="w-full">Watch quotes come in →</Button></Link>
-              <Link href="/post-job"><Button variant="outline" className="w-full">Post Another Job</Button></Link>
+              <Button variant="outline" className="w-full" onClick={() => {
+                setStep(1);
+                setJobId(null);
+                setOtp("");
+                setNeedsVerify(false);
+                setAiAnalysis(null);
+                setAnalyzing(false);
+                setShowProcessing(false);
+                setCatAnswers({});
+                setHiringIntent("");
+                setJob({ categoryId: "", title: "", description: "", budgetMin: "", budgetMax: "", urgency: "NORMAL", locationText: "", preferredDate: "" });
+              }}>Post Another Job</Button>
             </div>
           </div>
         )}

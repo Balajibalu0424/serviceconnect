@@ -468,7 +468,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let conditions: any[] = [
-      or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"), eq(jobs.status, "IN_DISCUSSION"))!
+      inArray(jobs.status, ["LIVE", "BOOSTED", "IN_DISCUSSION"])
     ];
     if (categoryId) conditions.push(eq(jobs.categoryId, categoryId));
 
@@ -927,7 +927,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           totalAmount: quote.amount, status: "CONFIRMED"
         }).returning();
 
-        await tx.update(jobs).set({ status: "IN_DISCUSSION", updatedAt: new Date() }).where(eq(jobs.id, quote.jobId));
+        await tx.update(jobs).set({ status: "MATCHED", updatedAt: new Date() }).where(eq(jobs.id, quote.jobId));
+
+        // Auto-reject all other pending quotes for this job
+        await tx.update(quotes)
+          .set({ status: "REJECTED", updatedAt: new Date() })
+          .where(and(
+            eq(quotes.jobId, quote.jobId),
+            eq(quotes.status, "PENDING"),
+            ne(quotes.id, quote.id)
+          ));
       });
 
       await createNotification(quote.professionalId, "QUOTE_ACCEPTED", "Your quote was accepted!",
@@ -2175,8 +2184,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { message, history } = req.body;
       if (!message) return res.status(400).json({ error: "message required" });
       const userRole = req.user!.role as "CUSTOMER" | "PROFESSIONAL" | "ADMIN";
-      const reply = await aiChatAssistant(message, userRole, history || []);
-      return res.json({ reply });
+      const result = await aiChatAssistant(message, userRole, history || []);
+
+      // If AI suggested creating a ticket, create it automatically
+      if (result.action === "create_ticket" && result.ticketData) {
+        const td = result.ticketData;
+        const [ticket] = await db.insert(supportTickets).values({
+          userId: req.user!.userId,
+          subject: td.subject,
+          description: td.description,
+          category: td.category,
+          priority: td.priority || "MEDIUM",
+          status: "OPEN",
+        }).returning();
+
+        return res.json({
+          reply: result.reply,
+          ticketCreated: true,
+          ticketId: ticket.id,
+          ticketSubject: td.subject,
+        });
+      }
+
+      return res.json({ reply: result.reply });
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 

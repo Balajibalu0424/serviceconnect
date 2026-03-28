@@ -44,7 +44,7 @@ export default function AdminUsers() {
       return res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith("/api/admin/users") });
       toast({ title: "User updated" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -62,7 +62,7 @@ export default function AdminUsers() {
       return res.json();
     },
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith("/api/admin/users") });
       toast({ title: "Credits granted", description: `New balance: ${data?.newBalance} credits` });
       setGrantTarget(null);
       setGrantAmount("");

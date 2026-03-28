@@ -35,7 +35,7 @@ export default function AdminJobs() {
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/jobs"] }); toast({ title: "Job published" }); },
+    onSuccess: () => { qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith("/api/admin/jobs") }); toast({ title: "Job published" }); },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
@@ -45,7 +45,7 @@ export default function AdminJobs() {
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/jobs"] }); toast({ title: "Job closed" }); },
+    onSuccess: () => { qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith("/api/admin/jobs") }); toast({ title: "Job closed" }); },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 

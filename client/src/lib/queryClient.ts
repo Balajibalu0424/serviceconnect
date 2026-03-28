@@ -9,20 +9,37 @@ function getApiBase() {
   return API_BASE;
 }
 
-// In-memory token store — replaces localStorage (blocked in sandboxed iframes)
+// Token store — persists to localStorage so sessions survive page refreshes.
+// Falls back to in-memory only when localStorage is unavailable (sandboxed iframes).
+const TOKEN_KEYS = { access: "sc_access_token", refresh: "sc_refresh_token" } as const;
+
+function safeGetItem(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function safeSetItem(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* sandboxed — ignore */ }
+}
+function safeRemoveItem(key: string) {
+  try { localStorage.removeItem(key); } catch { /* sandboxed — ignore */ }
+}
+
 const tokenStore: { accessToken: string | null; refreshToken: string | null } = {
-  accessToken: null,
-  refreshToken: null,
+  accessToken: safeGetItem(TOKEN_KEYS.access),
+  refreshToken: safeGetItem(TOKEN_KEYS.refresh),
 };
 
 export function setTokens(accessToken: string, refreshToken: string) {
   tokenStore.accessToken = accessToken;
   tokenStore.refreshToken = refreshToken;
+  safeSetItem(TOKEN_KEYS.access, accessToken);
+  safeSetItem(TOKEN_KEYS.refresh, refreshToken);
 }
 
 export function clearTokens() {
   tokenStore.accessToken = null;
   tokenStore.refreshToken = null;
+  safeRemoveItem(TOKEN_KEYS.access);
+  safeRemoveItem(TOKEN_KEYS.refresh);
 }
 
 export function getAccessToken() {
@@ -56,6 +73,7 @@ export async function apiRequest(method: string, url: string, body?: unknown) {
       if (refreshRes.ok) {
         const { accessToken } = await refreshRes.json();
         tokenStore.accessToken = accessToken;
+        safeSetItem(TOKEN_KEYS.access, accessToken);
         headers["Authorization"] = `Bearer ${accessToken}`;
         return fetch(`${getApiBase()}${url}`, {
           method, headers, body: body ? JSON.stringify(body) : undefined

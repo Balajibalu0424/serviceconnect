@@ -53,7 +53,18 @@ export default function AiAssistantWidget() {
       });
 
       const data = await res.json();
-      setMessages([...newMessages, { role: "assistant", content: data.reply || "Sorry, something went wrong." }]);
+      const assistantReply = data.reply || "Sorry, something went wrong.";
+      const updatedMessages: Message[] = [...newMessages, { role: "assistant", content: assistantReply }];
+
+      // If AI created a support ticket, append a system-style confirmation
+      if (data.ticketCreated) {
+        updatedMessages.push({
+          role: "assistant",
+          content: `✅ Support ticket created: "${data.ticketSubject}"\nYou can track it in your Support page.`,
+        });
+      }
+
+      setMessages(updatedMessages);
     } catch {
       setMessages([...newMessages, { role: "assistant", content: "I\u2019m having trouble connecting. Please try again." }]);
     } finally {
