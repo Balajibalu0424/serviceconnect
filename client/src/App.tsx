@@ -4,6 +4,9 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { SocketProvider } from "@/contexts/SocketContext";
+import { CallProvider } from "@/contexts/CallContext";
+import { CallOverlay } from "@/components/CallOverlay";
 import AiAssistantWidget from "@/components/ai/AiAssistantWidget";
 
 
@@ -173,10 +176,14 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AppRoutes />
-        <AiAssistantWidget />
-        <Toaster />
-
+        <SocketProvider>
+          <CallProvider>
+            <AppRoutes />
+            <CallOverlay />
+            <AiAssistantWidget />
+            <Toaster />
+          </CallProvider>
+        </SocketProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

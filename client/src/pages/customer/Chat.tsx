@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Send, Loader2, ArrowLeft, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCall } from "@/contexts/CallContext";
 
 export default function Chat() {
   const { user } = useAuth();
@@ -20,6 +21,7 @@ export default function Chat() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { initiateCall } = useCall();
 
   const { data: conversations = [], isLoading: loadingConvs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations"],
@@ -192,21 +194,21 @@ export default function Chat() {
                 </div>
                 {/* Request Call button */}
                 <Button
-                  variant="outline"
+                  variant="default"
                   size="sm"
-                  className="gap-1.5 text-xs"
-                  disabled={requestCall.isPending}
+                  className="gap-1.5 text-xs bg-green-500 hover:bg-green-600 shadow-lg"
                   onClick={() => {
                     const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id);
                     if (otherParticipant) {
-                      requestCall.mutate(otherParticipant.id);
+                      initiateCall(otherParticipant.id, `${otherParticipant.firstName} ${otherParticipant.lastName}`);
+                      requestCall.mutate(otherParticipant.id); // fallback db log
                     } else {
                       toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
                     }
                   }}
                 >
-                  <Phone className="w-3.5 h-3.5" />
-                  {requestCall.isPending ? "Requesting..." : "Request Call"}
+                  <Phone className="w-4 h-4" />
+                  Request Call
                 </Button>
               </div>
 

@@ -17,3 +17,5 @@ vite.config.ts.*
 *.tsbuildinfo
 
 .vercel
+
+*.txt

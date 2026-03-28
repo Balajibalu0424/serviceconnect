@@ -1,6 +1,5 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { Server as SocketIOServer } from "socket.io";
 import { db } from "./db";
 import {
   users, userSessions, professionalProfiles, serviceCategories,
@@ -10,6 +9,7 @@ import {
   spinWheelEvents, supportTickets, ticketMessages, notifications,
   adminAuditLogs, platformMetrics, featureFlags, callRequests
 } from "@shared/schema";
+import { pusher } from "./pusher";
 import {
   eq, and, ne, or, sql, lt, gt, gte, lte, desc, asc,
   isNull, isNotNull, inArray, count, sum, avg, like, ilike
@@ -36,9 +36,19 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder"
   apiVersion: "2024-12-18.acacia"
 });
 
+// ─── Pusher Initialization (Imported from ./pusher) ──────────────────────────
+
+
 // ─── Helper: create notification ─────────────────────────────────────────────
 async function createNotification(userId: string, type: string, title: string, message: string, data: object = {}) {
   await db.insert(notifications).values({ userId, type, title, message, data });
+  
+  // Real-time push via Pusher
+  try {
+    await pusher.trigger(`private-user-${userId}`, "new_notification", { type, title, message, data });
+  } catch (err) {
+    console.error("Pusher trigger error (notification):", err);
+  }
 }
 
 // ─── Helper: credit engine (atomic) ──────────────────────────────────────────
@@ -72,43 +82,52 @@ async function addCredits(userId: string, amount: number, type: any, description
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  // ─── Socket.io ──────────────────────────────────────────────────────────────
-  // Socket.io requires a persistent server — skip in Vercel serverless.
-  // In serverless, httpServer.listening is false (never bound to a port).
-  const isServerless = !httpServer.listening && process.env.VERCEL === "1";
+  // ─── Pusher Endpoints ──────────────────────────────────────────────────────
+  
+  // Auth for private channels
+  // Unified Pusher Auth (Handles both signin and channel subscription)
+  app.post("/api/pusher/auth", (req: any, res) => {
+    if (!req.user) return res.status(401).send("Unauthorized");
+    const socketId = req.body.socket_id;
+    const channel = req.body.channel_name;
 
-  let io: SocketIOServer | null = null;
-  const onlineUsers = new Map<string, string>(); // userId → socketId
+    if (channel) {
+      // Channel authorization (private-*)
+      const authResponse = pusher.authorizeChannel(socketId, channel);
+      return res.send(authResponse);
+    } else {
+      // User authentication (pusher.signin())
+      const userData = {
+        id: req.user.id.toString(),
+        user_info: {
+          name: `${req.user.firstName} ${req.user.lastName}`,
+          email: req.user.email
+        }
+      };
+      const authResponse = pusher.authenticateUser(socketId, userData);
+      return res.send(authResponse);
+    }
+  });
 
-  if (!isServerless) {
-    io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  // Relay signals for WebRTC or real-time events between users
+  app.post("/api/pusher/trigger", requireAuth, async (req: AuthRequest, res) => {
+    const { to, event, data } = req.body;
+    if (!to || !event) return res.status(400).send("Missing target or event");
 
-    io.on("connection", (socket) => {
-      const userId = socket.handshake.auth?.userId;
-      if (userId) onlineUsers.set(userId, socket.id);
-
-      socket.on("join_conversation", (conversationId: string) => {
-        socket.join(`conv_${conversationId}`);
+    try {
+      await pusher.trigger(`private-user-${to}`, event, {
+        from: req.user.id,
+        data,
       });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Pusher trigger error:", err);
+      res.status(500).json({ error: "Failed to relay signal" });
+    }
+  });
 
-      socket.on("leave_conversation", (conversationId: string) => {
-        socket.leave(`conv_${conversationId}`);
-      });
-
-      socket.on("typing", ({ conversationId, isTyping }: any) => {
-        socket.to(`conv_${conversationId}`).emit("user_typing", { userId, isTyping });
-      });
-
-      socket.on("disconnect", () => {
-        if (userId) onlineUsers.delete(userId);
-      });
-    });
-
-    // Start aftercare scheduler only in persistent server mode
-    startAftercareScheduler(createNotification, io);
-  } else {
-    console.log("[serverless] Socket.io and cron scheduler disabled in Vercel environment");
-  }
+  // Start aftercare scheduler (we'll need to update this to work without IO if needed)
+  startAftercareScheduler(createNotification, null);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // AUTH ROUTES

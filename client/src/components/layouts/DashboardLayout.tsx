@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
+import { useSocket } from "@/contexts/SocketContext";
 
 interface NavItem { label: string; href: string; icon: any; badge?: number; }
 
@@ -58,6 +60,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleNewNotif = () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    };
+    socket.on("new_notification", handleNewNotif);
+    return () => {
+      socket.off("new_notification", handleNewNotif);
+    };
+  }, [socket]);
 
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
   const unreadCount = notifData?.unreadCount || 0;
