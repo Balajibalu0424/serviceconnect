@@ -191,21 +191,23 @@ export default function Chat() {
                   <p className="text-xs text-muted-foreground">Active now</p>
                 </div>
                 {/* Request Call button */}
-                {activeConv?.participants?.length > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5 text-xs"
-                    disabled={requestCall.isPending}
-                    onClick={() => {
-                      const otherParticipant = activeConv.participants.find((p: any) => p.id !== user?.id);
-                      if (otherParticipant) requestCall.mutate(otherParticipant.id);
-                    }}
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    {requestCall.isPending ? "Requesting..." : "Request Call"}
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  disabled={requestCall.isPending}
+                  onClick={() => {
+                    const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+                    if (otherParticipant) {
+                      requestCall.mutate(otherParticipant.id);
+                    } else {
+                      toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
+                    }
+                  }}
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  {requestCall.isPending ? "Requesting..." : "Request Call"}
+                </Button>
               </div>
 
               {/* Messages */}
