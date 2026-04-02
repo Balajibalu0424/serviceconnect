@@ -440,7 +440,20 @@ export default function PostJob() {
             </div>
 
             {/* AI summary + hiring intent */}
-            {(aiAnalysis || hiringIntent) && (
+            {analyzing ? (
+              <Card className="border-primary/20 bg-primary/5">
+                <CardContent className="pt-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-primary animate-pulse">
+                    <Sparkles className="w-4 h-4" />
+                    AI is analyzing your job request...
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-4 bg-primary/10 rounded w-3/4 animate-pulse"></div>
+                    <div className="h-4 bg-primary/10 rounded w-1/2 animate-pulse"></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (aiAnalysis || hiringIntent) && (
               <Card className="border-primary/20 bg-primary/5">
                 <CardContent className="pt-4 space-y-2">
                   {aiAnalysis && (
@@ -468,24 +481,49 @@ export default function PostJob() {
               <>
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <Label className="text-muted-foreground">First Name</Label>
-                    <p className="font-medium">{account.firstName || "Not provided"}</p>
+                    <Label>First Name</Label>
+                    <Input 
+                      type="text" 
+                      value={account.firstName} 
+                      onChange={e => setAccount(a => ({...a, firstName: e.target.value}))} 
+                      required 
+                      placeholder="Jane" 
+                      className="mt-1" 
+                    />
                   </div>
                   <div>
-                    <Label className="text-muted-foreground">Last Name</Label>
-                    <p className="font-medium">{account.lastName || "Not provided"}</p>
+                    <Label>Last Name</Label>
+                    <Input 
+                      type="text" 
+                      value={account.lastName} 
+                      onChange={e => setAccount(a => ({...a, lastName: e.target.value}))} 
+                      required 
+                      placeholder="Doe" 
+                      className="mt-1" 
+                    />
                   </div>
                 </div>
                 <div className="mb-3">
-                  <Label className="text-muted-foreground">Email</Label>
-                  <p className="font-medium">{account.email || "Not provided"}</p>
+                  <Label>Email</Label>
+                  <Input 
+                    type="email" 
+                    value={account.email} 
+                    onChange={e => setAccount(a => ({...a, email: e.target.value}))} 
+                    required 
+                    placeholder="jane@example.com" 
+                    className="mt-1" 
+                  />
                 </div>
-                {account.phone && (
-                  <div className="mb-4">
-                    <Label className="text-muted-foreground">Phone</Label>
-                    <p className="font-medium">{account.phone}</p>
-                  </div>
-                )}
+                <div className="mb-4">
+                  <Label>Phone (Optional)</Label>
+                  <Input 
+                    type="tel" 
+                    value={account.phone} 
+                    onChange={e => setAccount(a => ({...a, phone: e.target.value}))} 
+                    placeholder="08X XXX XXXX" 
+                    className="mt-1" 
+                  />
+                </div>
                 <div className="pt-2 border-t border-border">
                   <Label>Create password to secure your account</Label>
                   <Input type="password" value={account.password} onChange={e => setAccount(a => ({...a, password: e.target.value}))} minLength={8} required data-testid="input-password" placeholder="••••••••" className="mt-1" />

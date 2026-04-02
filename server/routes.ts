@@ -254,6 +254,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
 
+      if (!email || !password || !firstName || !lastName || !title || !description || !categoryId) {
+        return res.status(400).json({ error: "Missing required fields for customer onboarding." });
+      }
+
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
 
@@ -670,6 +674,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
       if (!job) return res.status(404).json({ error: "Job not found" });
+
+      if (job.customerId === proId) {
+        return res.status(400).json({ error: "You cannot unlock a job you posted yourself." });
+      }
 
       const existing = await db.select().from(jobUnlocks)
         .where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));

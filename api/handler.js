@@ -32399,9 +32399,6 @@ var require_jsonwebtoken = __commonJS({
 // api/index.ts
 var import_express = __toESM(require_express2(), 1);
 
-// server/routes.ts
-import { Server as SocketIOServer } from "socket.io";
-
 // node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib4(), 1);
 var Client = import_lib.default.Client;
@@ -39101,6 +39098,8 @@ __export(schema_exports, {
   aftercareBranchEnum: () => aftercareBranchEnum,
   bookingStatusEnum: () => bookingStatusEnum,
   bookings: () => bookings,
+  callRequestStatusEnum: () => callRequestStatusEnum,
+  callRequests: () => callRequests,
   convStatusEnum: () => convStatusEnum,
   convTypeEnum: () => convTypeEnum,
   conversationParticipants: () => conversationParticipants,
@@ -43441,6 +43440,8 @@ var jobStatusEnum = pgEnum("job_status", [
   "DRAFT",
   "LIVE",
   "IN_DISCUSSION",
+  "MATCHED",
+  "BOOKED",
   "AFTERCARE_2D",
   "AFTERCARE_5D",
   "BOOSTED",
@@ -43827,6 +43828,22 @@ var featureFlags = pgTable("feature_flags", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`)
 });
+var callRequestStatusEnum = pgEnum("call_request_status", ["PENDING", "ACCEPTED", "DECLINED", "EXPIRED", "COMPLETED"]);
+var callRequests = pgTable("call_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requesterId: varchar("requester_id").notNull().references(() => users.id),
+  targetId: varchar("target_id").notNull().references(() => users.id),
+  jobId: varchar("job_id").references(() => jobs.id),
+  bookingId: varchar("booking_id").references(() => bookings.id),
+  status: callRequestStatusEnum("status").notNull().default("PENDING"),
+  reason: text("reason"),
+  respondedAt: timestamp("responded_at"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`)
+}, (t) => [
+  index("call_req_requester_idx").on(t.requesterId),
+  index("call_req_target_idx").on(t.targetId)
+]);
 var insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 var insertJobSchema = createInsertSchema(jobs).omit({ id: true, createdAt: true, updatedAt: true });
 var insertQuoteSchema = createInsertSchema(quotes).omit({ id: true, createdAt: true, updatedAt: true });
@@ -43840,6 +43857,19 @@ var pool = new Pool({
   connectionString: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/serviceconnect"
 });
 var db = drizzle(pool, { schema: schema_exports });
+
+// server/pusher.ts
+import Pusher from "pusher";
+if (!process.env.PUSHER_APP_ID || !process.env.PUSHER_KEY || !process.env.PUSHER_SECRET) {
+  console.warn("Pusher environment variables are missing! Real-time notifications won't work.");
+}
+var pusher = new Pusher({
+  appId: process.env.PUSHER_APP_ID || "",
+  key: process.env.PUSHER_KEY || "",
+  secret: process.env.PUSHER_SECRET || "",
+  cluster: process.env.PUSHER_CLUSTER || "mt1",
+  useTLS: true
+});
 
 // server/auth.ts
 var import_jsonwebtoken = __toESM(require_jsonwebtoken(), 1);
@@ -43888,30 +43918,271 @@ function requireRole(...roles) {
 }
 
 // server/profanityFilter.ts
-var CONTACT_PATTERNS = [
-  { regex: /(\+353[\s\-]?\d{2}[\s\-]?\d{3}[\s\-]?\d{4}|\+353\d{9})/gi, flag: "IE_PHONE" },
-  { regex: /(08[3-9][\s\-]?\d{3}[\s\-]?\d{4}|08[3-9]\d{7})/gi, flag: "IE_MOBILE" },
-  { regex: /(\+44[\s\-]?\d{2,4}[\s\-]?\d{3,4}[\s\-]?\d{4}|\+44\d{10})/gi, flag: "UK_PHONE" },
-  { regex: /([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, flag: "EMAIL" },
-  { regex: /(https?:\/\/[^\s]+)/gi, flag: "URL" },
-  { regex: /(www\.[^\s]+\.[^\s]+)/gi, flag: "URL" },
-  { regex: /(@[a-zA-Z0-9_]{2,50})/gi, flag: "SOCIAL_HANDLE" },
-  { regex: /(\b0\d{9,10}\b)/gi, flag: "PHONE_GENERIC" }
+var PROFANITY_LIST = [
+  // MILD — common profanity
+  { word: "damn", severity: "MILD" },
+  { word: "dammit", severity: "MILD" },
+  { word: "crap", severity: "MILD" },
+  { word: "hell", severity: "MILD" },
+  { word: "piss", severity: "MILD" },
+  { word: "pissed", severity: "MILD" },
+  { word: "arse", severity: "MILD" },
+  { word: "arsehole", severity: "MILD" },
+  { word: "bollocks", severity: "MILD" },
+  { word: "bugger", severity: "MILD" },
+  { word: "bloody", severity: "MILD" },
+  { word: "shag", severity: "MILD" },
+  { word: "sod", severity: "MILD" },
+  { word: "git", severity: "MILD" },
+  { word: "wanker", severity: "MILD" },
+  { word: "tosser", severity: "MILD" },
+  { word: "minger", severity: "MILD" },
+  { word: "daft", severity: "MILD" },
+  { word: "gobshite", severity: "MILD" },
+  { word: "eejit", severity: "MILD" },
+  // SEVERE — strong profanity
+  { word: "fuck", severity: "SEVERE" },
+  { word: "fucker", severity: "SEVERE" },
+  { word: "fucking", severity: "SEVERE" },
+  { word: "fucked", severity: "SEVERE" },
+  { word: "fucks", severity: "SEVERE" },
+  { word: "motherfucker", severity: "SEVERE" },
+  { word: "motherfucking", severity: "SEVERE" },
+  { word: "shit", severity: "SEVERE" },
+  { word: "shitty", severity: "SEVERE" },
+  { word: "bullshit", severity: "SEVERE" },
+  { word: "horseshit", severity: "SEVERE" },
+  { word: "dipshit", severity: "SEVERE" },
+  { word: "shithead", severity: "SEVERE" },
+  { word: "ass", severity: "SEVERE" },
+  { word: "asshole", severity: "SEVERE" },
+  { word: "arsehole", severity: "SEVERE" },
+  { word: "bitch", severity: "SEVERE" },
+  { word: "bitches", severity: "SEVERE" },
+  { word: "bitching", severity: "SEVERE" },
+  { word: "bastard", severity: "SEVERE" },
+  { word: "dick", severity: "SEVERE" },
+  { word: "dickhead", severity: "SEVERE" },
+  { word: "cock", severity: "SEVERE" },
+  { word: "cocksucker", severity: "SEVERE" },
+  { word: "prick", severity: "SEVERE" },
+  { word: "twat", severity: "SEVERE" },
+  { word: "cunt", severity: "SEVERE" },
+  { word: "slut", severity: "SEVERE" },
+  { word: "whore", severity: "SEVERE" },
+  { word: "skank", severity: "SEVERE" },
+  { word: "wank", severity: "SEVERE" },
+  { word: "bellend", severity: "SEVERE" },
+  { word: "knob", severity: "SEVERE" },
+  { word: "knobhead", severity: "SEVERE" },
+  { word: "muppet", severity: "SEVERE" },
+  { word: "pillock", severity: "SEVERE" },
+  { word: "plonker", severity: "SEVERE" },
+  { word: "numpty", severity: "SEVERE" },
+  { word: "scumbag", severity: "SEVERE" },
+  { word: "douchebag", severity: "SEVERE" },
+  { word: "jackass", severity: "SEVERE" },
+  // CRITICAL — slurs and hate speech
+  { word: "nigger", severity: "CRITICAL" },
+  { word: "nigga", severity: "CRITICAL" },
+  { word: "negro", severity: "CRITICAL" },
+  { word: "coon", severity: "CRITICAL" },
+  { word: "darkie", severity: "CRITICAL" },
+  { word: "spic", severity: "CRITICAL" },
+  { word: "spick", severity: "CRITICAL" },
+  { word: "wetback", severity: "CRITICAL" },
+  { word: "beaner", severity: "CRITICAL" },
+  { word: "chink", severity: "CRITICAL" },
+  { word: "gook", severity: "CRITICAL" },
+  { word: "jap", severity: "CRITICAL" },
+  { word: "paki", severity: "CRITICAL" },
+  { word: "raghead", severity: "CRITICAL" },
+  { word: "towelhead", severity: "CRITICAL" },
+  { word: "camel jockey", severity: "CRITICAL" },
+  { word: "sandnigger", severity: "CRITICAL" },
+  { word: "kike", severity: "CRITICAL" },
+  { word: "hymie", severity: "CRITICAL" },
+  { word: "heeb", severity: "CRITICAL" },
+  { word: "cracker", severity: "CRITICAL" },
+  { word: "honky", severity: "CRITICAL" },
+  { word: "whitey", severity: "CRITICAL" },
+  { word: "gringo", severity: "CRITICAL" },
+  { word: "fag", severity: "CRITICAL" },
+  { word: "faggot", severity: "CRITICAL" },
+  { word: "dyke", severity: "CRITICAL" },
+  { word: "homo", severity: "CRITICAL" },
+  { word: "lesbo", severity: "CRITICAL" },
+  { word: "tranny", severity: "CRITICAL" },
+  { word: "shemale", severity: "CRITICAL" },
+  { word: "retard", severity: "CRITICAL" },
+  { word: "retarded", severity: "CRITICAL" },
+  { word: "spaz", severity: "CRITICAL" },
+  { word: "spastic", severity: "CRITICAL" },
+  { word: "cripple", severity: "CRITICAL" },
+  { word: "midget", severity: "CRITICAL" },
+  { word: "mongoloid", severity: "CRITICAL" },
+  { word: "gypo", severity: "CRITICAL" },
+  { word: "pikey", severity: "CRITICAL" },
+  { word: "knacker", severity: "CRITICAL" },
+  { word: "tinker", severity: "CRITICAL" },
+  { word: "traveller scum", severity: "CRITICAL" },
+  { word: "kill yourself", severity: "CRITICAL" },
+  { word: "kys", severity: "CRITICAL" },
+  { word: "go die", severity: "CRITICAL" },
+  { word: "neck yourself", severity: "CRITICAL" }
 ];
-var REPLACEMENT = "[contact hidden \u2014 upgrade to Standard for full access]";
-function cleanProfanity(text2) {
-  if (!text2) return { cleaned: text2, flagged: false };
-  const badWords = ["fuck", "shit", "damn", "bitch", "crap"];
-  let cleaned = text2;
-  let flagged = false;
-  for (const word of badWords) {
-    const regex = new RegExp(word, "gi");
-    if (regex.test(cleaned)) {
-      flagged = true;
-      cleaned = cleaned.replace(new RegExp(word, "gi"), "*".repeat(word.length));
+var LEET_MAP = {
+  "0": "o",
+  "1": "i",
+  "3": "e",
+  "4": "a",
+  "5": "s",
+  "7": "t",
+  "@": "a",
+  "$": "s",
+  "!": "i",
+  "*": "",
+  "+": "t",
+  "(": "c",
+  "|": "i",
+  "\xA1": "i",
+  "\xA3": "l"
+};
+function normalizeLeetSpeak(text2) {
+  let normalized = text2.toLowerCase();
+  for (const [leet, normal] of Object.entries(LEET_MAP)) {
+    normalized = normalized.split(leet).join(normal);
+  }
+  normalized = normalized.replace(/[\.\-_\s]+(?=[a-z])/g, "");
+  return normalized;
+}
+function detectProfanity(text2) {
+  if (!text2) return { matches: [], highestSeverity: null };
+  const normalizedText = normalizeLeetSpeak(text2);
+  const matches = [];
+  let highestSeverity = null;
+  const severityOrder = { MILD: 1, SEVERE: 2, CRITICAL: 3 };
+  for (const entry of PROFANITY_LIST) {
+    const wordPattern = entry.word.includes(" ") ? new RegExp(entry.word.replace(/\s+/g, "\\s+"), "gi") : new RegExp(`\\b${entry.word}\\b`, "gi");
+    if (wordPattern.test(text2.toLowerCase()) || wordPattern.test(normalizedText)) {
+      matches.push({ word: entry.word, severity: entry.severity });
+      if (!highestSeverity || severityOrder[entry.severity] > severityOrder[highestSeverity]) {
+        highestSeverity = entry.severity;
+      }
     }
   }
-  return { cleaned, flagged };
+  return { matches, highestSeverity };
+}
+function cleanProfanity(text2) {
+  if (!text2) return { cleaned: text2, flagged: false, severity: null, matchCount: 0 };
+  const { matches, highestSeverity } = detectProfanity(text2);
+  if (matches.length === 0) return { cleaned: text2, flagged: false, severity: null, matchCount: 0 };
+  let cleaned = text2;
+  for (const match of matches) {
+    if (match.word.includes(" ")) {
+      const multiWordRegex = new RegExp(match.word.replace(/\s+/g, "\\s+"), "gi");
+      cleaned = cleaned.replace(multiWordRegex, (m) => "*".repeat(m.length));
+    } else {
+      const wordRegex = new RegExp(`\\b${match.word}\\b`, "gi");
+      cleaned = cleaned.replace(wordRegex, (m) => "*".repeat(m.length));
+    }
+  }
+  const leetPatterns = [
+    { pattern: /f[\*\.\-_]?[uü][\*\.\-_]?c[\*\.\-_]?k/gi, replace: "****" },
+    { pattern: /\$h[\!1i]t/gi, replace: "****" },
+    { pattern: /a\$\$/gi, replace: "***" },
+    { pattern: /b[\!1]tch/gi, replace: "*****" },
+    { pattern: /d[\!1]ck/gi, replace: "****" },
+    { pattern: /c[\*\.\-_]?[uü]nt/gi, replace: "****" },
+    { pattern: /n[\!1]gg[ea3]r?/gi, replace: "******" },
+    { pattern: /f[\@4]gg?[o0]t/gi, replace: "******" },
+    { pattern: /r[e3]t[\@4]rd/gi, replace: "******" },
+    { pattern: /wh[o0]r[e3]/gi, replace: "*****" },
+    { pattern: /\$lut/gi, replace: "****" },
+    { pattern: /\$[ck]um/gi, replace: "****" }
+  ];
+  for (const { pattern, replace } of leetPatterns) {
+    if (pattern.test(cleaned)) {
+      cleaned = cleaned.replace(pattern, replace);
+    }
+  }
+  return { cleaned, flagged: true, severity: highestSeverity, matchCount: matches.length };
+}
+var CONTACT_REPLACEMENT = "[contact info removed \u2014 use in-app messaging]";
+var CONTACT_PATTERNS = [
+  // Irish phone numbers
+  { regex: /(\+353[\s\-]?\d{2}[\s\-]?\d{3}[\s\-]?\d{4}|\+353\d{9})/gi, flag: "IE_PHONE" },
+  { regex: /(08[3-9][\s\-]?\d{3}[\s\-]?\d{4}|08[3-9]\d{7})/gi, flag: "IE_MOBILE" },
+  // UK phone numbers
+  { regex: /(\+44[\s\-]?\d{2,4}[\s\-]?\d{3,4}[\s\-]?\d{4}|\+44\d{10})/gi, flag: "UK_PHONE" },
+  { regex: /(07\d{3}[\s\-]?\d{3}[\s\-]?\d{3}|07\d{9})/gi, flag: "UK_MOBILE" },
+  // US/International phone numbers
+  { regex: /(\+1[\s\-]?\d{3}[\s\-]?\d{3}[\s\-]?\d{4}|\+1\d{10})/gi, flag: "US_PHONE" },
+  { regex: /(\+\d{1,4}[\s\-]?\d{6,14})/gi, flag: "INTL_PHONE" },
+  // Generic: any sequence of 7+ digits with optional separators
+  { regex: /\b(\d[\s\-\.]*){7,15}\b/gi, flag: "PHONE_GENERIC" },
+  // Email addresses
+  { regex: /([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, flag: "EMAIL" },
+  // Email obfuscation ("name at gmail dot com")
+  { regex: /\b[a-zA-Z0-9._%+-]+\s*(?:\bat\b|\[at\]|@)\s*[a-zA-Z0-9.-]+\s*(?:\bdot\b|\[dot\]|\.)\s*(?:com|ie|co\.uk|net|org|io)\b/gi, flag: "EMAIL_OBFUSCATED" },
+  // URLs
+  { regex: /(https?:\/\/[^\s]+)/gi, flag: "URL" },
+  { regex: /(www\.[^\s]+\.[^\s]+)/gi, flag: "URL" },
+  // Social media handles
+  { regex: /(@[a-zA-Z0-9_]{2,50})/gi, flag: "SOCIAL_HANDLE" },
+  // Social media URLs
+  { regex: /((?:instagram|facebook|fb|twitter|tiktok|snapchat|linkedin|youtube|whatsapp|wa|telegram|signal)\.(?:com|me|tv|io)[\/\w\-\.]*)/gi, flag: "SOCIAL_URL" },
+  // Social media invitations
+  { regex: /(?:add|follow|find|dm|message|text|call|ring|contact|reach)\s+(?:me|us)\s+(?:on|at|via|through)\s+(?:instagram|insta|facebook|fb|whatsapp|wa|snap|snapchat|twitter|tiktok|telegram|signal|viber)/gi, flag: "SOCIAL_INVITE" },
+  // WhatsApp / messaging links
+  { regex: /(?:wa\.me|chat\.whatsapp\.com|t\.me|m\.me)\/[^\s]+/gi, flag: "MESSAGING_LINK" },
+  // Eircode (Irish postal codes — can be used as contact vectors)
+  { regex: /\b[A-Za-z]\d{2}\s?[A-Za-z0-9]{4}\b/gi, flag: "EIRCODE" }
+];
+var NUMBER_WORDS = {
+  "zero": "0",
+  "oh": "0",
+  "o": "0",
+  "one": "1",
+  "two": "2",
+  "three": "3",
+  "four": "4",
+  "five": "5",
+  "six": "6",
+  "seven": "7",
+  "eight": "8",
+  "nine": "9",
+  "wan": "1",
+  "tree": "3",
+  "fiver": "5",
+  "sixer": "6"
+  // Irish slang
+};
+function detectSpelledOutNumbers(text2) {
+  const lower = text2.toLowerCase();
+  const words = lower.split(/[\s,\-\.]+/);
+  let digitSequence = "";
+  let startedSequence = false;
+  for (const word of words) {
+    if (NUMBER_WORDS[word] !== void 0 || /^\d$/.test(word)) {
+      digitSequence += NUMBER_WORDS[word] || word;
+      startedSequence = true;
+    } else if (startedSequence) {
+      if (digitSequence.length >= 7) {
+        return { hasNumber: true, flag: "SPOKEN_PHONE" };
+      }
+      digitSequence = "";
+      startedSequence = false;
+    }
+  }
+  if (digitSequence.length >= 7) {
+    return { hasNumber: true, flag: "SPOKEN_PHONE" };
+  }
+  const mixedPattern = /\b\d{2,4}[\s\-]*((?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|wan|tree)[\s\-]*){4,})/gi;
+  if (mixedPattern.test(lower)) {
+    return { hasNumber: true, flag: "MIXED_PHONE" };
+  }
+  return { hasNumber: false, flag: "" };
 }
 function maskContactInfo(text2) {
   if (!text2) return { masked: text2, flags: [], hitCount: 0 };
@@ -43919,12 +44190,20 @@ function maskContactInfo(text2) {
   const flags = [];
   let hitCount = 0;
   for (const { regex, flag } of CONTACT_PATTERNS) {
+    regex.lastIndex = 0;
     const matches = masked.match(regex);
     if (matches && matches.length > 0) {
       flags.push(flag);
       hitCount += matches.length;
-      masked = masked.replace(regex, REPLACEMENT);
+      regex.lastIndex = 0;
+      masked = masked.replace(regex, CONTACT_REPLACEMENT);
     }
+  }
+  const spokenResult = detectSpelledOutNumbers(masked);
+  if (spokenResult.hasNumber) {
+    flags.push(spokenResult.flag);
+    hitCount += 1;
+    masked = masked + "\n\n\u26A0\uFE0F [Potential phone number detected and hidden \u2014 please use in-app messaging]";
   }
   return { masked, flags, hitCount };
 }
@@ -43933,25 +44212,34 @@ function processMessageContent(content, shouldMaskContacts) {
   let processed = content;
   const flags = [];
   let isFiltered = false;
-  const { cleaned, flagged } = cleanProfanity(processed);
+  let severity = null;
+  let profanityCount = 0;
+  let contactCount = 0;
+  const { cleaned, flagged, severity: profSeverity, matchCount } = cleanProfanity(processed);
   if (flagged) {
     processed = cleaned;
     flags.push("PROFANITY");
+    if (profSeverity === "CRITICAL") flags.push("HATE_SPEECH");
+    if (profSeverity === "SEVERE") flags.push("STRONG_PROFANITY");
     isFiltered = true;
+    severity = profSeverity;
+    profanityCount = matchCount;
   }
-  if (shouldMaskContacts) {
-    const { masked, flags: contactFlags, hitCount } = maskContactInfo(processed);
-    if (hitCount > 0) {
-      processed = masked;
-      flags.push(...contactFlags);
-      isFiltered = true;
-    }
+  const { masked, flags: contactFlags, hitCount } = maskContactInfo(processed);
+  if (hitCount > 0) {
+    processed = masked;
+    flags.push(...contactFlags);
+    isFiltered = true;
+    contactCount = hitCount;
   }
   return {
     content: processed,
     originalContent: isFiltered ? original : null,
     isFiltered,
-    filterFlags: flags
+    filterFlags: flags,
+    severity,
+    profanityCount,
+    contactCount
   };
 }
 
@@ -44052,7 +44340,7 @@ async function runAftercareCheck(createNotification2) {
   }
   console.log("[Aftercare] Check complete");
 }
-function startAftercareScheduler(createNotification2, io) {
+function startAftercareScheduler(createNotification2, io2) {
   cron.schedule("0 * * * *", () => runAftercareCheck(createNotification2));
   console.log("[Aftercare Scheduler] Started \u2014 runs every hour");
 }
@@ -45748,6 +46036,19 @@ Return ONLY valid JSON:
 }
 async function aiChatAssistant(userMessage, userRole, conversationHistory = []) {
   const contextMessages = conversationHistory.slice(-6).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
+  const roleGuidelines = {
+    CUSTOMER: `- Help with posting jobs, understanding the process, how quotes work, and finding professionals.
+- IMPORTANT: You CANNOT actually "hire" or "accept quotes" for the user. If they ask you to hire someone, explain that they must click the "Accept Quote" button on the Job Details page.
+- If the user reports a problem, billing issue, or complaint, offer to create a support ticket.
+- Do NOT discuss professional-side features like credits, lead costs, or pro dashboards.`,
+    PROFESSIONAL: `- Help with credits, bidding strategy, profile tips, optimising quotes, and understanding lead costs.
+- Give advice on how to win more jobs, write better quotes, and improve their profile.
+- If the user reports a technical issue or billing problem, offer to create a support ticket.
+- Do NOT discuss customer-side features like posting jobs or how quotes appear to customers.`,
+    ADMIN: `- Help with platform management, metrics interpretation, user moderation, and feature flags.
+- Provide guidance on handling flagged content, suspended users, and support tickets.
+- You may discuss any aspect of the platform.`
+  };
   const prompt = `You are ServiceConnect AI Assistant, a helpful chatbot for an Irish home services marketplace (similar to Bark.com).
 
 The user is a ${userRole.toLowerCase()}.
@@ -45760,19 +46061,39 @@ User's message: "${userMessage}"
 
 Guidelines:
 - Be friendly, concise, and helpful
-- For CUSTOMER: help with posting jobs, understanding the process, finding pros
-- For PROFESSIONAL: help with credits, bidding, profile tips, understanding the platform
-- For ADMIN: help with platform management, metrics, user issues
+${roleGuidelines[userRole]}
 - If asked something unrelated to ServiceConnect, politely redirect
 - Use Irish/UK English spellings
 - Keep responses under 150 words
 - NEVER share personal data or make up specific prices
 
-Respond naturally:`;
+IMPORTANT: If the user is reporting a problem, complaint, or technical issue and seems frustrated or needs formal help, respond with a JSON object like this:
+{
+  "reply": "your friendly response explaining you'll create a ticket",
+  "action": "create_ticket",
+  "ticketData": {
+    "subject": "brief subject line",
+    "description": "detailed description of the issue",
+    "category": "one of: billing, technical, account, general",
+    "priority": "LOW, MEDIUM, HIGH, or URGENT"
+  }
+}
+
+Otherwise, respond with just a JSON object:
+{ "reply": "your helpful response" }
+
+Return ONLY valid JSON \u2014 no markdown fences.`;
   try {
-    return await ask(prompt);
+    const raw = await ask(prompt);
+    try {
+      const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
+      const cleaned = (jsonMatch[1] || raw).trim();
+      return JSON.parse(cleaned);
+    } catch {
+      return { reply: raw };
+    }
   } catch {
-    return "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment, or contact our support team for help.";
+    return { reply: "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment, or contact our support team for help." };
   }
 }
 async function generateReviewSummary(proName, reviews2) {
@@ -51334,6 +51655,11 @@ var stripe = new stripe_esm_node_default(process.env.STRIPE_SECRET_KEY || "sk_te
 });
 async function createNotification(userId, type, title, message, data = {}) {
   await db.insert(notifications).values({ userId, type, title, message, data });
+  try {
+    await pusher.trigger(`private-user-${userId}`, "new_notification", { type, title, message, data });
+  } catch (err) {
+    console.error("Pusher trigger error (notification):", err);
+  }
 }
 async function addCredits(userId, amount, type, description, referenceType, referenceId) {
   return db.transaction(async (tx) => {
@@ -51354,31 +51680,40 @@ async function addCredits(userId, amount, type, description, referenceType, refe
   });
 }
 async function registerRoutes(httpServer, app2) {
-  const isServerless = !httpServer.listening && process.env.VERCEL === "1";
-  let io = null;
-  const onlineUsers = /* @__PURE__ */ new Map();
-  if (!isServerless) {
-    io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
-    io.on("connection", (socket) => {
-      const userId = socket.handshake.auth?.userId;
-      if (userId) onlineUsers.set(userId, socket.id);
-      socket.on("join_conversation", (conversationId) => {
-        socket.join(`conv_${conversationId}`);
+  app2.post("/api/pusher/auth", (req, res) => {
+    if (!req.user) return res.status(401).send("Unauthorized");
+    const socketId = req.body.socket_id;
+    const channel = req.body.channel_name;
+    if (channel) {
+      const authResponse = pusher.authorizeChannel(socketId, channel);
+      return res.send(authResponse);
+    } else {
+      const userData = {
+        id: req.user.id.toString(),
+        user_info: {
+          name: `${req.user.firstName} ${req.user.lastName}`,
+          email: req.user.email
+        }
+      };
+      const authResponse = pusher.authenticateUser(socketId, userData);
+      return res.send(authResponse);
+    }
+  });
+  app2.post("/api/pusher/trigger", requireAuth, async (req, res) => {
+    const { to, event, data } = req.body;
+    if (!to || !event) return res.status(400).send("Missing target or event");
+    try {
+      await pusher.trigger(`private-user-${to}`, event, {
+        from: req.user.id,
+        data
       });
-      socket.on("leave_conversation", (conversationId) => {
-        socket.leave(`conv_${conversationId}`);
-      });
-      socket.on("typing", ({ conversationId, isTyping }) => {
-        socket.to(`conv_${conversationId}`).emit("user_typing", { userId, isTyping });
-      });
-      socket.on("disconnect", () => {
-        if (userId) onlineUsers.delete(userId);
-      });
-    });
-    startAftercareScheduler(createNotification, io);
-  } else {
-    console.log("[serverless] Socket.io and cron scheduler disabled in Vercel environment");
-  }
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Pusher trigger error:", err);
+      res.status(500).json({ error: "Failed to relay signal" });
+    }
+  });
+  startAftercareScheduler(createNotification, null);
   app2.post("/api/auth/register", async (req, res) => {
     try {
       const { email, password, firstName, lastName, phone, role } = req.body;
@@ -51493,6 +51828,9 @@ async function registerRoutes(httpServer, app2) {
   app2.post("/api/onboarding/customer", async (req, res) => {
     try {
       const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
+      if (!email || !password || !firstName || !lastName || !title || !description || !categoryId) {
+        return res.status(400).json({ error: "Missing required fields for customer onboarding." });
+      }
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
       const result = await db.transaction(async (tx) => {
@@ -51686,7 +52024,7 @@ async function registerRoutes(httpServer, app2) {
     const { categoryId, location, page = "1", limit = "20" } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let conditions = [
-      or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"), eq(jobs.status, "IN_DISCUSSION"))
+      inArray(jobs.status, ["LIVE", "BOOSTED", "IN_DISCUSSION"])
     ];
     if (categoryId) conditions.push(eq(jobs.categoryId, categoryId));
     const liveJobs = await db.select({
@@ -51826,6 +52164,9 @@ async function registerRoutes(httpServer, app2) {
       const jobId = req.params.id;
       const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
       if (!job) return res.status(404).json({ error: "Job not found" });
+      if (job.customerId === proId) {
+        return res.status(400).json({ error: "You cannot unlock a job you posted yourself." });
+      }
       const existing = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
       if (existing.length > 0) return res.status(409).json({ error: "Already unlocked this job" });
       const creditsToSpend = tier === "STANDARD" ? job.creditCost : 0;
@@ -51864,7 +52205,7 @@ async function registerRoutes(httpServer, app2) {
           { conversationId: conv.id, userId: proId, role: "MEMBER" },
           { conversationId: conv.id, userId: job.customerId, role: "MEMBER" }
         ]);
-        const systemMsg = tier === "FREE" ? `A professional has unlocked your job. They are using the free tier \u2014 contact details are hidden from them.` : `A professional has unlocked your job with full access.`;
+        const systemMsg = tier === "FREE" ? `A professional has unlocked your job and can now message you directly.` : `A professional has unlocked your job with priority access and can now message you directly.`;
         await tx.insert(messages).values({
           conversationId: conv.id,
           senderId: proId,
@@ -51873,11 +52214,6 @@ async function registerRoutes(httpServer, app2) {
           isFiltered: false
         });
       });
-      let customerPhone = null;
-      if (tier === "STANDARD") {
-        const [cust] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-        customerPhone = cust?.phone;
-      }
       await createNotification(
         job.customerId,
         "JOB_UNLOCK",
@@ -51885,7 +52221,7 @@ async function registerRoutes(httpServer, app2) {
         `A professional has unlocked your job: ${job.title}`,
         { jobId }
       );
-      return res.status(201).json({ success: true, customerPhone });
+      return res.status(201).json({ success: true });
     } catch (e) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -51921,13 +52257,12 @@ async function registerRoutes(httpServer, app2) {
             conversationId: conv.id,
             senderId: proId,
             type: "SYSTEM",
-            content: "This professional has upgraded to Standard tier \u2014 full contact details are now available.",
+            content: "This professional has upgraded to Standard tier \u2014 priority messaging enabled. Use in-app chat or request a call.",
             isFiltered: false
           });
         }
       });
-      const [cust] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-      return res.json({ success: true, customerPhone: cust?.phone });
+      return res.json({ success: true });
     } catch (e) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -52075,7 +52410,12 @@ async function registerRoutes(httpServer, app2) {
           totalAmount: quote.amount,
           status: "CONFIRMED"
         }).returning();
-        await tx.update(jobs).set({ status: "IN_DISCUSSION", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, quote.jobId));
+        await tx.update(jobs).set({ status: "MATCHED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, quote.jobId));
+        await tx.update(quotes).set({ status: "REJECTED", updatedAt: /* @__PURE__ */ new Date() }).where(and(
+          eq(quotes.jobId, quote.jobId),
+          eq(quotes.status, "PENDING"),
+          ne(quotes.id, quote.id)
+        ));
       });
       await createNotification(
         quote.professionalId,
@@ -52100,8 +52440,28 @@ async function registerRoutes(httpServer, app2) {
     const userId = req.user.userId;
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     let conditions = user.role === "CUSTOMER" ? [eq(bookings.customerId, userId)] : [eq(bookings.professionalId, userId)];
-    const result = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
-    return res.json(result);
+    const rawBookings = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
+    const enrichedBookings = await Promise.all(rawBookings.map(async (b) => {
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, b.jobId));
+      const [customer] = await db.select().from(users).where(eq(users.id, b.customerId));
+      const [professional] = await db.select().from(users).where(eq(users.id, b.professionalId));
+      return {
+        ...b,
+        job,
+        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl } : null,
+        professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: professional.businessName } : null
+      };
+    }));
+    return res.json(enrichedBookings);
+  });
+  app2.post("/api/bookings/:id/in-progress", requireAuth, async (req, res) => {
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+    if (booking.professionalId !== req.user.userId) {
+      return res.status(403).json({ error: "Forbidden. Only the assigned professional can mark this in progress." });
+    }
+    await db.update(bookings).set({ status: "IN_PROGRESS", updatedAt: /* @__PURE__ */ new Date() }).where(eq(bookings.id, req.params.id));
+    return res.json({ success: true });
   });
   app2.get("/api/bookings/:id", requireAuth, async (req, res) => {
     const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
@@ -52158,6 +52518,92 @@ async function registerRoutes(httpServer, app2) {
         }).where(eq(professionalProfiles.userId, booking.professionalId));
       }
       return res.status(201).json(review);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.post("/api/call-requests", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { targetId, jobId, bookingId, reason } = req.body;
+      if (!targetId) return res.status(400).json({ error: "Target user is required" });
+      const [existing] = await db.select().from(callRequests).where(and(
+        eq(callRequests.requesterId, userId),
+        eq(callRequests.targetId, targetId),
+        eq(callRequests.status, "PENDING")
+      ));
+      if (existing) return res.status(409).json({ error: "You already have a pending call request with this user" });
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1e3);
+      const [callReq] = await db.insert(callRequests).values({
+        requesterId: userId,
+        targetId,
+        jobId: jobId || null,
+        bookingId: bookingId || null,
+        reason: reason || "Would like to discuss the project",
+        expiresAt
+      }).returning();
+      const [requester] = await db.select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, userId));
+      await createNotification(
+        targetId,
+        "CALL_REQUEST",
+        "\u{1F4DE} Call request received",
+        `${requester.firstName} ${requester.lastName} would like to have a call with you: "${reason || "Discuss the project"}"`,
+        { callRequestId: callReq.id, requesterId: userId, jobId, bookingId }
+      );
+      return res.status(201).json(callReq);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/call-requests/:id", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { status } = req.body;
+      if (!["ACCEPTED", "DECLINED"].includes(status)) {
+        return res.status(400).json({ error: "Status must be ACCEPTED or DECLINED" });
+      }
+      const [callReq] = await db.select().from(callRequests).where(eq(callRequests.id, req.params.id));
+      if (!callReq) return res.status(404).json({ error: "Call request not found" });
+      if (callReq.targetId !== userId) return res.status(403).json({ error: "Not authorized" });
+      if (callReq.status !== "PENDING") return res.status(409).json({ error: "Call request already responded to" });
+      const [updated] = await db.update(callRequests).set({ status, respondedAt: /* @__PURE__ */ new Date() }).where(eq(callRequests.id, callReq.id)).returning();
+      const [responder] = await db.select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, userId));
+      if (status === "ACCEPTED") {
+        await createNotification(
+          callReq.requesterId,
+          "CALL_ACCEPTED",
+          "\u2705 Call request accepted",
+          `${responder.firstName} ${responder.lastName} accepted your call request! You can now coordinate a call time through in-app chat.`,
+          { callRequestId: callReq.id }
+        );
+      } else {
+        await createNotification(
+          callReq.requesterId,
+          "CALL_DECLINED",
+          "Call request declined",
+          `${responder.firstName} ${responder.lastName} declined your call request. You can continue communicating via in-app chat.`,
+          { callRequestId: callReq.id }
+        );
+      }
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/call-requests", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const sent = await db.select().from(callRequests).where(eq(callRequests.requesterId, userId)).orderBy(desc(callRequests.createdAt));
+      const received = await db.select().from(callRequests).where(eq(callRequests.targetId, userId)).orderBy(desc(callRequests.createdAt));
+      const enrichSent = await Promise.all(sent.map(async (cr) => {
+        const [target] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, cr.targetId));
+        return { ...cr, target };
+      }));
+      const enrichReceived = await Promise.all(received.map(async (cr) => {
+        const [requester] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, cr.requesterId));
+        return { ...cr, requester };
+      }));
+      return res.json({ sent: enrichSent, received: enrichReceived });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
@@ -52230,14 +52676,9 @@ async function registerRoutes(httpServer, app2) {
       if (!conv) return res.status(404).json({ error: "Conversation not found" });
       const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant" });
-      let shouldMask = false;
-      const [senderUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
-      if (senderUser.role === "PROFESSIONAL" && conv.jobId) {
-        const [unlock] = await db.select({ tier: jobUnlocks.tier }).from(jobUnlocks).where(and(eq(jobUnlocks.jobId, conv.jobId), eq(jobUnlocks.professionalId, userId)));
-        if (unlock?.tier === "FREE") shouldMask = true;
-      }
-      let { content: processedContent, originalContent, isFiltered, filterFlags } = processMessageContent(content, shouldMask);
-      if (shouldMask && !isFiltered && process.env.HUGGINGFACE_API_KEY) {
+      const shouldMask = true;
+      let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(content, shouldMask);
+      if (contactCount === 0 && process.env.HUGGINGFACE_API_KEY) {
         try {
           const nerResult = await nerMaskObfuscated(processedContent, process.env.HUGGINGFACE_API_KEY);
           if (nerResult.caught) {
@@ -52258,13 +52699,30 @@ async function registerRoutes(httpServer, app2) {
         filterFlags
       }).returning();
       await db.update(conversations).set({ lastMessageAt: /* @__PURE__ */ new Date() }).where(eq(conversations.id, convId));
-      if (isFiltered && filterFlags.length >= 2) {
+      if (severity === "CRITICAL") {
+        await createNotification(
+          "admin",
+          "MESSAGE_FLAGGED",
+          "\u{1F6A8} Hate speech detected",
+          `Critical content flagged for immediate review (${profanityCount} violations)`,
+          { messageId: msg.id, conversationId: convId, severity: "CRITICAL" }
+        );
+      } else if (severity === "SEVERE" || isFiltered && filterFlags.length >= 2) {
         await createNotification(
           "admin",
           "MESSAGE_FLAGGED",
           "Message flagged for review",
-          "A message has been auto-flagged for moderation",
-          { messageId: msg.id, conversationId: convId }
+          `Auto-flagged: ${filterFlags.join(", ")}`,
+          { messageId: msg.id, conversationId: convId, severity: severity || "INFO" }
+        );
+      }
+      if (contactCount > 0) {
+        await createNotification(
+          userId,
+          "SYSTEM",
+          "Contact sharing blocked",
+          "Phone numbers, emails, and social media handles are not allowed in messages. Please use in-app messaging to communicate.",
+          {}
         );
       }
       if (io) io.to(`conv_${convId}`).emit("new_message", msg);
@@ -53112,8 +53570,25 @@ async function registerRoutes(httpServer, app2) {
       const { message, history } = req.body;
       if (!message) return res.status(400).json({ error: "message required" });
       const userRole = req.user.role;
-      const reply = await aiChatAssistant(message, userRole, history || []);
-      return res.json({ reply });
+      const result = await aiChatAssistant(message, userRole, history || []);
+      if (result.action === "create_ticket" && result.ticketData) {
+        const td = result.ticketData;
+        const [ticket] = await db.insert(supportTickets).values({
+          userId: req.user.userId,
+          subject: td.subject,
+          description: td.description,
+          category: td.category,
+          priority: td.priority || "MEDIUM",
+          status: "OPEN"
+        }).returning();
+        return res.json({
+          reply: result.reply,
+          ticketCreated: true,
+          ticketId: ticket.id,
+          ticketSubject: td.subject
+        });
+      }
+      return res.json({ reply: result.reply });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }

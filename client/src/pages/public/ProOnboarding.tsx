@@ -78,7 +78,7 @@ export default function ProOnboarding() {
   };
 
   const handleSubmit = async () => {
-    if (!form.firstName || !form.lastName || !form.email || !form.password) {
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.password) {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
@@ -110,7 +110,7 @@ export default function ProOnboarding() {
 
   const canProceedStep0 = form.categoryIds.length > 0;
   const canProceedStep1 = form.bio.length >= 20 && form.location.length > 0;
-  const canProceedStep2 = form.firstName && form.lastName && form.email && form.password.length >= 8;
+  // Step 2 validation is handled dynamically upon click to provide toast errors, removing disabled wall.
 
   return (
     <div className="min-h-screen bg-background">
@@ -413,9 +413,9 @@ export default function ProOnboarding() {
                     <ChevronLeft className="w-4 h-4" /> Back
                   </Button>
                   <Button
-                    className="flex-1 gap-2 h-12 text-base"
+                    className="flex-1 gap-2 h-12 text-base shadow-sm"
                     onClick={handleSubmit}
-                    disabled={loading || !canProceedStep2}
+                    disabled={loading}
                   >
                     {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating account…</> : "Create Account & Get 20 Credits"}
                   </Button>
