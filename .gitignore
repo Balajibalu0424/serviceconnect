@@ -18,4 +18,6 @@ vite.config.ts.*
 
 .vercel
 
-*.txt
+# Test/scratch scripts — may contain credentials
+test_*.js
+test_*.ts

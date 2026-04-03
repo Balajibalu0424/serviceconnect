@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useLocation, useSearch } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -199,14 +199,19 @@ export default function PostJob() {
   const search = useSearch();
   const params = new URLSearchParams(search);
   const preselectedCategory = params.get("category") || "";
+  const verifyMode = params.get("verify") === "1";
   const { user, refreshUser } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [step, setStep] = useState<Step>(1);
+  const queryClient = useQueryClient();
+
+  // If user arrives from /post-job?verify=1, jump straight to OTP step
+  const initialStep: Step = verifyMode && user && !user.emailVerified ? 3 : 1;
+  const [step, setStep] = useState<Step>(initialStep);
   const [loading, setLoading] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(user?.firstJobId || null);
   const [otp, setOtp] = useState("");
-  const [needsVerify, setNeedsVerify] = useState(false);
+  const [needsVerify, setNeedsVerify] = useState(verifyMode && user && !user.emailVerified ? true : false);
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [showProcessing, setShowProcessing] = useState(false);
@@ -356,6 +361,8 @@ export default function PostJob() {
       setJobId(data.jobId);
       setNeedsVerify(true);
       await refreshUser();
+      // Invalidate jobs cache so dashboard shows the new DRAFT job immediately
+      await queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       setStep(3);
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -371,6 +378,8 @@ export default function PostJob() {
       const res = await apiRequest("POST", "/api/onboarding/customer/verify", { otp });
       if (!res.ok) throw new Error((await res.json()).error);
       await refreshUser();
+      // Invalidate jobs cache so dashboard reflects DRAFT→LIVE transition immediately
+      await queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       setStep(4);
       toast({ title: "Email verified!", description: "Your job is now live." });
     } catch (e: any) {

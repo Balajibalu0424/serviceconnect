@@ -51653,12 +51653,36 @@ var stripe_esm_node_default = Stripe;
 var stripe = new stripe_esm_node_default(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder", {
   apiVersion: "2024-12-18.acacia"
 });
-async function createNotification(userId, type, title, message, data = {}) {
-  await db.insert(notifications).values({ userId, type, title, message, data });
+async function createNotification(userIdOrRole, type, title, message, data = {}) {
+  if (!userIdOrRole) return;
   try {
-    await pusher.trigger(`private-user-${userId}`, "new_notification", { type, title, message, data });
+    if (userIdOrRole === "admin") {
+      const adminUsers = await db.select().from(users).where(eq(users.role, "ADMIN"));
+      if (adminUsers.length === 0) return;
+      const notifsToInsert = adminUsers.map((admin) => ({
+        userId: admin.id,
+        type,
+        title,
+        message,
+        data
+      }));
+      await db.insert(notifications).values(notifsToInsert);
+      for (const admin of adminUsers) {
+        pusher.trigger(`private-user-${admin.id}`, "new_notification", { type, title, message, data }).catch((err) => {
+          console.error("Pusher trigger error (notification) for admin:", err);
+        });
+      }
+      return;
+    }
+    await db.insert(notifications).values({ userId: userIdOrRole, type, title, message, data });
+    try {
+      await pusher.trigger(`private-user-${userIdOrRole}`, "new_notification", { type, title, message, data });
+    } catch (err) {
+      console.error("Pusher trigger error (notification):", err);
+    }
   } catch (err) {
-    console.error("Pusher trigger error (notification):", err);
+    console.error("Database error creating notification:", err);
+    throw err;
   }
 }
 async function addCredits(userId, amount, type, description, referenceType, referenceId) {

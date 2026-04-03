@@ -10,6 +10,8 @@ interface AuthUser {
   status: string;
   creditBalance: number;
   onboardingCompleted: boolean;
+  emailVerified: boolean;
+  firstJobId?: string | null;
   avatarUrl?: string;
   profile?: any;
 }

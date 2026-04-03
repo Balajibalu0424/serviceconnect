@@ -370,7 +370,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
 
   // AI: Live job analysis endpoint (called from PostJob form for instant feedback)
-  app.post("/api/jobs/analyze", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/jobs/analyze", async (req: Request, res: Response) => {
     try {
       const { title = "", description = "", locationText, categoryId } = req.body;
       const allCats = await db.select().from(serviceCategories);

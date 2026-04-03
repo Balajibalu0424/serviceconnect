@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   PlusCircle, Briefcase, MessageSquare, CheckCircle, AlertCircle,
   TrendingUp, ThumbsUp, ThumbsDown, Zap, ChevronRight, Clock,
-  ArrowRight, Star, BadgeCheck
+  ArrowRight, Star, BadgeCheck, Mail
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -125,6 +125,30 @@ export default function CustomerDashboard() {
               <Link href="/my-jobs">
                 <Button className="gap-2 shrink-0 bg-amber-500 hover:bg-amber-600 text-white shadow-md shadow-amber-500/20 rounded-xl" data-testid="button-publish-draft">
                   <Zap className="w-4 h-4" /> Review & Publish
+                </Button>
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Email verification banner — shown when user registered but hasn't verified OTP */}
+        {user && !user.emailVerified && user.role === "CUSTOMER" && (
+          <div className="relative overflow-hidden group rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 shadow-sm p-5 md:p-6">
+            <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/60 flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-blue-900 dark:text-blue-100 text-base font-outfit">Verify your email to publish your job</h3>
+                  <p className="text-sm text-blue-700 dark:text-blue-400/80 mt-0.5">
+                    Enter the 6-digit code we sent to <strong>{user.email}</strong>. Demo code: <strong className="font-mono">123456</strong>
+                  </p>
+                </div>
+              </div>
+              <Link href="/post-job?verify=1">
+                <Button className="gap-2 shrink-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md rounded-xl" data-testid="button-verify-email">
+                  <Mail className="w-4 h-4" /> Verify Now
                 </Button>
               </Link>
             </div>
