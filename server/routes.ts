@@ -40,14 +40,42 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder"
 
 
 // ─── Helper: create notification ─────────────────────────────────────────────
-async function createNotification(userId: string, type: string, title: string, message: string, data: object = {}) {
-  await db.insert(notifications).values({ userId, type, title, message, data });
-  
-  // Real-time push via Pusher
+async function createNotification(userIdOrRole: string, type: string, title: string, message: string, data: object = {}) {
+  if (!userIdOrRole) return;
+
   try {
-    await pusher.trigger(`private-user-${userId}`, "new_notification", { type, title, message, data });
+    // If the recipient is "admin", broadcast this to all ADMIN users
+    if (userIdOrRole === "admin") {
+      const adminUsers = await db.select().from(users).where(eq(users.role, "ADMIN"));
+      if (adminUsers.length === 0) return;
+
+      const notifsToInsert = adminUsers.map(admin => ({
+        userId: admin.id,
+        type, title, message, data
+      }));
+
+      await db.insert(notifications).values(notifsToInsert);
+
+      for (const admin of adminUsers) {
+        pusher.trigger(`private-user-${admin.id}`, "new_notification", { type, title, message, data }).catch(err => {
+          console.error("Pusher trigger error (notification) for admin:", err);
+        });
+      }
+      return;
+    }
+
+    // Otherwise, single user
+    await db.insert(notifications).values({ userId: userIdOrRole, type, title, message, data });
+    
+    // Real-time push via Pusher
+    try {
+      await pusher.trigger(`private-user-${userIdOrRole}`, "new_notification", { type, title, message, data });
+    } catch (err) {
+      console.error("Pusher trigger error (notification):", err);
+    }
   } catch (err) {
-    console.error("Pusher trigger error (notification):", err);
+    console.error("Database error creating notification:", err);
+    throw err;
   }
 }
 
