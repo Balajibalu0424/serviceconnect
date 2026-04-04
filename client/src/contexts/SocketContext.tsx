@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { pusher } from "@/lib/pusher";
 import { useAuth } from "./AuthContext";
+import { getAccessToken } from "@/lib/queryClient";
 
 interface SocketContextType {
   socket: any; // Keep name for compatibility, but it's now a Pusher instance or a proxy
@@ -62,21 +63,41 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         channel.unbind(event, callback);
       }
     },
+    // PHASE 1 FIX: Attach JWT Authorization header so /api/pusher/trigger 
+    // (protected by requireAuth) stops returning 401 and silently dropping all WebRTC signals.
     emit: async (event: string, data: any) => {
-      // Client cannot emit directly to others in Pusher private channels for security
-      // We use our server-side proxy
+      const token = getAccessToken();
+      if (!token) {
+        console.warn(`[SocketProxy] emit(${event}) skipped — no access token`);
+        return;
+      }
+
+      const targetUserId = data.to || data.userToCall;
+      if (!targetUserId) {
+        console.warn(`[SocketProxy] emit(${event}) skipped — no target userId in`, data);
+        return;
+      }
+
       try {
-        await fetch('/api/pusher/trigger', {
+        const res = await fetch('/api/pusher/trigger', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,   // ← THE FIX
+          },
           body: JSON.stringify({
-            channel: `private-user-${data.to || data.userToCall}`,
+            to: targetUserId,
             event: event,
             data: { ...data, from: user?.id }
           })
         });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error(`[SocketProxy] emit(${event}) failed ${res.status}:`, errText);
+        }
       } catch (err) {
-        console.error("Pusher emit failed", err);
+        console.error(`[SocketProxy] emit(${event}) network error:`, err);
       }
     }
   }), [user?.id]);

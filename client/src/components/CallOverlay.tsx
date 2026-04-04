@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useCall } from "@/contexts/CallContext";
 import { Button } from "./ui/button";
 import { Phone, PhoneOff, Mic, MicOff } from "lucide-react";
@@ -6,16 +6,26 @@ import { Phone, PhoneOff, Mic, MicOff } from "lucide-react";
 export function CallOverlay() {
   const { callStatus, activeCall, remoteStream, acceptCall, declineCall, endCall, toggleMute, isMuted } = useCall();
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [callSeconds, setCallSeconds] = useState(0);
 
   // Hook up the remote stream to the audio element when it becomes active
   useEffect(() => {
     if (audioRef.current && remoteStream) {
       audioRef.current.srcObject = remoteStream;
-      // Play is sometimes blocked by browser policies if no user interaction occurred,
-      // but accepting a call is a user interaction.
       audioRef.current.play().catch(console.error);
     }
   }, [remoteStream, callStatus]);
+
+  // Live call timer — reset and start counting when call becomes ACTIVE
+  useEffect(() => {
+    if (callStatus !== "ACTIVE") {
+      setCallSeconds(0);
+      return;
+    }
+    setCallSeconds(0);
+    const id = setInterval(() => setCallSeconds(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [callStatus]);
 
   if (callStatus === "IDLE" || !activeCall) return null;
 
@@ -91,7 +101,9 @@ export function CallOverlay() {
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-sm">{activeCall.withUserName}</h3>
-                <p className="text-xs text-green-500 font-medium">00:00</p>
+                <p className="text-xs text-green-500 font-medium">
+                  {String(Math.floor(callSeconds / 60)).padStart(2, "0")}:{String(callSeconds % 60).padStart(2, "0")}
+                </p>
               </div>
             </div>
             <div className="flex justify-between items-center bg-muted/50 rounded-xl p-2 px-4">

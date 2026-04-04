@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Send, Loader2, ArrowLeft, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import { useCall } from "@/contexts/CallContext";
+
 
 export default function Chat() {
   const { user } = useAuth();
@@ -21,7 +21,7 @@ export default function Chat() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { initiateCall } = useCall();
+
 
   const { data: conversations = [], isLoading: loadingConvs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations"],
@@ -192,23 +192,24 @@ export default function Chat() {
                   <p className="font-semibold text-sm">{activeConv?.jobTitle || "Conversation"}</p>
                   <p className="text-xs text-muted-foreground">Active now</p>
                 </div>
-                {/* Request Call button */}
+                {/* Request Call button — creates DB call request only.
+                     WebRTC offer will be triggered by server after callee accepts. */}
                 <Button
                   variant="default"
                   size="sm"
                   className="gap-1.5 text-xs bg-green-500 hover:bg-green-600 shadow-lg"
+                  disabled={requestCall.isPending}
                   onClick={() => {
                     const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id);
                     if (otherParticipant) {
-                      initiateCall(otherParticipant.id, `${otherParticipant.firstName} ${otherParticipant.lastName}`);
-                      requestCall.mutate(otherParticipant.id); // fallback db log
+                      requestCall.mutate(otherParticipant.id);
                     } else {
                       toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
                     }
                   }}
                 >
                   <Phone className="w-4 h-4" />
-                  Request Call
+                  {requestCall.isPending ? "Requesting…" : "Request Call"}
                 </Button>
               </div>
 

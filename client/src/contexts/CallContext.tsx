@@ -17,6 +17,7 @@ interface CallContextType {
   remoteStream: MediaStream | null;
   localStream: MediaStream | null;
   isMuted: boolean;
+  // initiateCall is kept for direct programmatic use (called from server-triggered flow)
   initiateCall: (userId: string, userName: string) => void;
   acceptCall: () => void;
   declineCall: () => void;
@@ -26,11 +27,39 @@ interface CallContextType {
 
 const CallContext = createContext<CallContextType | null>(null);
 
-const ICE_SERVERS = {
-  iceServers: [
+// PHASE 5: TURN/STUN config with env-var credentials.
+// Set VITE_METERED_USERNAME and VITE_METERED_CREDENTIAL on Vercel for reliable NAT traversal.
+// Falls back to STUN-only in dev/demo environments.
+const buildIceServers = (): RTCConfiguration => {
+  const servers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:global.stun.twilio.com:3478" },
-  ],
+  ];
+
+  const turnUser = import.meta.env.VITE_METERED_USERNAME;
+  const turnCred = import.meta.env.VITE_METERED_CREDENTIAL;
+
+  if (turnUser && turnCred) {
+    servers.push(
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: turnUser,
+        credential: turnCred,
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: turnUser,
+        credential: turnCred,
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443?transport=tcp",
+        username: turnUser,
+        credential: turnCred,
+      }
+    );
+  }
+
+  return { iceServers: servers };
 };
 
 export function CallProvider({ children }: { children: React.ReactNode }) {
@@ -47,212 +76,291 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const peerConnection = useRef<RTCPeerConnection | null>(null);
 
-  // Initialize RTCPeerConnection and bind local stream
-  const initializePeerConnection = () => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+  // PHASE 2 FIX: Keep a ref in sync with state so callbacks created at mount time
+  // always read the current activeCall value, avoiding stale closures.
+  const activeCallRef = useRef<ActiveCall | null>(null);
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
 
+  // Also keep a ref to the socket for use inside PC callbacks
+  const socketRef = useRef<any>(null);
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+
+  // ─── CLEANUP ─────────────────────────────────────────────────────────────────
+  const stopLocalStream = (stream: MediaStream | null) => {
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+  };
+
+  const closePeerConnection = () => {
+    if (peerConnection.current) {
+      peerConnection.current.onicecandidate = null;
+      peerConnection.current.ontrack = null;
+      peerConnection.current.onconnectionstatechange = null;
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+  };
+
+  const cleanupCall = (showToast = false, toastMsg = "Call Ended") => {
+    stopLocalStream(localStream);
+    setLocalStream(null);
+    closePeerConnection();
+    setRemoteStream(null);
+    setCallStatus("IDLE");
+    setActiveCall(null);
+    activeCallRef.current = null;
+    setIsMuted(false);
+    window.sessionStorage.removeItem("incoming_offer");
+    if (showToast) {
+      toast({ title: toastMsg });
+    }
+  };
+
+  // ─── BUILD PEER CONNECTION ────────────────────────────────────────────────────
+  const buildPeerConnection = (stream: MediaStream, targetUserId: string): RTCPeerConnection => {
+    closePeerConnection(); // defensive: close any existing connection
+
+    const pc = new RTCPeerConnection(buildIceServers());
+
+    // PHASE 2 FIX: use targetUserId from closure (not from activeCallRef) because
+    // this is always called with the right userId at creation time.
     pc.onicecandidate = (event) => {
-      if (event.candidate && activeCall?.withUserId && socket) {
-        socket.emit("webrtc_ice_candidate", {
-          to: activeCall.withUserId,
+      if (event.candidate && socketRef.current) {
+        console.debug("[WebRTC] Sending ICE candidate to", targetUserId);
+        socketRef.current.emit("webrtc_ice_candidate", {
+          to: targetUserId,
           candidate: event.candidate,
         });
       }
     };
 
     pc.ontrack = (event) => {
+      console.debug("[WebRTC] Remote track received");
       setRemoteStream(event.streams[0]);
     };
 
-    if (localStream) {
-      localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
-      });
-    }
+    // Log connection state changes for easier debugging
+    pc.onconnectionstatechange = () => {
+      console.debug("[WebRTC] Connection state:", pc.connectionState);
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+        console.warn("[WebRTC] Peer connection failed/disconnected — cleaning up");
+        toast({ title: "Call disconnected", description: "The connection was lost.", variant: "destructive" });
+        cleanupCall();
+      }
+    };
 
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     peerConnection.current = pc;
     return pc;
   };
 
-  const cleanupCall = () => {
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
-    }
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
-    setRemoteStream(null);
-    setCallStatus("IDLE");
-    setActiveCall(null);
-    setIsMuted(false);
-  };
-
   // ─── SOCKET LISTENERS ────────────────────────────────────────────────────────
+  // PHASE 3 FIX: Listen for "call_ready" — the new event the server fires when a
+  // DB call request is accepted. This is the correct trigger for the in-browser
+  // ringing/WebRTC flow (replaces the old immediate-call-on-button-click approach).
   useEffect(() => {
     if (!socket) return;
 
-    // Incoming Call Handle
-    const handleIncomingCall = ({ signal, from, name }: any) => {
-      if (callStatus !== "IDLE") {
-        // Busy
-        socket.emit("call_declined", { to: from });
-        return;
+    // ── Initiated by SERVER after call-request acceptance ──
+    // Event: "call_ready" — server fires this to both parties when DB request is accepted.
+    // The caller receives it and immediately starts the WebRTC offer.
+    // The callee receives it and shows the incoming RINGING screen.
+    const handleCallReady = ({ from, name, role }: { from: string; name: string; role: "caller" | "callee" }) => {
+      console.debug("[WebRTC] call_ready received, role:", role);
+
+      if (role === "callee") {
+        // Show incoming call screen — WebRTC offer will follow immediately
+        setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: false });
+        setCallStatus("RINGING");
+      } else if (role === "caller") {
+        // Server confirmed callee accepted, now begin the WebRTC offer
+        const callInfo = activeCallRef.current;
+        if (!callInfo) return;
+        setCallStatus("INITIATING");
+        // kick off offer async
+        _sendOffer(callInfo.withUserId).catch(console.error);
       }
-      setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: false });
-      setCallStatus("RINGING");
-      // Store incoming offer temporarily
-      window.sessionStorage.setItem("incoming_offer", JSON.stringify(signal));
     };
 
-    // Call Accepted Handle
+    // ── Incoming WebRTC offer (from the caller after call_ready) ──
+    const handleIncomingCall = ({ signal, from, name }: any) => {
+      console.debug("[WebRTC] incoming_call (offer) from:", from);
+
+      // If already in a call, auto-decline
+      const current = activeCallRef.current;
+      if (current && current.withUserId !== from) {
+        socketRef.current?.emit("call_declined", { to: from });
+        return;
+      }
+
+      // Store offer in sessionStorage for acceptCall to consume
+      window.sessionStorage.setItem("incoming_offer", JSON.stringify(signal));
+
+      // Ensure we're in RINGING state (may already be from call_ready)
+      if (callStatus === "IDLE" || !activeCallRef.current) {
+        setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: false });
+        setCallStatus("RINGING");
+      }
+    };
+
+    // ── Answer received by caller ──
     const handleCallAccepted = async ({ signal }: any) => {
+      console.debug("[WebRTC] call_accepted (answer) received");
       setCallStatus("ACTIVE");
       if (peerConnection.current) {
         try {
           await peerConnection.current.setRemoteDescription(new RTCSessionDescription(signal));
         } catch (e) {
-          console.error("Failed to set remote description", e);
+          console.error("[WebRTC] setRemoteDescription (answer) failed:", e);
         }
       }
     };
 
-    // Peer Declined/Ended Handle
-    const handleCallEnded = () => {
-      toast({ title: "Call Ended", description: "The other user ended the call." });
-      cleanupCall();
+    // ── Remote party ended or declined ──
+    const handleCallEnded = ({ reason }: any = {}) => {
+      console.debug("[WebRTC] call_ended/call_declined received:", reason);
+      cleanupCall(true, reason === "declined" ? "Call Declined" : "Call Ended");
     };
 
-    // ICE Candidate handler
+    // ── ICE candidates ──
     const handleIceCandidate = async ({ candidate }: any) => {
       if (peerConnection.current && candidate) {
         try {
           await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
-          console.error("Failed to add ice candidate", e);
+          console.error("[WebRTC] addIceCandidate failed:", e);
         }
       }
     };
 
+    socket.on("call_ready", handleCallReady);
     socket.on("incoming_call", handleIncomingCall);
     socket.on("call_accepted", handleCallAccepted);
-    socket.on("call_declined", handleCallEnded);
+    socket.on("call_declined", (d: any) => handleCallEnded({ ...d, reason: "declined" }));
     socket.on("call_ended", handleCallEnded);
     socket.on("webrtc_ice_candidate", handleIceCandidate);
 
     return () => {
+      socket.off("call_ready", handleCallReady);
       socket.off("incoming_call", handleIncomingCall);
       socket.off("call_accepted", handleCallAccepted);
       socket.off("call_declined", handleCallEnded);
       socket.off("call_ended", handleCallEnded);
       socket.off("webrtc_ice_candidate", handleIceCandidate);
     };
-  }, [socket, callStatus, activeCall, toast]);
+  // Only re-register when socket identity changes — NOT on callStatus change,
+  // which would create/drop listeners on every state transition.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket]);
 
-
-  // ─── ACTIONS ─────────────────────────────────────────────────────────────────
-  const initiateCall = async (userId: string, userName: string) => {
+  // ─── INTERNAL: send offer (caller side after call_ready) ─────────────────────
+  const _sendOffer = async (targetUserId: string) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
       setLocalStream(stream);
-      setCallStatus("INITIATING");
-      setActiveCall({ withUserId: userId, withUserName: userName, isCaller: true });
 
-      // Need to wait for states to flush before creating PC. 
-      // Instead, we just use the stream straight away.
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      
-      pc.onicecandidate = (event) => {
-        if (event.candidate && socket) {
-          socket.emit("webrtc_ice_candidate", {
-            to: userId,
-            candidate: event.candidate,
-          });
-        }
-      };
-      pc.ontrack = (event) => setRemoteStream(event.streams[0]);
-      
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      peerConnection.current = pc;
-
+      const pc = buildPeerConnection(stream, targetUserId);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      socket?.emit("call_user", {
-        userToCall: userId,
+      console.debug("[WebRTC] Sending offer to", targetUserId);
+      socketRef.current?.emit("call_user", {
+        userToCall: targetUserId,
         signalData: offer,
         from: user?.id,
         name: `${user?.firstName} ${user?.lastName}`,
       });
-      
     } catch (err) {
-      console.error("Microphone access blocked", err);
-      toast({ title: "Microphone Access Required", description: "Please allow microphone access to make calls.", variant: "destructive" });
+      console.error("[WebRTC] Offer creation failed:", err);
+      toast({
+        title: "Microphone Access Required",
+        description: "Please allow microphone access to make calls.",
+        variant: "destructive",
+      });
+      cleanupCall();
     }
   };
 
+  // ─── ACTIONS ─────────────────────────────────────────────────────────────────
+
+  // initiateCall: called when the server-side "call_ready" flow wants to
+  // programmatically start the caller side. Also usable directly if needed.
+  const initiateCall = async (userId: string, userName: string) => {
+    console.debug("[WebRTC] initiateCall →", userId);
+    setActiveCall({ withUserId: userId, withUserName: userName, isCaller: true });
+    setCallStatus("INITIATING");
+    await _sendOffer(userId);
+  };
+
   const acceptCall = async () => {
-    if (!activeCall) return;
+    const callInfo = activeCallRef.current;
+    if (!callInfo) return;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
       setLocalStream(stream);
 
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      
-      pc.onicecandidate = (event) => {
-        if (event.candidate && socket) {
-          socket.emit("webrtc_ice_candidate", {
-            to: activeCall.withUserId,
-            candidate: event.candidate,
-          });
-        }
-      };
-      pc.ontrack = (event) => setRemoteStream(event.streams[0]);
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      peerConnection.current = pc;
+      const pc = buildPeerConnection(stream, callInfo.withUserId);
 
       const incomingOfferStr = window.sessionStorage.getItem("incoming_offer");
-      if (incomingOfferStr) {
-        const offer = JSON.parse(incomingOfferStr);
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        window.sessionStorage.removeItem("incoming_offer");
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        socket?.emit("call_accepted", {
-          signal: answer,
-          to: activeCall.withUserId,
-        });
-
-        setCallStatus("ACTIVE");
+      if (!incomingOfferStr) {
+        console.error("[WebRTC] acceptCall: no incoming offer in sessionStorage");
+        return;
       }
+
+      const offer = JSON.parse(incomingOfferStr);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      window.sessionStorage.removeItem("incoming_offer");
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      console.debug("[WebRTC] Sending answer to", callInfo.withUserId);
+      socketRef.current?.emit("call_accepted", {
+        signal: answer,
+        to: callInfo.withUserId,
+      });
+
+      setCallStatus("ACTIVE");
     } catch (err) {
-      console.error("Microphone access blocked", err);
-      toast({ title: "Microphone Access Required", description: "Cannot accept call.", variant: "destructive" });
+      console.error("[WebRTC] acceptCall failed:", err);
+      toast({
+        title: "Microphone Access Required",
+        description: "Cannot accept call — please allow microphone access.",
+        variant: "destructive",
+      });
       declineCall();
     }
   };
 
   const declineCall = () => {
-    if (activeCall && socket) {
-      socket.emit("call_declined", { to: activeCall.withUserId });
+    const callInfo = activeCallRef.current;
+    if (callInfo && socketRef.current) {
+      socketRef.current.emit("call_declined", { to: callInfo.withUserId, reason: "declined" });
     }
-    cleanupCall();
+    cleanupCall(false);
   };
 
   const endCall = () => {
-    if (activeCall && socket) {
-      socket.emit("call_ended", { to: activeCall.withUserId });
+    const callInfo = activeCallRef.current;
+    if (callInfo && socketRef.current) {
+      socketRef.current.emit("call_ended", { to: callInfo.withUserId });
     }
-    cleanupCall();
+    cleanupCall(false);
   };
 
   const toggleMute = () => {
     if (localStream) {
-      localStream.getAudioTracks()[0].enabled = isMuted;
-      setIsMuted(!isMuted);
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = isMuted; // flip: if currently muted, re-enable
+        setIsMuted(!isMuted);
+      }
     }
   };
 
