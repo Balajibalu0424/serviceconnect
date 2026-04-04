@@ -44225,12 +44225,14 @@ function processMessageContent(content, shouldMaskContacts) {
     severity = profSeverity;
     profanityCount = matchCount;
   }
-  const { masked, flags: contactFlags, hitCount } = maskContactInfo(processed);
-  if (hitCount > 0) {
-    processed = masked;
-    flags.push(...contactFlags);
-    isFiltered = true;
-    contactCount = hitCount;
+  if (shouldMaskContacts) {
+    const { masked, flags: contactFlags, hitCount } = maskContactInfo(processed);
+    if (hitCount > 0) {
+      processed = masked;
+      flags.push(...contactFlags);
+      isFiltered = true;
+      contactCount = hitCount;
+    }
   }
   return {
     content: processed,
@@ -44340,7 +44342,7 @@ async function runAftercareCheck(createNotification2) {
   }
   console.log("[Aftercare] Check complete");
 }
-function startAftercareScheduler(createNotification2, io2) {
+function startAftercareScheduler(createNotification2, io) {
   cron.schedule("0 * * * *", () => runAftercareCheck(createNotification2));
   console.log("[Aftercare Scheduler] Started \u2014 runs every hour");
 }
@@ -51926,7 +51928,7 @@ async function registerRoutes(httpServer, app2) {
     const cats = await db.select().from(serviceCategories).where(eq(serviceCategories.isActive, true)).orderBy(asc(serviceCategories.sortOrder));
     return res.json(cats);
   });
-  app2.post("/api/jobs/analyze", requireAuth, async (req, res) => {
+  app2.post("/api/jobs/analyze", async (req, res) => {
     try {
       const { title = "", description = "", locationText, categoryId } = req.body;
       const allCats = await db.select().from(serviceCategories);
@@ -52061,13 +52063,18 @@ async function registerRoutes(httpServer, app2) {
       const matchbookCount = await db.select({ c: count() }).from(jobMatchbooks).where(and(eq(jobMatchbooks.jobId, row.job.id), isNull(jobMatchbooks.removedAt)));
       const [myMatchbook] = await db.select().from(jobMatchbooks).where(and(eq(jobMatchbooks.jobId, row.job.id), eq(jobMatchbooks.professionalId, proId), isNull(jobMatchbooks.removedAt)));
       const [myUnlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, row.job.id), eq(jobUnlocks.professionalId, proId)));
+      let unlockWithPhone = myUnlock || null;
+      if (myUnlock?.phoneUnlocked) {
+        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
+        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      }
       return {
         ...row.job,
         category: row.category,
         customer: row.customer,
         matchbookCount: matchbookCount[0].c,
         isMatchbooked: !!myMatchbook,
-        unlock: myUnlock || null
+        unlock: unlockWithPhone
       };
     }));
     return res.json(result);
@@ -52075,14 +52082,30 @@ async function registerRoutes(httpServer, app2) {
   app2.get("/api/jobs/matchbooked", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
     const proId = req.user.userId;
     const matchbooked = await db.select({ mb: jobMatchbooks, job: jobs, cat: serviceCategories }).from(jobMatchbooks).leftJoin(jobs, eq(jobMatchbooks.jobId, jobs.id)).leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id)).where(and(eq(jobMatchbooks.professionalId, proId), isNull(jobMatchbooks.removedAt))).orderBy(desc(jobMatchbooks.matchbookedAt));
-    return res.json(matchbooked);
+    const result = await Promise.all(matchbooked.map(async (row) => {
+      const [myUnlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, row.job.id), eq(jobUnlocks.professionalId, proId)));
+      let unlockWithPhone = myUnlock || null;
+      if (myUnlock?.phoneUnlocked) {
+        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
+        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      }
+      return { ...row, unlock: unlockWithPhone };
+    }));
+    return res.json(result);
   });
   app2.get("/api/jobs/:id", requireAuth, async (req, res) => {
     const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
     if (!job) return res.status(404).json({ error: "Job not found" });
     const [category] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
     const [customer] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl, phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-    return res.json({ ...job, category, customer: { ...customer, phone: void 0 } });
+    let customerPhone = null;
+    const requestingUserId = req.user.userId;
+    const requestingRole = req.user.role;
+    if (requestingRole === "PROFESSIONAL") {
+      const [phoneUnlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, job.id), eq(jobUnlocks.professionalId, requestingUserId), eq(jobUnlocks.phoneUnlocked, true)));
+      if (phoneUnlock) customerPhone = customer?.phone ?? null;
+    }
+    return res.json({ ...job, category, customer: { ...customer, phone: customerPhone } });
   });
   app2.patch("/api/jobs/:id", requireAuth, async (req, res) => {
     const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
@@ -52193,7 +52216,20 @@ async function registerRoutes(httpServer, app2) {
       }
       const existing = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
       if (existing.length > 0) return res.status(409).json({ error: "Already unlocked this job" });
-      const creditsToSpend = tier === "STANDARD" ? job.creditCost : 0;
+      let effectiveCreditCost = job.creditCost;
+      let appliedDiscountEventId = null;
+      if (tier === "STANDARD") {
+        const [pendingDiscount] = await db.select().from(spinWheelEvents).where(and(
+          eq(spinWheelEvents.professionalId, proId),
+          eq(spinWheelEvents.prizeType, "DISCOUNT"),
+          eq(spinWheelEvents.prizeApplied, false)
+        )).orderBy(asc(spinWheelEvents.id)).limit(1);
+        if (pendingDiscount) {
+          effectiveCreditCost = Math.max(1, Math.floor(job.creditCost * (1 - (pendingDiscount.prizeValue ?? 20) / 100)));
+          appliedDiscountEventId = pendingDiscount.id;
+        }
+      }
+      const creditsToSpend = tier === "STANDARD" ? effectiveCreditCost : 0;
       await db.transaction(async (tx) => {
         if (creditsToSpend > 0) {
           const [u] = await tx.select({ balance: users.creditBalance }).from(users).where(eq(users.id, proId)).for("update");
@@ -52205,11 +52241,14 @@ async function registerRoutes(httpServer, app2) {
             type: "SPEND",
             amount: -creditsToSpend,
             balanceAfter: newBalance,
-            description: `Unlocked job: ${job.title}`,
+            description: `Unlocked job: ${job.title}${appliedDiscountEventId ? " (spin discount applied)" : ""}`,
             referenceType: "JOB",
             referenceId: jobId
           });
           await tx.update(jobs).set({ hasTokenPurchases: true, status: "IN_DISCUSSION", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId));
+        }
+        if (appliedDiscountEventId) {
+          await tx.update(spinWheelEvents).set({ prizeApplied: true }).where(eq(spinWheelEvents.id, appliedDiscountEventId));
         }
         await tx.insert(jobUnlocks).values({
           jobId,
@@ -52245,7 +52284,12 @@ async function registerRoutes(httpServer, app2) {
         `A professional has unlocked your job: ${job.title}`,
         { jobId }
       );
-      return res.status(201).json({ success: true });
+      const responseData = { success: true };
+      if (tier === "STANDARD") {
+        const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
+        responseData.customerPhone = customerUser?.phone ?? null;
+      }
+      return res.status(201).json(responseData);
     } catch (e) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -52286,7 +52330,8 @@ async function registerRoutes(httpServer, app2) {
           });
         }
       });
-      return res.json({ success: true });
+      const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
+      return res.json({ success: true, customerPhone: customerUser?.phone ?? null });
     } catch (e) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -52309,6 +52354,28 @@ async function registerRoutes(httpServer, app2) {
       } else {
         await db.update(jobAftercares).set({ boostOffered: true }).where(eq(jobAftercares.id, aftercare.id));
         return res.json({ success: true, action: "boost_offered", boostFee: 4.99, discountPct: 40 });
+      }
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.post("/api/jobs/:id/aftercare/decline-boost", requireAuth, async (req, res) => {
+    try {
+      const { action } = req.body;
+      const jobId = req.params.id;
+      const userId = req.user.userId;
+      const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
+      if (!job) return res.status(404).json({ error: "Job not found or not authorized" });
+      if (action === "close") {
+        await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId));
+        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+        return res.json({ success: true, action: "closed" });
+      } else if (action === "leave_open") {
+        await db.update(jobs).set({ blockedRepost: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId));
+        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+        return res.json({ success: true, action: "left_open" });
+      } else {
+        return res.status(400).json({ error: "Invalid action. Use 'close' or 'leave_open'." });
       }
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -52700,7 +52767,11 @@ async function registerRoutes(httpServer, app2) {
       if (!conv) return res.status(404).json({ error: "Conversation not found" });
       const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant" });
-      const shouldMask = true;
+      let shouldMask = true;
+      if (conv.jobId) {
+        const [stdUnlock] = await db.select({ id: jobUnlocks.id }).from(jobUnlocks).where(and(eq(jobUnlocks.jobId, conv.jobId), eq(jobUnlocks.phoneUnlocked, true)));
+        if (stdUnlock) shouldMask = false;
+      }
       let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(content, shouldMask);
       if (contactCount === 0 && process.env.HUGGINGFACE_API_KEY) {
         try {
@@ -52749,7 +52820,9 @@ async function registerRoutes(httpServer, app2) {
           {}
         );
       }
-      if (io) io.to(`conv_${convId}`).emit("new_message", msg);
+      pusher.trigger(`private-conversation-${convId}`, "new_message", msg).catch(
+        (err) => console.error("Pusher trigger error (message):", err)
+      );
       const otherParticipants = await db.select({ userId: conversationParticipants.userId }).from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), ne(conversationParticipants.userId, userId)));
       for (const p of otherParticipants) {
         await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });

@@ -369,13 +369,17 @@ export function processMessageContent(
     profanityCount = matchCount;
   }
 
-  // 2. ALWAYS mask contact info (not just for FREE tier — platform-wide policy)
-  const { masked, flags: contactFlags, hitCount } = maskContactInfo(processed);
-  if (hitCount > 0) {
-    processed = masked;
-    flags.push(...contactFlags);
-    isFiltered = true;
-    contactCount = hitCount;
+  // 2. Mask contact info only if shouldMaskContacts is true.
+  // For STANDARD-unlocked conversations, masking is disabled so the
+  // pro (who paid for contact access) can share/receive phone numbers.
+  if (shouldMaskContacts) {
+    const { masked, flags: contactFlags, hitCount } = maskContactInfo(processed);
+    if (hitCount > 0) {
+      processed = masked;
+      flags.push(...contactFlags);
+      isFiltered = true;
+      contactCount = hitCount;
+    }
   }
 
   return {

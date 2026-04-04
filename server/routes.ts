@@ -545,13 +545,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .where(and(eq(jobMatchbooks.jobId, row.job.id), eq(jobMatchbooks.professionalId, proId), isNull(jobMatchbooks.removedAt)));
       const [myUnlock] = await db.select().from(jobUnlocks)
         .where(and(eq(jobUnlocks.jobId, row.job.id), eq(jobUnlocks.professionalId, proId)));
+
+      // Attach customer phone to unlock record if pro has phone-unlocked this job
+      let unlockWithPhone: any = myUnlock || null;
+      if (myUnlock?.phoneUnlocked) {
+        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
+        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      }
+
       return {
         ...row.job,
         category: row.category,
         customer: row.customer,
         matchbookCount: matchbookCount[0].c,
         isMatchbooked: !!myMatchbook,
-        unlock: myUnlock || null
+        unlock: unlockWithPhone
       };
     }));
 
@@ -566,7 +574,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       .leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id))
       .where(and(eq(jobMatchbooks.professionalId, proId), isNull(jobMatchbooks.removedAt)))
       .orderBy(desc(jobMatchbooks.matchbookedAt));
-    return res.json(matchbooked);
+
+    const result = await Promise.all(matchbooked.map(async (row) => {
+      const [myUnlock] = await db.select().from(jobUnlocks)
+        .where(and(eq(jobUnlocks.jobId, row.job!.id), eq(jobUnlocks.professionalId, proId)));
+      let unlockWithPhone: any = myUnlock || null;
+      if (myUnlock?.phoneUnlocked) {
+        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job!.customerId));
+        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      }
+      return { ...row, unlock: unlockWithPhone };
+    }));
+
+    return res.json(result);
   });
 
   app.get("/api/jobs/:id", requireAuth, async (req: AuthRequest, res: Response) => {
@@ -575,7 +595,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const [category] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
     const [customer] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl, phone: users.phone })
       .from(users).where(eq(users.id, job.customerId));
-    return res.json({ ...job, category, customer: { ...customer, phone: undefined } });
+
+    // Only expose phone to pros who have a STANDARD (phone-unlocked) record for this job
+    let customerPhone: string | null = null;
+    const requestingUserId = req.user!.userId;
+    const requestingRole = req.user!.role;
+    if (requestingRole === "PROFESSIONAL") {
+      const [phoneUnlock] = await db.select().from(jobUnlocks)
+        .where(and(eq(jobUnlocks.jobId, job.id), eq(jobUnlocks.professionalId, requestingUserId), eq(jobUnlocks.phoneUnlocked, true)));
+      if (phoneUnlock) customerPhone = customer?.phone ?? null;
+    }
+
+    return res.json({ ...job, category, customer: { ...customer, phone: customerPhone } });
   });
 
   app.patch("/api/jobs/:id", requireAuth, async (req: AuthRequest, res: Response) => {
@@ -711,7 +742,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
       if (existing.length > 0) return res.status(409).json({ error: "Already unlocked this job" });
 
-      const creditsToSpend = tier === "STANDARD" ? job.creditCost : 0;
+      // Check for a pending spin-wheel DISCOUNT prize for this pro (STANDARD unlocks only)
+      let effectiveCreditCost = job.creditCost;
+      let appliedDiscountEventId: string | null = null;
+      if (tier === "STANDARD") {
+        const [pendingDiscount] = await db.select().from(spinWheelEvents)
+          .where(and(
+            eq(spinWheelEvents.professionalId, proId),
+            eq(spinWheelEvents.prizeType, "DISCOUNT"),
+            eq(spinWheelEvents.prizeApplied, false)
+          ))
+          .orderBy(asc(spinWheelEvents.id))
+          .limit(1);
+        if (pendingDiscount) {
+          effectiveCreditCost = Math.max(1, Math.floor(job.creditCost * (1 - (pendingDiscount.prizeValue ?? 20) / 100)));
+          appliedDiscountEventId = pendingDiscount.id;
+        }
+      }
+
+      const creditsToSpend = tier === "STANDARD" ? effectiveCreditCost : 0;
 
       await db.transaction(async (tx) => {
         if (creditsToSpend > 0) {
@@ -721,9 +770,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           await tx.update(users).set({ creditBalance: newBalance }).where(eq(users.id, proId));
           await tx.insert(creditTransactions).values({
             userId: proId, type: "SPEND", amount: -creditsToSpend, balanceAfter: newBalance,
-            description: `Unlocked job: ${job.title}`, referenceType: "JOB", referenceId: jobId
+            description: `Unlocked job: ${job.title}${appliedDiscountEventId ? " (spin discount applied)" : ""}`,
+            referenceType: "JOB", referenceId: jobId
           });
           await tx.update(jobs).set({ hasTokenPurchases: true, status: "IN_DISCUSSION", updatedAt: new Date() }).where(eq(jobs.id, jobId));
+        }
+
+        // Mark spin discount as used
+        if (appliedDiscountEventId) {
+          await tx.update(spinWheelEvents).set({ prizeApplied: true })
+            .where(eq(spinWheelEvents.id, appliedDiscountEventId));
         }
 
         await tx.insert(jobUnlocks).values({
@@ -754,7 +810,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await createNotification(job.customerId, "JOB_UNLOCK", "Professional interested in your job",
         `A professional has unlocked your job: ${job.title}`, { jobId });
 
-      return res.status(201).json({ success: true });
+      // Return customer phone for STANDARD unlocks so the pro sees it immediately
+      const responseData: any = { success: true };
+      if (tier === "STANDARD") {
+        const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
+        responseData.customerPhone = customerUser?.phone ?? null;
+      }
+
+      return res.status(201).json(responseData);
     } catch (e: any) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -799,7 +862,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       });
 
-      return res.json({ success: true });
+      const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
+      return res.json({ success: true, customerPhone: customerUser?.phone ?? null });
     } catch (e: any) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -840,6 +904,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Boost job
+  // Decline boost after aftercare NOT_SORTED — choose to close or leave open
+  app.post("/api/jobs/:id/aftercare/decline-boost", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { action } = req.body as { action: "close" | "leave_open" };
+      const jobId = req.params.id;
+      const userId = req.user!.userId;
+
+      const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
+      if (!job) return res.status(404).json({ error: "Job not found or not authorized" });
+
+      if (action === "close") {
+        await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, jobId));
+        await db.update(jobAftercares).set({ closedAt: new Date() })
+          .where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+        return res.json({ success: true, action: "closed" });
+      } else if (action === "leave_open") {
+        // Mark blockedRepost so the customer cannot repost the same job category
+        await db.update(jobs).set({ blockedRepost: true, updatedAt: new Date() }).where(eq(jobs.id, jobId));
+        await db.update(jobAftercares).set({ closedAt: new Date() })
+          .where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+        return res.json({ success: true, action: "left_open" });
+      } else {
+        return res.status(400).json({ error: "Invalid action. Use 'close' or 'leave_open'." });
+      }
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/jobs/:id/boost", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const jobId = req.params.id;
@@ -1320,8 +1413,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant" });
 
-      // Contact masking is ALWAYS enabled platform-wide — no phone sharing allowed
-      const shouldMask = true;
+      // Phone masking is disabled for conversations where the pro has a STANDARD
+      // (phone-unlocked) record for the job — they already paid for contact access.
+      let shouldMask = true;
+      if (conv.jobId) {
+        const [stdUnlock] = await db.select({ id: jobUnlocks.id }).from(jobUnlocks)
+          .where(and(eq(jobUnlocks.jobId, conv.jobId), eq(jobUnlocks.phoneUnlocked, true)));
+        if (stdUnlock) shouldMask = false;
+      }
 
       let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(content, shouldMask);
 
@@ -1366,8 +1465,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           "Phone numbers, emails, and social media handles are not allowed in messages. Please use in-app messaging to communicate.", {});
       }
 
-      // Emit via socket (only available in persistent server mode, not serverless)
-      if (io) io.to(`conv_${convId}`).emit("new_message", msg);
+      // Emit via Pusher real-time channel
+      pusher.trigger(`private-conversation-${convId}`, "new_message", msg).catch(err =>
+        console.error("Pusher trigger error (message):", err)
+      );
 
       // Notify other participants
       const otherParticipants = await db.select({ userId: conversationParticipants.userId })

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
@@ -29,6 +30,8 @@ const STATUS_LABELS: Record<string, string> = {
 function AftercareCard({ job }: { job: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [boostOffer, setBoostOffer] = useState<{ fee: number; discountPct: number } | null>(null);
+  const [showDeclineOptions, setShowDeclineOptions] = useState(false);
 
   const respond = useMutation({
     mutationFn: async (sorted: boolean) => {
@@ -37,14 +40,99 @@ function AftercareCard({ job }: { job: any }) {
       return res.json();
     },
     onSuccess: (data, sorted) => {
-      qc.invalidateQueries({ queryKey: ["/api/jobs"] });
       if (data.action === "boost_offered") {
-        toast({ title: "We can help!", description: `Boost your job for €${data.boostFee} to get ${data.discountPct}% off credit costs for professionals.` });
+        setBoostOffer({ fee: data.boostFee, discountPct: data.discountPct });
       } else {
+        qc.invalidateQueries({ queryKey: ["/api/jobs"] });
         toast({ title: sorted ? "Great news!" : "Job closed", description: sorted ? "Glad it got sorted! Don't forget to leave a review." : "Your job has been closed." });
       }
-    }
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
   });
+
+  const acceptBoost = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/jobs/${job.id}/boost`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: () => {
+      setBoostOffer(null);
+      qc.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({ title: "Job boosted!", description: "Your job is now featured and cheaper to claim. €4.99 charged." });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
+  });
+
+  const declineBoost = useMutation({
+    mutationFn: async (action: "close" | "leave_open") => {
+      const res = await apiRequest("POST", `/api/jobs/${job.id}/aftercare/decline-boost`, { action });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setBoostOffer(null);
+      setShowDeclineOptions(false);
+      qc.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({ title: data.action === "closed" ? "Job closed" : "Job left open", description: data.action === "left_open" ? "Note: you won't be able to repost this same type of job." : undefined });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
+  });
+
+  // Boost offer step
+  if (boostOffer && !showDeclineOptions) {
+    return (
+      <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-start gap-3 mb-3">
+            <Zap className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-medium text-sm">Boost <span className="text-primary">"{job.title}"</span> to get more interest?</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                For €{boostOffer.fee} your job is reposted and becomes {boostOffer.discountPct}% cheaper for professionals to claim.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="gap-1.5 bg-amber-500 hover:bg-amber-600 text-white" onClick={() => acceptBoost.mutate()} disabled={acceptBoost.isPending} data-testid="button-boost-yes">
+              <Zap className="w-3 h-3" /> Yes, boost (€{boostOffer.fee})
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowDeclineOptions(true)} disabled={acceptBoost.isPending} data-testid="button-boost-no">
+              No thanks
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Decline boost → close or leave open
+  if (showDeclineOptions) {
+    return (
+      <Card className="border-muted bg-muted/20">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-start gap-3 mb-3">
+            <AlertCircle className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-medium text-sm">What would you like to do with <span className="text-primary">"{job.title}"</span>?</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Closing removes it from the feed. Leaving it open keeps it visible (repost not allowed).</p>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => declineBoost.mutate("close")} disabled={declineBoost.isPending} data-testid="button-close-job">
+              Close job
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => declineBoost.mutate("leave_open")} disabled={declineBoost.isPending} data-testid="button-leave-open">
+              Leave it open
+            </Button>
+            <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={() => setShowDeclineOptions(false)} disabled={declineBoost.isPending}>
+              Back
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">

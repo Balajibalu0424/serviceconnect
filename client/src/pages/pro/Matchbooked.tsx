@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Star, MapPin, Lock, Zap, Loader2 } from "lucide-react";
+import { Star, MapPin, Lock, Zap, Loader2, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +97,22 @@ export default function ProMatchbooked() {
     queryKey: ["/api/jobs/matchbooked"],
   });
 
+  const upgrade = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await apiRequest("POST", `/api/jobs/${jobId}/upgrade`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/jobs/matchbooked"] });
+      toast({
+        title: "Upgraded to Standard",
+        description: data.customerPhone ? `Customer's phone: ${data.customerPhone}` : "Phone number unlocked — visible on the card.",
+      });
+    },
+    onError: (e: any) => toast({ title: "Upgrade failed", description: e.message, variant: "destructive" }),
+  });
+
   const unmatchbook = useMutation({
     mutationFn: async (jobId: string) => {
       const res = await apiRequest("DELETE", `/api/jobs/${jobId}/matchbook`);
@@ -177,6 +193,19 @@ export default function ProMatchbooked() {
                           data-testid={`button-unlock-${job.id}`}>
                           <Lock className="w-4 h-4 fill-current" /> Claim Lead
                         </Button>
+                      )}
+                      {isUnlocked && row.unlock?.tier === "FREE" && (
+                        <Button size="sm" variant="outline" className="gap-2 rounded-xl h-10 px-5 w-full md:w-auto border-primary/40 text-primary hover:bg-primary/10"
+                          onClick={() => upgrade.mutate(job.id)} disabled={upgrade.isPending}
+                          data-testid={`button-upgrade-${job.id}`}>
+                          {upgrade.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Phone className="w-3.5 h-3.5" />}
+                          Upgrade for phone ({job.creditCost} cr)
+                        </Button>
+                      )}
+                      {isUnlocked && row.unlock?.tier === "STANDARD" && row.unlock?.customerPhone && (
+                        <div className="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 px-4 h-10 rounded-xl border border-green-200 dark:border-green-800">
+                          <Phone className="w-3.5 h-3.5" /> {row.unlock.customerPhone}
+                        </div>
                       )}
                       {isUnlocked && row.unlock?.conversationId && (
                         <Button size="sm" variant="default" className="rounded-xl h-10 px-6 w-full md:w-auto" asChild>

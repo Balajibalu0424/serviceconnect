@@ -27,6 +27,8 @@ export default function JobDetail() {
   const qc = useQueryClient();
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [aftercareResponse, setAftercareResponse] = useState<"SORTED" | "NOT_SORTED" | null>(null);
+  const [boostOffer, setBoostOffer] = useState<{ fee: number; discountPct: number } | null>(null);
+  const [showDeclineBoostConfirm, setShowDeclineBoostConfirm] = useState(false);
   const [reviewData, setReviewData] = useState({ rating: 5, comment: "" });
   const [showReview, setShowReview] = useState(false);
 
@@ -91,14 +93,48 @@ export default function JobDetail() {
   });
 
   const respondAftercare = useMutation({
-    mutationFn: async (response: "SORTED" | "NOT_SORTED") => {
-      const res = await apiRequest("POST", `/api/jobs/${params?.id}/aftercare/respond`, { response });
+    mutationFn: async (sorted: boolean) => {
+      const res = await apiRequest("POST", `/api/jobs/${params?.id}/aftercare/respond`, { sorted });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.action === "boost_offered") {
+        setBoostOffer({ fee: data.boostFee, discountPct: data.discountPct });
+        setAftercareResponse("NOT_SORTED");
+      } else {
+        qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
+        toast({ title: data.reviewPrompt ? "Job closed — leave a review!" : "Job closed", description: data.reviewPrompt ? "Glad it worked out!" : undefined });
+      }
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const acceptBoost = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/jobs/${params?.id}/boost`);
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
     onSuccess: () => {
+      setBoostOffer(null);
       qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
-      toast({ title: "Response recorded" });
+      toast({ title: "Job boosted!", description: "Your job is now featured and cheaper for pros. €4.99 charged." });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const declineBoost = useMutation({
+    mutationFn: async (action: "close" | "leave_open") => {
+      const res = await apiRequest("POST", `/api/jobs/${params?.id}/aftercare/decline-boost`, { action });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setBoostOffer(null);
+      setShowDeclineBoostConfirm(false);
+      qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
+      toast({ title: data.action === "closed" ? "Job closed" : "Job left open", description: data.action === "left_open" ? "Note: you won't be able to repost this same type of job." : undefined });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -125,8 +161,8 @@ export default function JobDetail() {
   if (!job) return <DashboardLayout><div className="p-6">Job not found</div></DashboardLayout>;
 
   const isAftercare = ["AFTERCARE_2D", "AFTERCARE_5D"].includes(job.status);
-  const canBoost = job.status === "OPEN" && !job.isBoosted && job.customerId === user?.id;
-  const canClose = ["OPEN", "MATCHED"].includes(job.status) && job.customerId === user?.id;
+  const canBoost = ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(job.status) && !job.isBoosted && job.customerId === user?.id;
+  const canClose = ["LIVE", "IN_DISCUSSION", "MATCHED", "BOOSTED"].includes(job.status) && job.customerId === user?.id;
   const isCompleted = job.status === "COMPLETED";
 
   return (
@@ -152,8 +188,8 @@ export default function JobDetail() {
           </div>
         </div>
 
-        {/* Aftercare banner */}
-        {isAftercare && (
+        {/* Aftercare banner — initial sorted? prompt */}
+        {isAftercare && !boostOffer && !showDeclineBoostConfirm && (
           <Card className="border-orange-400 bg-orange-50 dark:bg-orange-950/30">
             <CardContent className="pt-4 pb-4">
               <div className="flex items-start gap-3">
@@ -167,12 +203,70 @@ export default function JobDetail() {
                   </p>
                   <div className="flex gap-2 mt-3">
                     <Button size="sm" variant="default" className="gap-1 bg-green-600 hover:bg-green-700"
-                      onClick={() => respondAftercare.mutate("SORTED")} disabled={respondAftercare.isPending}>
+                      onClick={() => respondAftercare.mutate(true)} disabled={respondAftercare.isPending}>
                       <CheckCircle2 className="w-4 h-4" /> All sorted
                     </Button>
                     <Button size="sm" variant="outline" className="gap-1"
-                      onClick={() => respondAftercare.mutate("NOT_SORTED")} disabled={respondAftercare.isPending}>
+                      onClick={() => respondAftercare.mutate(false)} disabled={respondAftercare.isPending}>
                       <XCircle className="w-4 h-4" /> Not sorted
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Aftercare — boost offer step */}
+        {boostOffer && !showDeclineBoostConfirm && (
+          <Card className="border-amber-400 bg-amber-50 dark:bg-amber-950/30">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-start gap-3">
+                <Zap className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-semibold text-sm">Boost your job?</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    For €{boostOffer.fee} your job gets reposted and becomes {boostOffer.discountPct}% cheaper for professionals to claim — increasing your chances of getting sorted.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" variant="default" className="gap-1 bg-amber-500 hover:bg-amber-600 text-white"
+                      onClick={() => acceptBoost.mutate()} disabled={acceptBoost.isPending}>
+                      <Zap className="w-4 h-4" /> Yes, boost it (€{boostOffer.fee})
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1"
+                      onClick={() => setShowDeclineBoostConfirm(true)} disabled={acceptBoost.isPending}>
+                      No thanks
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Aftercare — decline boost → close or leave open */}
+        {showDeclineBoostConfirm && (
+          <Card className="border-muted bg-muted/30">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-semibold text-sm">What would you like to do with this job?</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Closing the job removes it from the feed. Leaving it open keeps it visible but you won't be able to repost the same type of job.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" variant="destructive" className="gap-1"
+                      onClick={() => declineBoost.mutate("close")} disabled={declineBoost.isPending}>
+                      Close this job
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1"
+                      onClick={() => declineBoost.mutate("leave_open")} disabled={declineBoost.isPending}>
+                      Leave it open
+                    </Button>
+                    <Button size="sm" variant="ghost" className="gap-1"
+                      onClick={() => setShowDeclineBoostConfirm(false)} disabled={declineBoost.isPending}>
+                      Back
                     </Button>
                   </div>
                 </div>
