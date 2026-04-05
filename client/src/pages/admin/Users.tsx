@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Users, CreditCard } from "lucide-react";
+import { Search, Users, CreditCard, ShieldCheck, ShieldX } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 const ROLE_COLORS: Record<string, string> = { CUSTOMER: "secondary", PROFESSIONAL: "default", ADMIN: "destructive", SUPPORT: "outline" };
@@ -46,6 +46,19 @@ export default function AdminUsers() {
     onSuccess: () => {
       qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith("/api/admin/users") });
       toast({ title: "User updated" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const verifyPro = useMutation({
+    mutationFn: async ({ id, approved, note }: { id: string; approved: boolean; note?: string }) => {
+      const res = await apiRequest("POST", `/api/admin/users/${id}/verify`, { approved, note });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith("/api/admin/users") });
+      toast({ title: vars.approved ? "Pro verified" : "Verification rejected" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -122,10 +135,54 @@ export default function AdminUsers() {
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <CreditCard className="w-3 h-3" />
                         {u.creditBalance ?? 0} credits
+                        {u.proVerification?.verificationStatus === "PENDING" && (
+                          <span className="ml-2 text-amber-600 dark:text-amber-400 font-medium">· Verification pending</span>
+                        )}
                       </p>
                     )}
                   </div>
                   <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+                    {u.role === "PROFESSIONAL" && u.proVerification && (
+                      <>
+                        {u.proVerification.verificationStatus === "PENDING" && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-green-700 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-950/30"
+                              onClick={() => verifyPro.mutate({ id: u.id, approved: true })}
+                              disabled={verifyPro.isPending}
+                              data-testid={`button-approve-${u.id}`}
+                            >
+                              <ShieldCheck className="w-3 h-3 mr-1" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                              onClick={() => verifyPro.mutate({ id: u.id, approved: false, note: "Documents not sufficient" })}
+                              disabled={verifyPro.isPending}
+                              data-testid={`button-reject-${u.id}`}
+                            >
+                              <ShieldX className="w-3 h-3 mr-1" /> Reject
+                            </Button>
+                          </>
+                        )}
+                        {u.proVerification.verificationStatus === "APPROVED" && (
+                          <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1 font-medium">
+                            <ShieldCheck className="w-3 h-3" /> Verified
+                          </span>
+                        )}
+                        {u.proVerification.verificationStatus === "UNSUBMITTED" && (
+                          <span className="text-xs text-muted-foreground">Not submitted</span>
+                        )}
+                        {u.proVerification.verificationStatus === "REJECTED" && (
+                          <span className="text-xs text-destructive flex items-center gap-1">
+                            <ShieldX className="w-3 h-3" /> Rejected
+                          </span>
+                        )}
+                      </>
+                    )}
                     {u.role === "PROFESSIONAL" && (
                       <Button
                         size="sm"

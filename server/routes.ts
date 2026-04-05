@@ -1798,6 +1798,71 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(profile);
   });
 
+  // ── Pro Verification ─────────────────────────────────────────────────────────
+
+  app.post("/api/pro/verification/submit", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
+    try {
+      const proId = req.user!.userId;
+      const { documentUrl, licenseNumber } = req.body;
+      if (!documentUrl) return res.status(400).json({ error: "Document URL is required" });
+
+      const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, proId));
+      if (!profile) return res.status(404).json({ error: "Professional profile not found" });
+      if (profile.verificationStatus === "APPROVED") return res.status(409).json({ error: "Already verified" });
+
+      await db.update(professionalProfiles).set({
+        verificationStatus: "PENDING",
+        verificationDocumentUrl: documentUrl,
+        verificationSubmittedAt: new Date(),
+        licenseNumber: licenseNumber || profile.licenseNumber,
+        updatedAt: new Date()
+      }).where(eq(professionalProfiles.userId, proId));
+
+      await createNotification(proId, "VERIFICATION_SUBMITTED", "Verification submitted",
+        "Your verification documents have been submitted and are pending admin review.", {});
+
+      return res.json({ success: true, verificationStatus: "PENDING" });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/users/:id/verify", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { approved, note } = req.body as { approved: boolean; note?: string };
+      const targetUserId = req.params.id;
+
+      const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, targetUserId));
+      if (!profile) return res.status(404).json({ error: "Professional profile not found" });
+
+      const newStatus = approved ? "APPROVED" : "REJECTED";
+      await db.update(professionalProfiles).set({
+        isVerified: approved,
+        verificationStatus: newStatus,
+        verificationReviewedAt: new Date(),
+        verificationReviewNote: note || null,
+        updatedAt: new Date()
+      }).where(eq(professionalProfiles.userId, targetUserId));
+
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId, action: approved ? "VERIFY_PRO" : "REJECT_PRO",
+        resourceType: "USER", resourceId: targetUserId,
+        changes: { approved, note }, ipAddress: req.ip
+      });
+
+      const notifTitle = approved ? "Verification approved!" : "Verification not approved";
+      const notifMsg = approved
+        ? "Your professional account has been verified. You now have full access to the platform."
+        : `Your verification was not approved. Reason: ${note || "Please resubmit with valid documents."}`;
+      await createNotification(targetUserId, approved ? "VERIFICATION_APPROVED" : "VERIFICATION_REJECTED",
+        notifTitle, notifMsg, {});
+
+      return res.json({ success: true, verificationStatus: newStatus });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/pro/:id/profile", async (req: Request, res: Response) => {
     const [user] = await db.select().from(users).where(eq(users.id, req.params.id));
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -1887,7 +1952,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     const result = await db.select().from(users).where(and(...conditions)).orderBy(desc(users.createdAt)).limit(parseInt(limit)).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(users).where(and(...conditions));
-    return res.json({ users: result.map(u => ({ ...u, passwordHash: undefined })), total: c });
+
+    // Attach verification info for professionals
+    const usersWithVerification = await Promise.all(result.map(async (u) => {
+      if (u.role === "PROFESSIONAL") {
+        const [profile] = await db.select({
+          isVerified: professionalProfiles.isVerified,
+          verificationStatus: professionalProfiles.verificationStatus,
+          verificationDocumentUrl: professionalProfiles.verificationDocumentUrl,
+          verificationSubmittedAt: professionalProfiles.verificationSubmittedAt,
+          verificationReviewNote: professionalProfiles.verificationReviewNote,
+        }).from(professionalProfiles).where(eq(professionalProfiles.userId, u.id));
+        return { ...u, passwordHash: undefined, proVerification: profile || null };
+      }
+      return { ...u, passwordHash: undefined };
+    }));
+
+    return res.json({ users: usersWithVerification, total: c });
   });
 
   app.patch("/api/admin/users/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {

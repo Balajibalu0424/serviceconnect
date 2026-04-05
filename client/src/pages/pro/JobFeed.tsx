@@ -284,6 +284,22 @@ export default function ProJobFeed() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
   });
 
+  const upgrade = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await apiRequest("POST", `/api/jobs/${jobId}/upgrade`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] });
+      toast({
+        title: "Upgraded to Standard",
+        description: data.customerPhone ? `Customer's phone: ${data.customerPhone}` : "Phone number unlocked.",
+      });
+    },
+    onError: (e: any) => toast({ title: "Upgrade failed", description: e.message, variant: "destructive" })
+  });
+
   const [loadedPages, setLoadedPages] = useState<Record<string, any[]>>({});
   const cacheKey = `${categoryFilter}:${page}`;
   if (pageData.length > 0 && !loadedPages[cacheKey]) {
@@ -399,6 +415,13 @@ export default function ProJobFeed() {
                             <span className="flex items-center gap-1.5 text-xs font-semibold">
                               <Phone className="w-3.5 h-3.5 text-green-600 dark:text-green-500" /> {job.unlock.customerPhone}
                             </span>
+                          )}
+                          {job.unlock.tier === "FREE" && (
+                            <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs rounded-lg border-primary/40 text-primary hover:bg-primary/10"
+                              onClick={() => upgrade.mutate(job.id)} disabled={upgrade.isPending}
+                              data-testid={`button-upgrade-${job.id}`}>
+                              <Phone className="w-3 h-3" /> Get phone ({job.creditCost} cr)
+                            </Button>
                           )}
                           <Button size="sm" variant="default" className="gap-1.5 h-8 text-xs ml-auto rounded-lg shadow-sm"
                             onClick={() => setLocation("/pro/chat")} data-testid={`button-chat-${job.id}`}>

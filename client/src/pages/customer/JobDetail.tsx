@@ -104,7 +104,12 @@ export default function JobDetail() {
         setAftercareResponse("NOT_SORTED");
       } else {
         qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
-        toast({ title: data.reviewPrompt ? "Job closed — leave a review!" : "Job closed", description: data.reviewPrompt ? "Glad it worked out!" : undefined });
+        if (data.reviewPrompt) {
+          setShowReview(true);
+          toast({ title: "Job closed!", description: "Glad it got sorted — leave a review for the professional." });
+        } else {
+          toast({ title: "Job closed" });
+        }
       }
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),

@@ -195,6 +195,75 @@ function ProcessingScreen({ categorySlug }: { categorySlug: string }) {
   );
 }
 
+function OtpStep({ email, otp, setOtp, onVerify, loading }: {
+  email: string; otp: string; setOtp: (v: string) => void;
+  onVerify: () => void; loading: boolean;
+}) {
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
+  const handleResend = async () => {
+    // NOTE: Real email OTP delivery is deferred (requires SendGrid/Resend integration).
+    // This button shows UI readiness — in demo mode the code remains 123456.
+    setResending(true);
+    setResendCooldown(60);
+    setResending(false);
+    toast({ title: "Code resent", description: "Demo mode: use code 123456." });
+  };
+
+  return (
+    <div className="space-y-6 text-center">
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Verify your email</h1>
+        <p className="text-muted-foreground">Enter the 6-digit code sent to <strong>{email}</strong></p>
+        <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mt-1 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-3 py-1.5 inline-block">
+          Demo mode — use code: <strong className="font-mono tracking-widest">123456</strong>
+        </p>
+      </div>
+      <div className="max-w-xs mx-auto space-y-3">
+        <Input
+          type="text" maxLength={6} value={otp}
+          onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
+          placeholder="123456"
+          className="text-center text-2xl tracking-widest h-14 font-mono"
+          data-testid="input-otp"
+        />
+        <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+          <Clock className="w-3 h-3" />
+          {resendCooldown > 0 ? (
+            <span>Resend available in {resendCooldown}s</span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending}
+              className="text-primary hover:underline disabled:opacity-50"
+              data-testid="button-resend-otp"
+            >
+              {resending ? "Resending…" : "Resend code"}
+            </button>
+          )}
+        </div>
+      </div>
+      <Button
+        className="w-full gap-2"
+        onClick={onVerify}
+        disabled={loading || otp.length !== 6}
+        data-testid="button-verify"
+      >
+        {loading ? "Verifying..." : "Verify & Go Live"} <CheckCircle className="w-4 h-4" />
+      </Button>
+    </div>
+  );
+}
+
 export default function PostJob() {
   const search = useSearch();
   const params = new URLSearchParams(search);
@@ -584,20 +653,13 @@ export default function PostJob() {
 
         {/* Step 3: OTP Verification */}
         {step === 3 && (needsVerify || !isLoggedIn) && (
-          <div className="space-y-6 text-center">
-            <div>
-              <h1 className="text-2xl font-bold mb-1">Verify your email</h1>
-              <p className="text-muted-foreground">Enter the 6-digit code sent to {account.email}</p>
-              <p className="text-xs text-accent font-medium mt-1">Demo mode — use code: <strong className="font-mono">123456</strong></p>
-            </div>
-            <div className="max-w-xs mx-auto">
-              <Input type="text" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)}
-                placeholder="123456" className="text-center text-2xl tracking-widest h-14 font-mono" data-testid="input-otp" />
-            </div>
-            <Button className="w-full gap-2" onClick={handleOtpVerify} disabled={loading || otp.length !== 6} data-testid="button-verify">
-              {loading ? "Verifying..." : "Verify & Go Live"} <CheckCircle className="w-4 h-4" />
-            </Button>
-          </div>
+          <OtpStep
+            email={account.email}
+            otp={otp}
+            setOtp={setOtp}
+            onVerify={handleOtpVerify}
+            loading={loading}
+          />
         )}
 
         {/* Step 4: Success */}

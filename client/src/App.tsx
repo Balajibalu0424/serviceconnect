@@ -41,6 +41,7 @@ import ProChat from "@/pages/pro/Chat";
 import ProProfile from "@/pages/pro/ProfileEditor";
 import ProCredits from "@/pages/pro/Credits";
 import ProSpinWheel from "@/pages/pro/SpinWheel";
+import ProVerificationPending from "@/pages/pro/VerificationPending";
 
 // Admin pages
 import AdminDashboard from "@/pages/admin/Dashboard";
@@ -53,11 +54,16 @@ import AdminAuditLogs from "@/pages/admin/AuditLogs";
 import AdminFeatureFlags from "@/pages/admin/FeatureFlags";
 import AdminMetrics from "@/pages/admin/Metrics";
 
-function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
+function ProtectedRoute({ children, roles, requireVerified = false }: { children: React.ReactNode; roles?: string[]; requireVerified?: boolean }) {
   const { user, isLoading, isAuthenticated } = useAuth();
   if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="text-muted-foreground">Loading...</div></div>;
   if (!isAuthenticated) return <Redirect to="/login" />;
   if (roles && user && !roles.includes(user.role)) return <Redirect to="/" />;
+  // Gate pro routes behind verification
+  if (requireVerified && user?.role === "PROFESSIONAL") {
+    const isVerified = user.profile?.isVerified === true;
+    if (!isVerified) return <Redirect to="/pro/verification-pending" />;
+  }
   return <>{children}</>;
 }
 
@@ -101,24 +107,29 @@ function AppRoutes() {
         <ProtectedRoute><CustomerSettings /></ProtectedRoute>
       </Route>
 
-      {/* Professional */}
+      {/* Professional — verification pending/submit (no requireVerified so unverified pros can reach it) */}
+      <Route path="/pro/verification-pending">
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProVerificationPending /></ProtectedRoute>
+      </Route>
+
+      {/* Professional — verified routes */}
       <Route path="/pro/dashboard">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProDashboard /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProDashboard /></ProtectedRoute>
       </Route>
       <Route path="/pro/feed">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProJobFeed /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProJobFeed /></ProtectedRoute>
       </Route>
       <Route path="/pro/matchbooked">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProMatchbooked /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProMatchbooked /></ProtectedRoute>
       </Route>
       <Route path="/pro/leads">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProLeads /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProLeads /></ProtectedRoute>
       </Route>
       <Route path="/pro/bookings">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProBookings /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProBookings /></ProtectedRoute>
       </Route>
       <Route path="/pro/chat">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProChat /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProChat /></ProtectedRoute>
       </Route>
       <Route path="/pro/profile">
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProProfile /></ProtectedRoute>
@@ -127,7 +138,7 @@ function AppRoutes() {
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProCredits /></ProtectedRoute>
       </Route>
       <Route path="/pro/spin">
-        <ProtectedRoute roles={["PROFESSIONAL"]}><ProSpinWheel /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProSpinWheel /></ProtectedRoute>
       </Route>
 
       {/* Admin */}
