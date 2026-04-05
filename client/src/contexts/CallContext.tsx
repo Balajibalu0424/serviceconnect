@@ -178,12 +178,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: false });
         setCallStatus("RINGING");
       } else if (role === "caller") {
-        // Server confirmed callee accepted, now begin the WebRTC offer
-        const callInfo = activeCallRef.current;
-        if (!callInfo) return;
+        // Server fired call_ready — set activeCall from the event payload and start the offer.
+        // activeCallRef is null at this point (caller only did a REST request, not a UI action),
+        // so we must read from and name directly from the event.
+        setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: true });
         setCallStatus("INITIATING");
-        // kick off offer async
-        _sendOffer(callInfo.withUserId).catch(console.error);
+        _sendOffer(from).catch(console.error);
       }
     };
 
@@ -269,10 +269,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       await pc.setLocalDescription(offer);
 
       console.debug("[WebRTC] Sending offer to", targetUserId);
-      socketRef.current?.emit("call_user", {
-        userToCall: targetUserId,
-        signalData: offer,
-        from: user?.id,
+      socketRef.current?.emit("incoming_call", {
+        to: targetUserId,
+        signal: offer,
         name: `${user?.firstName} ${user?.lastName}`,
       });
     } catch (err) {

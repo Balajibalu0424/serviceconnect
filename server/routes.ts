@@ -144,8 +144,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     try {
       await pusher.trigger(`private-user-${to}`, event, {
-        from: req.user.id,
-        data,
+        ...data,
+        from: req.user!.userId,
       });
       res.json({ success: true });
     } catch (err) {
@@ -1233,8 +1233,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .from(users).where(eq(users.id, userId));
 
       await createNotification(targetId, "CALL_REQUEST", "📞 Call request received",
-        `${requester.firstName} ${requester.lastName} would like to have a call with you: "${reason || "Discuss the project"}"`, 
+        `${requester.firstName} ${requester.lastName} would like to have a call with you: "${reason || "Discuss the project"}"`,
         { callRequestId: callReq.id, requesterId: userId, jobId, bookingId });
+
+      // Get target user name for call_ready payload
+      const [targetUser] = await db.select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users).where(eq(users.id, targetId));
+
+      const requesterName = `${requester.firstName} ${requester.lastName}`;
+      const targetName = targetUser ? `${targetUser.firstName} ${targetUser.lastName}` : "User";
+
+      // Fire call_ready to both parties to kick off the WebRTC flow immediately.
+      // Caller receives role=caller and starts the offer; callee receives role=callee and shows RINGING.
+      await pusher.trigger(`private-user-${userId}`, "call_ready", {
+        role: "caller",
+        from: targetId,
+        name: targetName,
+      });
+      await pusher.trigger(`private-user-${targetId}`, "call_ready", {
+        role: "callee",
+        from: userId,
+        name: requesterName,
+      });
 
       return res.status(201).json(callReq);
     } catch (e: any) {
