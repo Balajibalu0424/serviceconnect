@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSocket } from "@/contexts/SocketContext";
 import { useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,16 +10,34 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { ShieldCheck, Clock, XCircle, Upload, CheckCircle2, LogOut } from "lucide-react";
+import { ShieldCheck, Clock, XCircle, Upload, CheckCircle2, LogOut, ArrowRight } from "lucide-react";
 
 export default function ProVerificationPending() {
   const { user, refreshUser, logout } = useAuth();
+  const { socket } = useSocket();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const profile = user?.profile;
   const status: string = profile?.verificationStatus ?? "UNSUBMITTED";
 
   const [documentUrl, setDocumentUrl] = useState(profile?.verificationDocumentUrl ?? "");
   const [licenseNumber, setLicenseNumber] = useState(profile?.licenseNumber ?? "");
+
+  // Listen for real-time approval notification from admin via Pusher
+  useEffect(() => {
+    const handleNotification = async (data: any) => {
+      if (data?.type === "VERIFICATION_APPROVED") {
+        await refreshUser();
+        toast({ title: "Verification approved!", description: "You now have full access to the platform." });
+        navigate("/pro/dashboard");
+      }
+    };
+
+    socket?.on("new_notification", handleNotification);
+    return () => {
+      socket?.off("new_notification", handleNotification);
+    };
+  }, [socket, refreshUser, toast, navigate]);
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -84,6 +104,16 @@ export default function ProVerificationPending() {
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground text-center">{cfg.desc}</p>
 
+            {status === "APPROVED" && (
+              <Button
+                className="w-full"
+                onClick={() => navigate("/pro/dashboard")}
+                data-testid="button-go-to-dashboard"
+              >
+                Go to Dashboard <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            )}
+
             {canSubmit && (
               <div className="space-y-3 pt-2">
                 <div className="space-y-1">
@@ -120,6 +150,18 @@ export default function ProVerificationPending() {
               <div className="bg-amber-50 dark:bg-amber-950/20 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-400 text-center">
                 You'll receive a notification once your review is complete.
               </div>
+            )}
+
+            {status !== "APPROVED" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full text-muted-foreground"
+                onClick={() => navigate("/pro/dashboard")}
+                data-testid="button-skip-verification"
+              >
+                Skip for now — go to Dashboard
+              </Button>
             )}
 
             <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => logout()}>

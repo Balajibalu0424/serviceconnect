@@ -112,24 +112,24 @@ function AppRoutes() {
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProVerificationPending /></ProtectedRoute>
       </Route>
 
-      {/* Professional — verified routes */}
+      {/* Professional — all routes accessible without verification */}
       <Route path="/pro/dashboard">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProDashboard /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProDashboard /></ProtectedRoute>
       </Route>
       <Route path="/pro/feed">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProJobFeed /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProJobFeed /></ProtectedRoute>
       </Route>
       <Route path="/pro/matchbooked">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProMatchbooked /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProMatchbooked /></ProtectedRoute>
       </Route>
       <Route path="/pro/leads">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProLeads /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProLeads /></ProtectedRoute>
       </Route>
       <Route path="/pro/bookings">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProBookings /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProBookings /></ProtectedRoute>
       </Route>
       <Route path="/pro/chat">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProChat /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProChat /></ProtectedRoute>
       </Route>
       <Route path="/pro/profile">
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProProfile /></ProtectedRoute>
@@ -138,7 +138,7 @@ function AppRoutes() {
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProCredits /></ProtectedRoute>
       </Route>
       <Route path="/pro/spin">
-        <ProtectedRoute roles={["PROFESSIONAL"]} requireVerified><ProSpinWheel /></ProtectedRoute>
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProSpinWheel /></ProtectedRoute>
       </Route>
 
       {/* Admin */}
