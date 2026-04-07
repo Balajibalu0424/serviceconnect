@@ -307,3 +307,81 @@ ALTER TABLE professional_profiles ADD COLUMN verification_review_note TEXT;
 5. **`reviewPrompt` auto-open requires an active booking** — if no booking exists for the job, `POST /api/bookings/:id/review` will 404. The review button is already gated on `isCompleted` status in the UI.
 
 6. **OTP resend stub** — clicking resend does not send any email. It resets the UI countdown only. This is clearly labelled in the component as a demo-mode stub.
+
+---
+
+## Round 3 — Platform Refinements (2026-04-07)
+
+### What Was Built
+
+**1. Customer Phone Verification Gate**
+- `phoneVerified` column added to `users` table
+- `phone_verification_tokens` table: hashed OTPs with 10-minute expiry
+- `POST /api/auth/send-phone-otp` + `POST /api/auth/verify-phone-otp` endpoints
+- `PhoneVerificationModal` component: two-step modal (send → verify) for logged-in users
+- `PostJob.tsx`: gate fires before publish if `phoneVerified = false`; skipped if already verified
+- New users: phone field mandatory before onboarding proceeds
+
+**2. Customer Profile Hardening**
+- `PATCH /api/auth/profile`: returns 403 if CUSTOMER tries to change firstName/lastName
+- `GET /api/auth/me`: strips internal `id` from customer-facing response
+- `PATCH /api/admin/users/:id/name`: admin-only name correction with audit log
+- `Settings.tsx`: name shown as read-only display for customers with explanatory note
+
+**3. Unified Contact-Sharing Moderation**
+- `server/moderationService.ts`: single `moderateText(text, options)` utility
+- Covers: direct numbers, spaced digits, written number words (6+ sequence), mixed patterns, separator bypass, partial obfuscation
+- Applied to: job descriptions, quote messages, chat messages
+- Behaviour: block (HTTP 422) — not warn or mask
+- Chat phone allowed only with confirmed STANDARD-tier unlock (`phoneUnlocked = true`)
+
+**4. Reviews — Pro-Scoped, Reply Capable**
+- `proReply` and `proRepliedAt` columns added to `reviews` table
+- `POST /api/reviews/:id/reply`: professional-only, one reply per review, immutable
+- `GET /api/reviews`: enriched with reviewer/reviewee names
+- `ProProfile.tsx`: heading → "What customers say about [Name]"; pro replies displayed
+- `ProfileEditor.tsx`: reviews management section with `ReviewReplyForm` component
+- `ReviewReplyForm`: single-use, permanent after submit, 1000-char limit
+
+**5. AI Branding**
+- `client/src/lib/constants.ts`: `AI_DISPLAY_NAME = "ServiceConnect AI"`
+- `AiAssistantWidget.tsx`: "Powered by Gemini" removed; product-owned name throughout
+
+**6. AI Widget — Sandboxed 2-Action Mode**
+- Widget rewritten: home screen → "Post a Job" or "Get Support" buttons only
+- Post Job: AI chat for description, links to full `/post-job`
+- Support: category + description → `POST /api/support/tickets`
+- Backend: only `{ userName, userRole }` passed to Gemini; `aiChatWidgetSandboxed()` enforces scope
+- Out-of-scope queries return: "I can help you post a job or raise a support ticket."
+
+**7. Professional Verification — Optional**
+- `verificationLevelEnum` + `verificationLevel` column on `professional_profiles`
+- Submit → `SELF_DECLARED`; admin approve → `DOCUMENT_VERIFIED`; reject → `NONE`
+- `VerificationPending.tsx`: full optional framing, "Boost Your Credibility (Optional)"
+- No access blocking gate; skip button prominent
+
+### Files Changed (Round 3)
+- `shared/schema.ts` — 4 schema additions
+- `server/moderationService.ts` — new file
+- `server/routes.ts` — 8+ endpoint additions/modifications
+- `server/geminiService.ts` — sandbox function + signature update
+- `client/src/lib/constants.ts` — new file
+- `client/src/components/ai/AiAssistantWidget.tsx` — full rewrite
+- `client/src/components/auth/PhoneVerificationModal.tsx` — new file
+- `client/src/components/reviews/ReviewReplyForm.tsx` — new file
+- `client/src/pages/customer/PostJob.tsx` — phone gate + mandatory phone
+- `client/src/pages/customer/Settings.tsx` — name read-only for customers
+- `client/src/pages/pro/ProfileEditor.tsx` — reviews management section
+- `client/src/pages/pro/VerificationPending.tsx` — optional framing
+- `client/src/pages/public/ProProfile.tsx` — pro-scoped review copy + pro replies
+
+### Remaining Pending (Round 3)
+1. **SMS provider** (Twilio) for production phone OTP — dev uses console log + master code `123456`
+2. **Verified badge display** on pro cards — `verificationLevel` stored, display not yet wired
+3. **DB migration** — run `npm run db:push` before deploying
+4. **GDPR retention policy** — document phone storage purpose
+
+### Known Limitations (Round 3)
+- Pre-existing Drizzle TS2769 errors in routes.ts (~50 lines) are unchanged and pre-date this work
+- Phone OTP sends no real SMS in current state — production requires SMS provider integration
+- AI widget job posting guides description only; full posting completion happens at /post-job

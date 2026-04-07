@@ -14,6 +14,7 @@ import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camer
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
+import PhoneVerificationModal from "@/components/auth/PhoneVerificationModal";
 const ICON_MAP: Record<string, any> = { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator };
 
 type Step = 1 | 1.5 | 2 | 2.5 | 3 | 4;
@@ -281,6 +282,7 @@ export default function PostJob() {
   const [jobId, setJobId] = useState<string | null>(user?.firstJobId || null);
   const [otp, setOtp] = useState("");
   const [needsVerify, setNeedsVerify] = useState(verifyMode && user && !user.emailVerified ? true : false);
+  const [showPhoneVerify, setShowPhoneVerify] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [showProcessing, setShowProcessing] = useState(false);
@@ -400,6 +402,13 @@ export default function PostJob() {
       const jobPayload = { ...job, description: enrichedDescription };
 
       if (isLoggedIn) {
+        // Gate: verified phone required to publish — one-time, skipped once verified
+        if (!(user as any)?.phoneVerified) {
+          setShowPhoneVerify(true);
+          setLoading(false);
+          return;
+        }
+
         // Show fake processing screen for 2.5s then submit
         setStep(2.5);
         await new Promise(r => setTimeout(r, 2500));
@@ -417,6 +426,13 @@ export default function PostJob() {
         setStep(4);
         toast({ title: "Job posted!", description: data.aiAnalysis?.urgency?.isUrgent ? "🚨 Urgent — pros are being notified now!" : "Your job is now live." });
         await refreshUser();
+        return;
+      }
+
+      // New user — phone is mandatory to prevent ghost leads
+      if (!account.phone || account.phone.trim().length < 7) {
+        toast({ title: "Phone number required", description: "A valid phone number is required to verify your identity before your job goes live.", variant: "destructive" });
+        setLoading(false);
         return;
       }
 
@@ -710,6 +726,18 @@ export default function PostJob() {
           </div>
         )}
       </div>
+
+      {/* Phone verification gate for logged-in users without verified phone */}
+      <PhoneVerificationModal
+        open={showPhoneVerify}
+        phone={(user as any)?.phone}
+        onVerified={async () => {
+          setShowPhoneVerify(false);
+          await refreshUser();
+          handleAccountSubmit();
+        }}
+        onDismiss={() => setShowPhoneVerify(false)}
+      />
     </div>
   );
 }

@@ -13,12 +13,15 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Star, Briefcase, TrendingUp } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { ReviewReplyForm } from "@/components/reviews/ReviewReplyForm";
 
 export default function ProProfileEditor() {
   const { user, refreshUser } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
   const { data: profile, isLoading } = useQuery<any>({ queryKey: ["/api/pro/profile"] });
+  const { data: myReviews = [], refetch: refetchReviews } = useQuery<any[]>({ queryKey: ["/api/reviews"] });
 
   const [form, setForm] = useState({
     businessName: "",
@@ -246,6 +249,49 @@ export default function ProProfileEditor() {
                     <Badge className="gap-1 text-xs"><Briefcase className="w-3 h-3" /> Verified Professional</Badge>
                   </div>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Reviews — pro can view and respond */}
+        {myReviews.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                Customer reviews of your profile
+                <span className="text-muted-foreground font-normal text-sm ml-1">({myReviews.length})</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-5">
+                {myReviews.map((r: any) => (
+                  <div key={r.id} className="border-b last:border-0 pb-5 last:pb-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="flex">
+                        {[1, 2, 3, 4, 5].map(i => (
+                          <Star key={i} className={`w-3.5 h-3.5 ${i <= r.rating ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/30"}`} />
+                        ))}
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
+                      </span>
+                      {r.reviewerFirstName && (
+                        <span className="text-xs text-muted-foreground">· {r.reviewerFirstName}</span>
+                      )}
+                    </div>
+                    {r.title && <p className="text-sm font-medium mb-0.5">{r.title}</p>}
+                    {r.comment && <p className="text-sm text-muted-foreground italic">"{r.comment}"</p>}
+                    {r.proReply ? (
+                      <div className="mt-3 pl-3 border-l-2 border-blue-200 dark:border-blue-800">
+                        <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-0.5">Your response:</p>
+                        <p className="text-xs text-muted-foreground">{r.proReply}</p>
+                      </div>
+                    ) : (
+                      <ReviewReplyForm reviewId={r.id} onReplied={() => refetchReviews()} />
+                    )}
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>

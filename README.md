@@ -1,164 +1,182 @@
-# ServiceConnect — Ireland's Smartest Service Marketplace
+# ServiceConnect Platform
 
-ServiceConnect is a full-stack platform designed to connect customers with local professionals (plumbers, electricians, cleaners, etc.) using AI-driven matching and real-time communication.
-
-## 🚀 Key Features
-
-### 🤖 AI-Powered Experience
-- **AI Job Wizard**: Customers post jobs via an interactive AI chat that categorizes the request and scores its quality.
-- **AI Enhancement**: Professionals can use AI to polish their profile bios and responses.
-- **Smart Matching**: Automated logic to match jobs with the most relevant pros in the area.
-
-### 📞 Real-Time Communication
-- **Live Audio Calls**: Integrated WebRTC calling between customers and pros. **No phone numbers shared** — privacy-first signaling via Pusher.
-- **Instant Notifications**: Real-time alerts for new quotes, messages, and job updates.
-- **Secure Chat**: Full-featured chat system with quote injection and system messages.
-
-### 💼 Professional Tools
-- **Marketplace Dashboard**: Pros see live leads based on their service area and categories.
-- **Unlock System**: Pros spend credits to unlock job details and start discussions.
-- **Gamification**: Daily "Spin Wheel" for pros to win credits, boosts, and trial upgrades.
-
-### 🛡️ Admin & Support
-- **Robust Admin Panel**: Manage users, monitor jobs, and view platform metrics.
-- **Support Tickets**: Integrated helpdesk system for dispute resolution and user assistance.
-- **Audit Logs**: Full tracking of administrative actions.
+ServiceConnect is a production-ready, peer-to-peer service marketplace connecting local customers with qualified professionals. Built with a focus on real-time communication, AI-driven job quality control, and a robust credit-based monetization model, it offers a seamless end-to-end experience from job posting to booking completion.
 
 ---
 
-## 🧠 Deep Dive: AI Intelligence Engine
+## 📋 Features & Capability Inventory
 
-ServiceConnect uses a sophisticated AI layer powered by **Google Gemini 1.5 Flash** to ensure platform quality and security.
+### 👤 Customer Features
+- **AI-Suported Job Posting**: Instant feedback on job quality, fake job detection, and auto-urgency tagging powered by Google Gemini.
+- **Job Management**: Track job status (Live, Matched, Completed) and view professional responses.
+- **Real-time Chat & WebRTC Calling**: Secure communication with professionals without exposing personal phone numbers until explicitly unlocked.
+- **Booking & Reviews**: Confirm quotes, manage service dates, and leave ratings/reviews for completed work.
+- **Support & Notifications**: Integrated ticketing system and real-time alerts.
 
-### 1. Job Quality & Trust
-- **Quality Scoring**: Every job post is analyzed for detail and intent. Low-quality posts are flagged for improvement.
-- **Fraud Detection**: AI detects "fake" or "spam" jobs before they reach professionals.
-- **Urgency Detection**: Automatically categorizes jobs as 'Emergency', 'Urgent', or 'Flexible' based on natural language.
+### 🛠️ Professional Features
+- **Job Discovery Engine**: Browse local leads filtered by category, location, and urgency.
+- **Matchbook & Lead Unlocking**: Save interesting leads and unlock contact details using a credit-based system.
+- **Quote Management**: Send professional estimates with duration and custom messages.
+- **Gamified Daily Rewards**: A "Spin the Wheel" feature offering daily credits, boosts, and badges to encourage retention.
+- **Profile Customization**: Portfolio management, service area definition (radius-based), and verified badges.
+- **Subscription & Boosts**: Stripe-integrated subscription tiers and lead boosting to increase visibility.
 
-### 2. Privacy & PII Masking
-- **NER Obfuscation**: Named Entity Recognition (NER) is used to detect and mask phone numbers, emails, and exact addresses in public chats.
-- **Secure Unlocking**: Contact details are only revealed after a professional "unlocks" a lead using platform credits.
-
-### 3. Professional Growth
-- **Bio Enhancement**: AI helps pros write compelling, professional bios.
-- **Smart Quotes**: Suggests personalized quote responses based on the specific job requirements.
-- **Review Summaries**: Condensed insights from customer feedback to help pros improve.
-
----
-
-## 🛠️ Technology Stack
-
-| Layer | Technology |
-|---|---|
-| **Frontend** | React 18, Vite, Tailwind CSS, Shadcn UI, Framer Motion |
-| **Backend** | Node.js, Express, TypeScript |
-| **Database** | PostgreSQL (Supabase/Neon), Drizzle ORM |
-| **Real-time** | Pusher Channels (Serverless compatible) |
-| **AI Engine** | Google Gemini 1.5 Flash |
-| **Auth** | JWT Secure Authentication |
-| **Payments** | Stripe (Pre-integrated) |
-
-## 🆔 Project Identifiers
-
-For administrative and deployment tracking:
-
-- **Vercel Project ID**: `prj_cLK7fMreK6Zsh6knWJ4A6xrG6GEk`
-- **Vercel Org ID**: `team_NWtacEH7XlimRjg1lPZ0wVAU`
-- **Supabase Project ID**: `hukbvdneqqkovrgnoklh` (Region: `eu-west-1`)
-- **GitHub Repository**: `balajibrahmacharis-projects/serviceconnect`
+### 🛡️ Admin & Operational Controls
+- **Centralized Dashboard**: Real-time metrics on user growth, job volume, and revenue.
+- **Chat Monitoring**: Advanced tools for moderation and dispute resolution across all active conversations.
+- **Feature Flags**: Dynamic control over platform capabilities without redeployment.
+- **Audit Logging**: Comprehensive tracking of administrative actions for security compliance.
+- **Support Ticket Management**: Full helpdesk functionality for resolving user issues.
 
 ---
 
-## 🌍 Environment Variables (`.env`)
+## 🔐 Role-Based Access Control (RBAC)
 
-To run this project, you need to set up the following environment variables. See `.env.example` for a template.
-
-### Database & Auth
-- `DATABASE_URL`: Your PostgreSQL connection string (Supabase or Neon).
-- `JWT_SECRET`: A secure 64-character hex string for signing tokens.
-
-### External APIs
-- `GEMINI_API_KEY`: Google AI Studio key for the matching engine.
-- `STRIPE_SECRET_KEY`: Stripe API key for processing payments.
-
-### Pusher (Real-time & Calling)
-- `PUSHER_APP_ID`: Server-side ID.
-- `PUSHER_KEY`: Server-side Key.
-- `PUSHER_SECRET`: Server-side Secret.
-- `PUSHER_CLUSTER`: e.g., `eu`.
-- `VITE_PUSHER_KEY`: Client-side key (must match server).
-- `VITE_PUSHER_CLUSTER`: Client-side cluster (must match server).
+| Role | Access Level | Key Permissions |
+| :--- | :--- | :--- |
+| **Customer** | User | Post jobs, accept quotes, review pros, initiate chat/calls. |
+| **Professional** | User | Browse jobs, unlock leads, send quotes, manage business profile. |
+| **Admin** | Superuser | System metrics, user moderation, chat monitoring, audit logs, feature flags. |
+| **Support** | Staff | Ticket resolution and basic user management. |
 
 ---
 
-## 📦 Deployment Guide (Vercel)
+## 🔄 Core User Flows
 
-ServiceConnect is optimized for **Vercel** serverless deployment.
+1. **The Lead Lifecycle**:
+   - **Customer** posts a job. AI scores quality and tags urgency.
+   - **Professional** discovers the lead on their map/list and "Unlocks" it using credits.
+   - **Chat** is initiated; both parties can use WebRTC calling once a request is accepted.
+   - **Pro** sends a **Quote**; **Customer** accepts to create a **Booking**.
 
-### 1. Database Setup
-1. Create a PostgreSQL instance on **Supabase** or **Neon**.
-2. Run database migrations:
-   ```bash
-   npm run db:push
-   ```
-3. (Optional) Seed initial data:
-   ```bash
-   npm run db:seed
-   ```
-
-### 2. Vercel Configuration
-1. Import the repository into Vercel.
-2. Set the **Build Command**: `npm run vercel-build`.
-3. Set the **Output Directory**: `dist/public`.
-4. Add all environment variables listed above to the Vercel dashboard.
+2. **Monetization & Engagement**:
+   - **Pros** purchase credit packages or subscriptions via Stripe.
+   - **Pros** use credits to unlock leads or boost their profile visibility.
+   - **Daily Login** rewards (Spin Wheel) keep professionals engaged.
 
 ---
 
-## 🛠️ Available Scripts
+## 💻 Tech Stack
 
-| Command | Description |
-|---|---|
-| `npm run dev` | Starts the development server with `tsx` |
-| `npm run build` | Runs the custom build script in `script/build.ts` |
-| `npm run vercel-build` | Build command used by Vercel |
-| `npm run start` | Starts the production server from `dist/` |
-| `npm run db:push` | Syncs Drizzle schema with the database |
-| `npm run db:migrate` | Forced sync of Drizzle schema |
-| `npm run db:seed` | Fills the database with initial mock data |
-| `npm run check` | Runs TypeScript type checking |
+- **Frontend**: React 18, Vite, Tailwind CSS, Radix UI, Framer Motion.
+- **Backend**: Express.js (Node.js), Passport.js (Local Auth).
+- **Database**: PostgreSQL (hosted on Supabase) with Drizzle ORM.
+- **Real-time**: Pusher (Signaling for Chat & WebRTC).
+- **AI Engine**: Google Gemini API for job analysis and onboarding assistance.
+- **Payments**: Stripe API (Subscriptions & Credit Packages).
+- **Monitoring**: Recharts (Admin Metrics).
 
 ---
 
-## 💻 Local Development
+## 🏗️ Project Structure
 
-1. **Install Dependencies**:
+```text
+├── client/                 # Frontend (Vite + React)
+│   ├── src/
+│   │   ├── components/     # Atomic UI and composite modules
+│   │   ├── contexts/       # Auth, Socket, and Call providers
+│   │   ├── pages/          # Role-split page components (admin, pro, customer)
+│   │   └── lib/            # API hooks (TanStack Query) and utils
+├── server/                 # Backend (Express)
+│   ├── index.ts            # Server entry point
+│   ├── routes.ts           # API surface (2000+ lines of core logic)
+│   ├── auth.ts             # Passport strategies & JWT logic
+│   └── aiEngine.ts         # Logic for job scoring & classification
+├── shared/                 # Shared TypeScript models
+│   └── schema.ts           # Drizzle schema definitions (Source of truth)
+└── script/                 # Build and migration automation
+```
+
+---
+
+## 🗄️ Database Architecture
+
+The platform uses a relational PostgreSQL schema managed via **Drizzle ORM**.
+- **Primary Entities**: `users`, `jobs`, `professional_profiles`.
+- **Relationship Links**: `job_matchbooks`, `job_unlocks`, `quotes`, `bookings`.
+- **System Entities**: `credit_transactions`, `notifications`, `admin_audit_logs`.
+
+**Commands**:
+- `npm run db:push`: Sync schema to the database.
+- `npm run db:seed`: Populate the DB with test users and categories.
+
+---
+
+## 🚀 Local Development Setup
+
+### Prerequisites
+- Node.js (v18+)
+- PostgreSQL Database (Locally or via Supabase)
+- Pusher, Stripe, and Google Gemini API keys.
+
+### Installation
+1. Clone the repository and install dependencies:
    ```bash
    npm install
    ```
-2. **Setup Environment**:
-   Create a `.env` file based on `.env.example`.
-3. **Start Development Server**:
+2. Create a `.env` file in the root directory (see **Environment Variables** section).
+3. Initialize the database:
+   ```bash
+   npm run db:push
+   npm run db:seed
+   ```
+4. Start the development server:
    ```bash
    npm run dev
    ```
-   The app will be available at `http://localhost:5000`.
 
 ---
 
-## 📂 Project Structure
+## ☁️ Deployment (Vercel + GitHub)
 
-- `client/`: React frontend application.
-- `server/`: Express backend and API routes.
-- `shared/`: Drizzle schema definitions and shared TypeScript types.
-- `api/`: Vercel serverless entry point.
-- `scripts/`: Database management and utility scripts.
+### Workflow
+- **CI/CD**: Pushing to the `main` branch triggers an automatic build and deployment on Vercel.
+- **Build Script**: The `script/build.ts` handles the unified build of frontend and backend.
 
----
-
-## 🛡️ Privacy & Security
-- **Data Masking**: PII (phone/email) is automatically masked in chat until a job is officially "unlocked".
-- **Encrypted Signaling**: All live call handshakes are encrypted and proxied through the server to ensure user metadata is never exposed directly.
+### Required Vercel Config
+- Set **Build Command**: `npm run vercel-build`
+- Set **Output Directory**: `dist/public` (frontend assets)
+- Ensure all production environment variables are mirrored in the Vercel Dashboard.
 
 ---
 
-Developed with ❤️ for ServiceConnect.
+## 🔑 Environment Variables
+
+| Variable | Description | Exposure |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | PostgreSQL connection string (Supabase) | Server |
+| `JWT_SECRET` | Secret for signing auth tokens | Server |
+| `GEMINI_API_KEY` | API key for Google AI features | Server |
+| `PUSHER_APP_ID/KEY/SECRET` | Pusher credentials for real-time events | Server |
+| `VITE_PUSHER_KEY/CLUSTER` | Public Pusher config for the client | Client |
+| `STRIPE_SECRET_KEY` | Stripe backend secret (Test Mode) | Server |
+| `VITE_STRIPE_PUBLIC_KEY` | Stripe frontend key (Test Mode) | Client |
+
+---
+
+## 🛠️ Operational Guide
+
+### Test Accounts
+| Role | Email | Password |
+| :--- | :--- | :--- |
+| **Admin** | `admin@serviceconnect.ie` | `admin123456` |
+| **Customer** | `alice@test.com` | `password123` |
+| **Professional** | `pro1@test.com` | `password123` |
+
+### Verification Checklist
+- [ ] Log in as **Customer**, post a job, and verify AI scoring.
+- [ ] Log in as **Pro**, unlock the job, and initiate a chat.
+- [ ] Accept a WebRTC call request in the chat window.
+
+---
+
+## ⚠️ Known Issues & Gaps
+- **Email/SMS**: Notification templates are implemented, but real SMTP/SMS transport layers need to be wired (currently logged to console).
+- **Identity Verification**: Professional identity verification (`is_verified` flag) is currently an administrative manual process.
+
+---
+
+## 📈 Future Improvements
+- **Mobile Apps**: Leveraging the established API for React Native or Capacitor mobile wrappings.
+- **Review Sentiment**: Using Gemini to summarize professional reviews into a "Pros & Cons" profile summary.
+- **Advanced Escrow**: Integrating Stripe Connect for milestone-based payments.

@@ -46,6 +46,7 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
   emailVerified: boolean("email_verified").notNull().default(false),
+  phoneVerified: boolean("phone_verified").notNull().default(false),
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   firstJobId: varchar("first_job_id"),
   creditBalance: integer("credit_balance").notNull().default(0),
@@ -67,6 +68,17 @@ export const userSessions = pgTable("user_sessions", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => [index("sessions_user_idx").on(t.userId)]);
 
+export const phoneVerificationTokens = pgTable("phone_verification_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  hashedCode: text("hashed_code").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  used: boolean("used").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => [index("phone_tokens_user_idx").on(t.userId)]);
+
+export const verificationLevelEnum = pgEnum("verification_level", ["NONE", "SELF_DECLARED", "DOCUMENT_VERIFIED"]);
+
 export const professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
@@ -78,6 +90,7 @@ export const professionalProfiles = pgTable("professional_profiles", {
   ratingAvg: decimal("rating_avg", { precision: 3, scale: 2 }).notNull().default("0"),
   totalReviews: integer("total_reviews").notNull().default(0),
   isVerified: boolean("is_verified").notNull().default(false),
+  verificationLevel: verificationLevelEnum("verification_level").notNull().default("NONE"),
   verificationStatus: text("verification_status").notNull().default("UNSUBMITTED"),
   verificationDocumentUrl: text("verification_document_url"),
   verificationSubmittedAt: timestamp("verification_submitted_at"),
@@ -254,6 +267,8 @@ export const reviews = pgTable("reviews", {
   comment: text("comment"),
   response: text("response"),
   responseAt: timestamp("response_at"),
+  proReply: text("pro_reply"),
+  proRepliedAt: timestamp("pro_replied_at"),
   isVisible: boolean("is_visible").notNull().default(true),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => [index("reviews_reviewee_idx").on(t.revieweeId)]);
@@ -481,3 +496,5 @@ export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
 export type PlatformMetric = typeof platformMetrics.$inferSelect;
 export type FeatureFlag = typeof featureFlags.$inferSelect;
 export type CallRequest = typeof callRequests.$inferSelect;
+export type PhoneVerificationToken = typeof phoneVerificationTokens.$inferSelect;
+export type InsertPhoneVerificationToken = typeof phoneVerificationTokens.$inferInsert;

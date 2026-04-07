@@ -6,10 +6,17 @@ import {
   conversations, conversationParticipants, messages,
   creditPackages, creditTransactions, featureFlags, notifications
 } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, count } from "drizzle-orm";
 
 async function seed() {
   console.log("Seeding database...");
+
+  // Guard: skip if already seeded
+  const existing = await db.select({ c: count() }).from(users);
+  if (Number(existing[0].c) > 0) {
+    console.log(`Database already has ${existing[0].c} users — skipping seed to prevent duplicates.`);
+    return;
+  }
 
   // Service Categories
   const categories = await db.insert(serviceCategories).values([

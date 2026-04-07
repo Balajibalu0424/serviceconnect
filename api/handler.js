@@ -39128,6 +39128,7 @@ __export(schema_exports, {
   participantRoleEnum: () => participantRoleEnum,
   paymentStatusEnum: () => paymentStatusEnum,
   payments: () => payments,
+  phoneVerificationTokens: () => phoneVerificationTokens,
   platformMetrics: () => platformMetrics,
   professionalProfiles: () => professionalProfiles,
   quoteStatusEnum: () => quoteStatusEnum,
@@ -39145,7 +39146,8 @@ __export(schema_exports, {
   userRoleEnum: () => userRoleEnum,
   userSessions: () => userSessions,
   userStatusEnum: () => userStatusEnum,
-  users: () => users
+  users: () => users,
+  verificationLevelEnum: () => verificationLevelEnum
 });
 
 // node_modules/zod/v3/external.js
@@ -43487,6 +43489,7 @@ var users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
   emailVerified: boolean("email_verified").notNull().default(false),
+  phoneVerified: boolean("phone_verified").notNull().default(false),
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   firstJobId: varchar("first_job_id"),
   creditBalance: integer("credit_balance").notNull().default(0),
@@ -43506,6 +43509,15 @@ var userSessions = pgTable("user_sessions", {
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").notNull().default(sql`now()`)
 }, (t) => [index("sessions_user_idx").on(t.userId)]);
+var phoneVerificationTokens = pgTable("phone_verification_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  hashedCode: text("hashed_code").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  used: boolean("used").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`)
+}, (t) => [index("phone_tokens_user_idx").on(t.userId)]);
+var verificationLevelEnum = pgEnum("verification_level", ["NONE", "SELF_DECLARED", "DOCUMENT_VERIFIED"]);
 var professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
@@ -43517,6 +43529,7 @@ var professionalProfiles = pgTable("professional_profiles", {
   ratingAvg: decimal("rating_avg", { precision: 3, scale: 2 }).notNull().default("0"),
   totalReviews: integer("total_reviews").notNull().default(0),
   isVerified: boolean("is_verified").notNull().default(false),
+  verificationLevel: verificationLevelEnum("verification_level").notNull().default("NONE"),
   verificationStatus: text("verification_status").notNull().default("UNSUBMITTED"),
   verificationDocumentUrl: text("verification_document_url"),
   verificationSubmittedAt: timestamp("verification_submitted_at"),
@@ -43680,6 +43693,8 @@ var reviews = pgTable("reviews", {
   comment: text("comment"),
   response: text("response"),
   responseAt: timestamp("response_at"),
+  proReply: text("pro_reply"),
+  proRepliedAt: timestamp("pro_replied_at"),
   isVisible: boolean("is_visible").notNull().default(true),
   createdAt: timestamp("created_at").notNull().default(sql`now()`)
 }, (t) => [index("reviews_reviewee_idx").on(t.revieweeId)]);
@@ -44247,6 +44262,82 @@ function processMessageContent(content, shouldMaskContacts) {
     severity,
     profanityCount,
     contactCount
+  };
+}
+
+// server/moderationService.ts
+var EXTENDED_PHONE_PATTERNS = [
+  // Spaced single digits: "0 8 7 1 2 3 4 5 6" (7+ single digits separated by spaces/dashes)
+  /\b(\d[\s\-]){6,}\d\b/g,
+  // Written number words in sequence (6+ consecutive)
+  /\b(zero|one|two|three|four|five|six|seven|eight|nine|oh|nought)(\s+(zero|one|two|three|four|five|six|seven|eight|nine|oh|nought)){5,}\b/gi,
+  // "oh eight seven" style Irish mobile opener
+  /\b(oh|zero|0)\s*(eight|ate|8)\s*(seven|7)\b/gi,
+  // Separator bypass with dots or slashes: "087.123.4567" or "087/123/4567"
+  /\b0\d{2}[\.\/\\]\d{3}[\.\/\\]\d{4}\b/g,
+  // Partial obfuscation with asterisks: "087 123 ****" still reveals structure
+  /\b0\d{2}\s+\d{3}\s+[\d\*]{4}\b/g,
+  // Parenthetical format: (087) 123 4567
+  /\(\s*0\d{2}\s*\)\s*\d{3}[\s\-]\d{4}/g
+];
+function hasExtendedPhonePattern(text2) {
+  return EXTENDED_PHONE_PATTERNS.some((re) => {
+    re.lastIndex = 0;
+    return re.test(text2);
+  });
+}
+function moderateText(text2, options = {}) {
+  const { allowPhone = false, fieldName = "content" } = options;
+  if (!text2 || text2.trim().length === 0) {
+    return { blocked: false, cleanedText: text2 || "", flags: [] };
+  }
+  const processed = processMessageContent(text2, !allowPhone);
+  if (!allowPhone && processed.filterFlags.some(
+    (f) => f.includes("PHONE") || f.includes("EMAIL") || f.includes("URL") || f.includes("SOCIAL") || f.includes("SPOKEN") || f.includes("MIXED") || f.includes("POSTAL")
+  )) {
+    return {
+      blocked: true,
+      reason: "contact_info_detected",
+      userMessage: `Your ${fieldName} appears to contain contact information (phone number, email address, or social handle). Please keep all communication within the platform to stay safe and protected.`,
+      cleanedText: processed.content,
+      flags: processed.filterFlags,
+      severity: processed.severity ?? void 0
+    };
+  }
+  if (!allowPhone && hasExtendedPhonePattern(text2)) {
+    return {
+      blocked: true,
+      reason: "phone_pattern_detected",
+      userMessage: `Your ${fieldName} appears to contain a phone number. Contact details must stay within the platform's secure system.`,
+      cleanedText: text2,
+      flags: ["EXTENDED_PHONE"]
+    };
+  }
+  if (processed.severity === "CRITICAL") {
+    return {
+      blocked: true,
+      reason: "hate_speech_detected",
+      userMessage: `Your ${fieldName} contains language that is not permitted on this platform and cannot be submitted.`,
+      cleanedText: processed.content,
+      flags: processed.filterFlags,
+      severity: processed.severity ?? void 0
+    };
+  }
+  if (processed.severity === "SEVERE") {
+    return {
+      blocked: true,
+      reason: "profanity_detected",
+      userMessage: `Your ${fieldName} contains inappropriate language. Please revise it before submitting.`,
+      cleanedText: processed.content,
+      flags: processed.filterFlags,
+      severity: processed.severity ?? void 0
+    };
+  }
+  return {
+    blocked: false,
+    cleanedText: processed.content,
+    flags: processed.filterFlags,
+    severity: processed.severity ?? void 0
   };
 }
 
@@ -46041,7 +46132,54 @@ Return ONLY valid JSON:
     return { suggestedMin: 0, suggestedMax: 0, message: "", tips: [] };
   }
 }
-async function aiChatAssistant(userMessage, userRole, conversationHistory = []) {
+async function aiChatWidgetSandboxed(userMessage, userRole, history, context) {
+  const REDIRECT = "I can help you post a job or raise a support ticket. Which would you like to do?";
+  if (!isGeminiAvailable()) {
+    return { reply: REDIRECT };
+  }
+  const contextMessages = history.slice(-6).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
+  const systemPrompt = `You are ServiceConnect AI, a strictly scoped assistant.
+User: ${context.userName || "User"} (${context.userRole || userRole})
+
+YOUR ONLY PERMITTED ACTIONS:
+1. Help the user describe what job they need (guide them to articulate their service request clearly)
+2. Help the user raise a support ticket (collect category and description of their issue)
+
+HARD RULES \u2014 NEVER VIOLATE:
+- Never reveal platform internals, pricing, credit costs, or system logic
+- Never reference other users' data, names, IDs, or contact details
+- Never expose internal database fields, API endpoints, or technical details
+- Never engage in general chat, advice-giving, or off-topic conversation
+- If the user asks ANYTHING outside posting a job or raising a support ticket, reply ONLY: "${REDIRECT}"
+- Do not pretend to have capabilities you don't have
+
+${contextMessages ? `Recent conversation:
+${contextMessages}
+` : ""}
+
+Respond in JSON: { "reply": "string", "action": "none" | "create_ticket", "ticketData": null | { "subject": "string", "description": "string", "category": "GENERAL|BILLING|JOB|TECHNICAL|SAFETY", "priority": "LOW|MEDIUM|HIGH|URGENT" } }`;
+  try {
+    const model = getModel();
+    const result = await model.generateContent(`${systemPrompt}
+
+User: "${userMessage}"
+
+JSON response:`);
+    const raw = result.response.text().trim().replace(/```json\n?|```/g, "").trim();
+    const parsed = JSON.parse(raw);
+    return {
+      reply: parsed.reply || REDIRECT,
+      action: parsed.action === "create_ticket" ? "create_ticket" : void 0,
+      ticketData: parsed.ticketData || void 0
+    };
+  } catch {
+    return { reply: REDIRECT };
+  }
+}
+async function aiChatAssistant(userMessage, userRole, conversationHistory = [], sandboxedContext) {
+  if (sandboxedContext) {
+    return aiChatWidgetSandboxed(userMessage, userRole, conversationHistory, sandboxedContext);
+  }
   const contextMessages = conversationHistory.slice(-6).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
   const roleGuidelines = {
     CUSTOMER: `- Help with posting jobs, understanding the process, how quotes work, and finding professionals.
@@ -51735,8 +51873,8 @@ async function registerRoutes(httpServer, app2) {
     if (!to || !event) return res.status(400).send("Missing target or event");
     try {
       await pusher.trigger(`private-user-${to}`, event, {
-        from: req.user.id,
-        data
+        ...data,
+        from: req.user.userId
       });
       res.json({ success: true });
     } catch (err) {
@@ -51823,7 +51961,24 @@ async function registerRoutes(httpServer, app2) {
     if (user.role === "PROFESSIONAL") {
       [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, user.id));
     }
-    return res.json({ ...user, passwordHash: void 0, profile });
+    const isCustomer = user.role === "CUSTOMER";
+    const safeUser = {
+      ...isCustomer ? {} : { id: user.id },
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      emailVerified: user.emailVerified,
+      phoneVerified: user.phoneVerified ?? false,
+      onboardingCompleted: user.onboardingCompleted,
+      creditBalance: user.creditBalance,
+      createdAt: user.createdAt
+    };
+    return res.json({ ...safeUser, profile });
   });
   app2.post("/api/auth/change-password", requireAuth, async (req, res) => {
     const { currentPassword, newPassword } = req.body;
@@ -51844,6 +51999,57 @@ async function registerRoutes(httpServer, app2) {
       );
     }
     return res.json({ success: true });
+  });
+  app2.post("/api/auth/send-phone-otp", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.phoneVerified) return res.json({ success: true, alreadyVerified: true });
+      if (!user.phone) return res.status(400).json({ error: "No phone number on file. Please add your phone number first." });
+      const { randomInt } = await import("crypto");
+      const code = String(randomInt(1e5, 999999));
+      const hashedCode = await hashPassword(code);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1e3);
+      await db.delete(phoneVerificationTokens).where(
+        and(eq(phoneVerificationTokens.userId, userId), eq(phoneVerificationTokens.used, false))
+      );
+      await db.insert(phoneVerificationTokens).values({ userId, hashedCode, expiresAt });
+      if (false) {
+        console.log(`[DEV] Phone OTP for ${user.phone}: ${code}`);
+      }
+      return res.json({ success: true, message: "Verification code sent to your phone." });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/auth/verify-phone-otp", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { code } = req.body;
+      if (!code) return res.status(400).json({ error: "Verification code required" });
+      const [token] = await db.select().from(phoneVerificationTokens).where(and(
+        eq(phoneVerificationTokens.userId, userId),
+        eq(phoneVerificationTokens.used, false),
+        gt(phoneVerificationTokens.expiresAt, /* @__PURE__ */ new Date())
+      )).orderBy(desc(phoneVerificationTokens.createdAt)).limit(1);
+      let valid = false;
+      if (false) {
+        valid = true;
+      } else if (token) {
+        valid = await comparePassword(code, token.hashedCode);
+      }
+      if (!valid) {
+        return res.status(400).json({ error: "Invalid or expired verification code. Please request a new one." });
+      }
+      if (token) {
+        await db.update(phoneVerificationTokens).set({ used: true }).where(eq(phoneVerificationTokens.id, token.id));
+      }
+      await db.update(users).set({ phoneVerified: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId));
+      return res.json({ success: true, message: "Phone number verified successfully." });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
   });
   app2.post("/api/ai/onboarding-chat", async (req, res) => {
     try {
@@ -51958,6 +52164,14 @@ async function registerRoutes(httpServer, app2) {
       }
       if (!categoryId || typeof categoryId !== "string") {
         return res.status(400).json({ error: "Please select a service category." });
+      }
+      const descMod = moderateText(description, { fieldName: "job description" });
+      if (descMod.blocked) {
+        return res.status(422).json({ error: descMod.userMessage });
+      }
+      const titleMod = moderateText(title, { fieldName: "job title" });
+      if (titleMod.blocked) {
+        return res.status(422).json({ error: titleMod.userMessage });
       }
       if (req.body.checkBlocked) {
         const blocked = await db.select().from(jobs).where(and(eq(jobs.customerId, userId), eq(jobs.blockedRepost, true), eq(jobs.categoryId, categoryId)));
@@ -52133,6 +52347,10 @@ async function registerRoutes(httpServer, app2) {
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (job.customerId !== req.user.userId && req.user.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
       if (job.status !== "DRAFT") return res.status(400).json({ error: "Only DRAFT jobs can be published" });
+      const publishDescMod = moderateText(job.description, { fieldName: "job description" });
+      if (publishDescMod.blocked) {
+        return res.status(422).json({ error: publishDescMod.userMessage });
+      }
       const [cat] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
       const [customerUser] = await db.select({ email: users.email }).from(users).where(eq(users.id, job.customerId));
       const qualityResult = scoreJobQuality(job.title, job.description, job.locationText, cat?.name || "service");
@@ -52449,6 +52667,12 @@ async function registerRoutes(httpServer, app2) {
       if (!job) return res.status(404).json({ error: "Job not found" });
       const [unlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
       if (!unlock) return res.status(403).json({ error: "You must unlock this job first" });
+      if (message) {
+        const quoteMod = moderateText(message, { fieldName: "quote message" });
+        if (quoteMod.blocked) {
+          return res.status(422).json({ error: quoteMod.userMessage });
+        }
+      }
       const [quote] = await db.insert(quotes).values({
         jobId,
         professionalId: proId,
@@ -52646,6 +52870,19 @@ async function registerRoutes(httpServer, app2) {
         `${requester.firstName} ${requester.lastName} would like to have a call with you: "${reason || "Discuss the project"}"`,
         { callRequestId: callReq.id, requesterId: userId, jobId, bookingId }
       );
+      const [targetUser] = await db.select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, targetId));
+      const requesterName = `${requester.firstName} ${requester.lastName}`;
+      const targetName = targetUser ? `${targetUser.firstName} ${targetUser.lastName}` : "User";
+      await pusher.trigger(`private-user-${userId}`, "call_ready", {
+        role: "caller",
+        from: targetId,
+        name: targetName
+      });
+      await pusher.trigger(`private-user-${targetId}`, "call_ready", {
+        role: "callee",
+        from: userId,
+        name: requesterName
+      });
       return res.status(201).json(callReq);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -52772,12 +53009,21 @@ async function registerRoutes(httpServer, app2) {
       if (!conv) return res.status(404).json({ error: "Conversation not found" });
       const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant" });
-      let shouldMask = true;
+      let allowPhone = false;
       if (conv.jobId) {
-        const [stdUnlock] = await db.select({ id: jobUnlocks.id }).from(jobUnlocks).where(and(eq(jobUnlocks.jobId, conv.jobId), eq(jobUnlocks.phoneUnlocked, true)));
-        if (stdUnlock) shouldMask = false;
+        const [stdUnlock] = await db.select({ id: jobUnlocks.id, phoneUnlocked: jobUnlocks.phoneUnlocked }).from(jobUnlocks).where(and(
+          eq(jobUnlocks.jobId, conv.jobId),
+          eq(jobUnlocks.professionalId, userId),
+          eq(jobUnlocks.tier, "STANDARD"),
+          eq(jobUnlocks.phoneUnlocked, true)
+        ));
+        if (stdUnlock) allowPhone = true;
       }
-      let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(content, shouldMask);
+      const chatMod = moderateText(content, { allowPhone, fieldName: "message" });
+      if (chatMod.blocked) {
+        return res.status(422).json({ error: chatMod.userMessage });
+      }
+      let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(chatMod.cleanedText, !allowPhone);
       if (contactCount === 0 && process.env.HUGGINGFACE_API_KEY) {
         try {
           const nerResult = await nerMaskObfuscated(processedContent, process.env.HUGGINGFACE_API_KEY);
@@ -53125,6 +53371,7 @@ async function registerRoutes(httpServer, app2) {
       if (profile.verificationStatus === "APPROVED") return res.status(409).json({ error: "Already verified" });
       await db.update(professionalProfiles).set({
         verificationStatus: "PENDING",
+        verificationLevel: "SELF_DECLARED",
         verificationDocumentUrl: documentUrl,
         verificationSubmittedAt: /* @__PURE__ */ new Date(),
         licenseNumber: licenseNumber || profile.licenseNumber,
@@ -53151,6 +53398,7 @@ async function registerRoutes(httpServer, app2) {
       const newStatus = approved ? "APPROVED" : "REJECTED";
       await db.update(professionalProfiles).set({
         isVerified: approved,
+        verificationLevel: approved ? "DOCUMENT_VERIFIED" : "NONE",
         verificationStatus: newStatus,
         verificationReviewedAt: /* @__PURE__ */ new Date(),
         verificationReviewNote: note || null,
@@ -53496,9 +53744,42 @@ async function registerRoutes(httpServer, app2) {
     try {
       const userId = req.user.userId;
       const { targetUserId } = req.query;
-      const whereClause = targetUserId ? eq(reviews.revieweeId, String(targetUserId)) : eq(reviews.revieweeId, userId);
-      const rows = await db.select().from(reviews).where(whereClause).orderBy(desc(reviews.createdAt));
-      return res.json(rows);
+      const proId = targetUserId ? String(targetUserId) : userId;
+      const whereClause = and(eq(reviews.revieweeId, proId), eq(reviews.isVisible, true));
+      const rows = await db.select({
+        id: reviews.id,
+        bookingId: reviews.bookingId,
+        reviewerId: reviews.reviewerId,
+        revieweeId: reviews.revieweeId,
+        rating: reviews.rating,
+        title: reviews.title,
+        comment: reviews.comment,
+        proReply: reviews.proReply,
+        proRepliedAt: reviews.proRepliedAt,
+        isVisible: reviews.isVisible,
+        createdAt: reviews.createdAt
+      }).from(reviews).where(whereClause).orderBy(desc(reviews.createdAt));
+      const enriched = await Promise.all(rows.map(async (r) => {
+        const [reviewer] = await db.select({
+          firstName: users.firstName,
+          lastName: users.lastName,
+          avatarUrl: users.avatarUrl
+        }).from(users).where(eq(users.id, r.reviewerId));
+        const [reviewee] = await db.select({
+          firstName: users.firstName,
+          lastName: users.lastName
+        }).from(users).where(eq(users.id, r.revieweeId));
+        return {
+          ...r,
+          reviewerFirstName: reviewer?.firstName,
+          reviewerLastName: reviewer?.lastName,
+          reviewerAvatarUrl: reviewer?.avatarUrl,
+          revieweeFirstName: reviewee?.firstName,
+          revieweeLastName: reviewee?.lastName,
+          proName: reviewee ? `${reviewee.firstName} ${reviewee.lastName}` : void 0
+        };
+      }));
+      return res.json(enriched);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -53506,8 +53787,35 @@ async function registerRoutes(httpServer, app2) {
   app2.get("/api/reviews/given", requireAuth, async (req, res) => {
     try {
       const userId = req.user.userId;
-      const rows = await db.select().from(reviews).where(eq(reviews.reviewerId, userId)).orderBy(desc(reviews.createdAt));
+      const rows = await db.select().from(reviews).where(and(eq(reviews.reviewerId, userId), eq(reviews.isVisible, true))).orderBy(desc(reviews.createdAt));
       return res.json(rows);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/reviews/:id/reply", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
+    try {
+      const { reply } = req.body;
+      if (!reply || reply.trim().length === 0) {
+        return res.status(400).json({ error: "Reply text is required" });
+      }
+      if (reply.trim().length > 1e3) {
+        return res.status(400).json({ error: "Reply must be 1000 characters or fewer" });
+      }
+      const [review] = await db.select().from(reviews).where(eq(reviews.id, req.params.id));
+      if (!review || !review.isVisible) return res.status(404).json({ error: "Review not found" });
+      if (review.revieweeId !== req.user.userId) {
+        return res.status(403).json({ error: "You can only reply to reviews on your own profile" });
+      }
+      if (review.proReply) {
+        return res.status(409).json({ error: "You have already replied to this review. Replies cannot be changed." });
+      }
+      const replyMod = moderateText(reply, { fieldName: "reply" });
+      if (replyMod.blocked) {
+        return res.status(422).json({ error: replyMod.userMessage });
+      }
+      const [updated] = await db.update(reviews).set({ proReply: reply.trim(), proRepliedAt: /* @__PURE__ */ new Date() }).where(eq(reviews.id, req.params.id)).returning();
+      return res.json(updated);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -53598,18 +53906,56 @@ async function registerRoutes(httpServer, app2) {
   app2.patch("/api/auth/profile", requireAuth, async (req, res) => {
     try {
       const userId = req.user.userId;
+      const userRole = req.user.role;
       const { firstName, lastName, phone, avatarUrl } = req.body;
-      const [updated] = await db.update(users).set({ firstName, lastName, phone: phone || null, avatarUrl: avatarUrl || null, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId)).returning();
+      if (userRole === "CUSTOMER" && (firstName !== void 0 || lastName !== void 0)) {
+        return res.status(403).json({
+          error: "Your name cannot be changed. If you need a correction, please contact support."
+        });
+      }
+      const updateData = { updatedAt: /* @__PURE__ */ new Date() };
+      if (userRole !== "CUSTOMER") {
+        if (firstName !== void 0) updateData.firstName = firstName;
+        if (lastName !== void 0) updateData.lastName = lastName;
+      }
+      if (phone !== void 0) updateData.phone = phone || null;
+      if (avatarUrl !== void 0) updateData.avatarUrl = avatarUrl || null;
+      const [updated] = await db.update(users).set(updateData).where(eq(users.id, userId)).returning();
+      const isCustomer = updated.role === "CUSTOMER";
       return res.json({
-        id: updated.id,
+        ...isCustomer ? {} : { id: updated.id },
         email: updated.email,
         firstName: updated.firstName,
         lastName: updated.lastName,
         phone: updated.phone,
         role: updated.role,
         creditBalance: updated.creditBalance,
-        avatarUrl: updated.avatarUrl
+        avatarUrl: updated.avatarUrl,
+        phoneVerified: updated.phoneVerified ?? false,
+        emailVerified: updated.emailVerified
       });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.patch("/api/admin/users/:id/name", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { firstName, lastName } = req.body;
+      if (!firstName && !lastName) return res.status(400).json({ error: "Provide firstName or lastName to update" });
+      const updateData = { updatedAt: /* @__PURE__ */ new Date() };
+      if (firstName) updateData.firstName = firstName;
+      if (lastName) updateData.lastName = lastName;
+      const [updated] = await db.update(users).set(updateData).where(eq(users.id, req.params.id)).returning();
+      if (!updated) return res.status(404).json({ error: "User not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "UPDATE_USER_NAME",
+        resourceType: "USER",
+        resourceId: req.params.id,
+        changes: { firstName, lastName },
+        ipAddress: req.ip
+      });
+      return res.json({ success: true, firstName: updated.firstName, lastName: updated.lastName });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -53736,7 +54082,7 @@ async function registerRoutes(httpServer, app2) {
         job.description,
         cat?.name || "service",
         `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
-        profile?.skills || []
+        profile?.serviceCategories || []
       );
       return res.json(result);
     } catch (e) {
@@ -53745,14 +54091,18 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.post("/api/ai/chat", requireAuth, async (req, res) => {
     try {
-      const { message, history } = req.body;
+      const { message, history, mode } = req.body;
       if (!message) return res.status(400).json({ error: "message required" });
+      const userId = req.user.userId;
       const userRole = req.user.role;
-      const result = await aiChatAssistant(message, userRole, history || []);
+      const [user] = await db.select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, userId));
+      const userName = user ? `${user.firstName} ${user.lastName}` : "User";
+      const sandboxedContext = { userName, userRole };
+      const result = await aiChatAssistant(message, userRole, history || [], sandboxedContext);
       if (result.action === "create_ticket" && result.ticketData) {
         const td = result.ticketData;
         const [ticket] = await db.insert(supportTickets).values({
-          userId: req.user.userId,
+          userId,
           subject: td.subject,
           description: td.description,
           category: td.category,
@@ -53788,7 +54138,7 @@ async function registerRoutes(httpServer, app2) {
       const proReviews = await db.select({
         rating: reviews.rating,
         comment: reviews.comment
-      }).from(reviews).where(eq(reviews.professionalId, proId)).orderBy(desc(reviews.createdAt)).limit(10);
+      }).from(reviews).where(eq(reviews.revieweeId, proId)).orderBy(desc(reviews.createdAt)).limit(10);
       if (proReviews.length === 0) return res.json({ summary: "" });
       const [proUser] = await db.select().from(users).where(eq(users.id, proId));
       const proName = `${proUser?.firstName || ""} ${proUser?.lastName || ""}`.trim();

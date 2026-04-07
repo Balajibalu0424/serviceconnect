@@ -329,20 +329,21 @@ export default function ProPublicProfile() {
           </Card>
         )}
 
-        {/* Reviews */}
+        {/* Reviews — attributed to this professional */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">
-              Reviews {reviews.length > 0 && <span className="text-muted-foreground font-normal text-sm">({reviews.length})</span>}
+              What customers say about {pro.firstName}
+              {reviews.length > 0 && <span className="text-muted-foreground font-normal text-sm ml-1">({reviews.length})</span>}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {reviews.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">No reviews yet — be the first to hire {pro.firstName}</p>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {reviews.map((r: any) => (
-                  <div key={r.id} className="border-b last:border-0 pb-4 last:pb-0">
+                  <div key={r.id} className="border-b last:border-0 pb-5 last:pb-0">
                     <div className="flex items-center gap-2 mb-1.5">
                       <div className="flex">
                         {[1, 2, 3, 4, 5].map(i => (
@@ -350,8 +351,21 @@ export default function ProPublicProfile() {
                         ))}
                       </div>
                       <span className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}</span>
+                      {r.reviewerFirstName && (
+                        <span className="text-xs text-muted-foreground">· {r.reviewerFirstName}</span>
+                      )}
                     </div>
+                    {r.title && <p className="text-sm font-medium mb-0.5">{r.title}</p>}
                     {r.comment && <p className="text-sm text-muted-foreground italic">"{r.comment}"</p>}
+                    {/* Professional's response */}
+                    {r.proReply && (
+                      <div className="mt-3 pl-3 border-l-2 border-blue-200 dark:border-blue-800">
+                        <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-0.5">
+                          {pro.firstName}'s response:
+                        </p>
+                        <p className="text-xs text-muted-foreground">{r.proReply}</p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

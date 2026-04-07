@@ -40,16 +40,22 @@ export default function Settings() {
     reader.readAsDataURL(file);
   };
 
+  const isCustomer = user?.role === "CUSTOMER";
+
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileLoading(true);
     try {
-      const res = await apiRequest("PATCH", "/api/auth/profile", {
-        firstName,
-        lastName,
+      const payload: Record<string, unknown> = {
         phone,
         avatarUrl: avatarUrl || undefined,
-      });
+      };
+      // Professionals can edit their name; customers cannot (server enforces this too)
+      if (!isCustomer) {
+        payload.firstName = firstName;
+        payload.lastName = lastName;
+      }
+      const res = await apiRequest("PATCH", "/api/auth/profile", payload);
       if (!res.ok) throw new Error((await res.json()).error);
       await refreshUser();
       toast({ title: "Profile updated", description: "Your changes have been saved." });
@@ -138,30 +144,45 @@ export default function Settings() {
 
               <Separator />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="firstName">First name</Label>
-                  <Input
-                    id="firstName"
-                    value={firstName}
-                    onChange={e => setFirstName(e.target.value)}
-                    placeholder="First name"
-                    required
-                    data-testid="input-first-name"
-                  />
+              {isCustomer ? (
+                <div className="space-y-1.5">
+                  <Label>Full name</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="px-3 py-2 rounded-md border bg-gray-50 dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 select-none">
+                      {user?.firstName}
+                    </div>
+                    <div className="px-3 py-2 rounded-md border bg-gray-50 dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 select-none">
+                      {user?.lastName}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Your name cannot be changed after registration. Contact support if a correction is needed.
+                  </p>
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="lastName">Last name</Label>
-                  <Input
-                    id="lastName"
-                    value={lastName}
-                    onChange={e => setLastName(e.target.value)}
-                    placeholder="Last name"
-                    required
-                    data-testid="input-last-name"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="firstName">First name</Label>
+                    <Input
+                      id="firstName"
+                      value={firstName}
+                      onChange={e => setFirstName(e.target.value)}
+                      placeholder="First name"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="lastName">Last name</Label>
+                    <Input
+                      id="lastName"
+                      value={lastName}
+                      onChange={e => setLastName(e.target.value)}
+                      placeholder="Last name"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="space-y-1">
                 <Label htmlFor="phone">

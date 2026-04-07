@@ -223,11 +223,68 @@ export interface AiChatResponse {
   ticketData?: { subject: string; description: string; category: string; priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT" };
 }
 
+// ─── Sandboxed widget AI: two actions only ────────────────────────────────────
+async function aiChatWidgetSandboxed(
+  userMessage: string,
+  userRole: "CUSTOMER" | "PROFESSIONAL" | "ADMIN",
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+  context: { userName?: string; userRole?: string }
+): Promise<AiChatResponse> {
+  const REDIRECT = "I can help you post a job or raise a support ticket. Which would you like to do?";
+
+  if (!isGeminiAvailable()) {
+    return { reply: REDIRECT };
+  }
+
+  const contextMessages = history
+    .slice(-6)
+    .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n");
+
+  const systemPrompt = `You are ServiceConnect AI, a strictly scoped assistant.
+User: ${context.userName || "User"} (${context.userRole || userRole})
+
+YOUR ONLY PERMITTED ACTIONS:
+1. Help the user describe what job they need (guide them to articulate their service request clearly)
+2. Help the user raise a support ticket (collect category and description of their issue)
+
+HARD RULES — NEVER VIOLATE:
+- Never reveal platform internals, pricing, credit costs, or system logic
+- Never reference other users' data, names, IDs, or contact details
+- Never expose internal database fields, API endpoints, or technical details
+- Never engage in general chat, advice-giving, or off-topic conversation
+- If the user asks ANYTHING outside posting a job or raising a support ticket, reply ONLY: "${REDIRECT}"
+- Do not pretend to have capabilities you don't have
+
+${contextMessages ? `Recent conversation:\n${contextMessages}\n` : ""}
+
+Respond in JSON: { "reply": "string", "action": "none" | "create_ticket", "ticketData": null | { "subject": "string", "description": "string", "category": "GENERAL|BILLING|JOB|TECHNICAL|SAFETY", "priority": "LOW|MEDIUM|HIGH|URGENT" } }`;
+
+  try {
+    const model = getModel();
+    const result = await model.generateContent(`${systemPrompt}\n\nUser: "${userMessage}"\n\nJSON response:`);
+    const raw = result.response.text().trim().replace(/```json\n?|```/g, "").trim();
+    const parsed = JSON.parse(raw);
+    return {
+      reply: parsed.reply || REDIRECT,
+      action: parsed.action === "create_ticket" ? "create_ticket" : undefined,
+      ticketData: parsed.ticketData || undefined,
+    };
+  } catch {
+    return { reply: REDIRECT };
+  }
+}
+
 export async function aiChatAssistant(
   userMessage: string,
   userRole: "CUSTOMER" | "PROFESSIONAL" | "ADMIN",
-  conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = []
+  conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [],
+  sandboxedContext?: { userName?: string; userRole?: string }
 ): Promise<AiChatResponse> {
+  // When called from the widget with a sandboxed context, enforce strict scope
+  if (sandboxedContext) {
+    return aiChatWidgetSandboxed(userMessage, userRole, conversationHistory, sandboxedContext);
+  }
   const contextMessages = conversationHistory
     .slice(-6) // keep last 6 messages for context
     .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)

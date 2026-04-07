@@ -55,29 +55,29 @@ export default function ProVerificationPending() {
   const statusConfig = {
     UNSUBMITTED: {
       icon: <Upload className="w-10 h-10 text-muted-foreground" />,
-      badge: <Badge variant="outline">Not submitted</Badge>,
-      title: "Complete Your Verification",
-      desc: "Submit your license/insurance document to get verified and access the full platform.",
+      badge: <Badge variant="outline">Optional</Badge>,
+      title: "Boost Your Credibility (Optional)",
+      desc: "Submitting your license or insurance document is completely optional. Verified profiles attract more customers and earn a trust badge — but you can start using the platform right away.",
     },
     PENDING: {
       icon: <Clock className="w-10 h-10 text-amber-500" />,
       badge: <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border-amber-300">Under review</Badge>,
-      title: "Verification Pending",
-      desc: "Your documents have been submitted and are being reviewed by our team. This usually takes 1–2 business days.",
+      title: "Verification Under Review",
+      desc: "Your documents have been submitted and are being reviewed by our team. This usually takes 1–2 business days. You can use the platform while you wait.",
     },
     REJECTED: {
       icon: <XCircle className="w-10 h-10 text-destructive" />,
       badge: <Badge variant="destructive">Not approved</Badge>,
-      title: "Verification Not Approved",
+      title: "Documents Not Approved",
       desc: profile?.verificationReviewNote
-        ? `Reason: ${profile.verificationReviewNote}. Please update your documents and resubmit.`
-        : "Please update your documents and resubmit.",
+        ? `Reason: ${profile.verificationReviewNote}. You can resubmit updated documents or continue using the platform without verification.`
+        : "You can resubmit updated documents or continue using the platform without verification.",
     },
     APPROVED: {
       icon: <CheckCircle2 className="w-10 h-10 text-green-500" />,
-      badge: <Badge className="bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-green-300">Approved</Badge>,
+      badge: <Badge className="bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-green-300">Verified</Badge>,
       title: "You're Verified!",
-      desc: "Your account is verified. You now have full access to the platform.",
+      desc: "Your account is verified. Your profile displays a trust badge to help you stand out to customers.",
     },
   };
 
@@ -141,7 +141,7 @@ export default function ProVerificationPending() {
                   disabled={submit.isPending || !documentUrl.trim()}
                   data-testid="button-submit-verification"
                 >
-                  {submit.isPending ? "Submitting…" : status === "REJECTED" ? "Resubmit Documents" : "Submit for Verification"}
+                  {submit.isPending ? "Submitting…" : status === "REJECTED" ? "Resubmit Documents" : "Submit Documents (Optional)"}
                 </Button>
               </div>
             )}

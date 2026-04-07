@@ -7,7 +7,8 @@ import {
   quotes, bookings, reviews, conversations, conversationParticipants,
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
-  adminAuditLogs, platformMetrics, featureFlags, callRequests
+  adminAuditLogs, platformMetrics, featureFlags, callRequests,
+  phoneVerificationTokens
 } from "@shared/schema";
 import { pusher } from "./pusher";
 import {
@@ -19,6 +20,7 @@ import {
   comparePassword, verifyRefreshToken, type AuthRequest
 } from "./auth";
 import { processMessageContent, maskContactInfo } from "./profanityFilter";
+import { moderateText } from "./moderationService";
 import { startAftercareScheduler, runAftercareCheck } from "./scheduler";
 import {
   scoreJobQuality, detectCategory, detectFakeJob, detectUrgency, nerMaskObfuscated
@@ -237,7 +239,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (user.role === "PROFESSIONAL") {
       [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, user.id));
     }
-    return res.json({ ...user, passwordHash: undefined, profile });
+    const isCustomer = user.role === "CUSTOMER";
+    // Strip internal ID from customer-facing responses; admins and pros retain it for system references
+    const safeUser = {
+      ...(isCustomer ? {} : { id: user.id }),
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      emailVerified: user.emailVerified,
+      phoneVerified: (user as any).phoneVerified ?? false,
+      onboardingCompleted: user.onboardingCompleted,
+      creditBalance: user.creditBalance,
+      createdAt: user.createdAt,
+    };
+    return res.json({ ...safeUser, profile });
   });
 
   app.post("/api/auth/change-password", requireAuth, async (req: AuthRequest, res: Response) => {
@@ -260,6 +280,81 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
     }
     return res.json({ success: true });
+  });
+
+  // ─── Phone OTP: Send ──────────────────────────────────────────────────────
+  app.post("/api/auth/send-phone-otp", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if ((user as any).phoneVerified) return res.json({ success: true, alreadyVerified: true });
+      if (!user.phone) return res.status(400).json({ error: "No phone number on file. Please add your phone number first." });
+
+      // Generate 6-digit code
+      const { randomInt } = await import("crypto");
+      const code = String(randomInt(100000, 999999));
+      const hashedCode = await hashPassword(code);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Invalidate existing unused tokens
+      await db.delete(phoneVerificationTokens).where(
+        and(eq(phoneVerificationTokens.userId, userId), eq(phoneVerificationTokens.used, false))
+      );
+
+      await db.insert(phoneVerificationTokens).values({ userId, hashedCode, expiresAt });
+
+      // Development: log code to console. Production: integrate SMS provider (e.g. Twilio)
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[DEV] Phone OTP for ${user.phone}: ${code}`);
+      }
+
+      return res.json({ success: true, message: "Verification code sent to your phone." });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Phone OTP: Verify ───────────────────────────────────────────────────
+  app.post("/api/auth/verify-phone-otp", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { code } = req.body;
+      if (!code) return res.status(400).json({ error: "Verification code required" });
+
+      const [token] = await db.select().from(phoneVerificationTokens)
+        .where(and(
+          eq(phoneVerificationTokens.userId, userId),
+          eq(phoneVerificationTokens.used, false),
+          gt(phoneVerificationTokens.expiresAt, new Date())
+        ))
+        .orderBy(desc(phoneVerificationTokens.createdAt))
+        .limit(1);
+
+      let valid = false;
+      // Dev master code for testing
+      if (process.env.NODE_ENV !== "production" && code === "123456") {
+        valid = true;
+      } else if (token) {
+        valid = await comparePassword(code, token.hashedCode);
+      }
+
+      if (!valid) {
+        return res.status(400).json({ error: "Invalid or expired verification code. Please request a new one." });
+      }
+
+      if (token) {
+        await db.update(phoneVerificationTokens)
+          .set({ used: true })
+          .where(eq(phoneVerificationTokens.id, token.id));
+      }
+
+      await db.update(users).set({ phoneVerified: true, updatedAt: new Date() } as any).where(eq(users.id, userId));
+
+      return res.json({ success: true, message: "Phone number verified successfully." });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -402,6 +497,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (!categoryId || typeof categoryId !== "string") {
         return res.status(400).json({ error: "Please select a service category." });
+      }
+
+      // ── Content moderation ────────────────────────────────────────────────
+      const descMod = moderateText(description, { fieldName: "job description" });
+      if (descMod.blocked) {
+        return res.status(422).json({ error: descMod.userMessage });
+      }
+      const titleMod = moderateText(title, { fieldName: "job title" });
+      if (titleMod.blocked) {
+        return res.status(422).json({ error: titleMod.userMessage });
       }
 
       // Anti-spam: check blockedRepost
@@ -636,6 +741,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (job.customerId !== req.user!.userId && req.user!.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
       if (job.status !== "DRAFT") return res.status(400).json({ error: "Only DRAFT jobs can be published" });
+
+      // ── Content moderation on publish ──────────────────────────────────
+      const publishDescMod = moderateText(job.description, { fieldName: "job description" });
+      if (publishDescMod.blocked) {
+        return res.status(422).json({ error: publishDescMod.userMessage });
+      }
 
       // ── AI Quality Gate on publish ──────────────────────────────────────
       const [cat] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
@@ -1004,6 +1115,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [unlock] = await db.select().from(jobUnlocks)
         .where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
       if (!unlock) return res.status(403).json({ error: "You must unlock this job first" });
+
+      // Moderate quote message — phone never allowed in quote text
+      if (message) {
+        const quoteMod = moderateText(message, { fieldName: "quote message" });
+        if (quoteMod.blocked) {
+          return res.status(422).json({ error: quoteMod.userMessage });
+        }
+      }
 
       const [quote] = await db.insert(quotes).values({
         jobId, professionalId: proId, customerId: job.customerId,
@@ -1433,16 +1552,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant" });
 
-      // Phone masking is disabled for conversations where the pro has a STANDARD
-      // (phone-unlocked) record for the job — they already paid for contact access.
-      let shouldMask = true;
+      // Phone sharing: only allowed when the sender is a pro with a STANDARD-tier unlock
+      // (phoneUnlocked=true) for the job linked to this conversation.
+      let allowPhone = false;
       if (conv.jobId) {
-        const [stdUnlock] = await db.select({ id: jobUnlocks.id }).from(jobUnlocks)
-          .where(and(eq(jobUnlocks.jobId, conv.jobId), eq(jobUnlocks.phoneUnlocked, true)));
-        if (stdUnlock) shouldMask = false;
+        const [stdUnlock] = await db.select({ id: jobUnlocks.id, phoneUnlocked: jobUnlocks.phoneUnlocked })
+          .from(jobUnlocks)
+          .where(and(
+            eq(jobUnlocks.jobId, conv.jobId),
+            eq(jobUnlocks.professionalId, userId),
+            eq(jobUnlocks.tier, "STANDARD"),
+            eq(jobUnlocks.phoneUnlocked, true)
+          ));
+        if (stdUnlock) allowPhone = true;
       }
 
-      let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(content, shouldMask);
+      // Run unified moderation — blocks if phone detected and not allowed
+      const chatMod = moderateText(content, { allowPhone, fieldName: "message" });
+      if (chatMod.blocked) {
+        return res.status(422).json({ error: chatMod.userMessage });
+      }
+
+      // Use existing pipeline for flagging/storage metadata (severity, flags)
+      let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(chatMod.cleanedText, !allowPhone);
 
       // NER Layer 2: If regex found no contacts, run HuggingFace NER
       // to catch obfuscated contact-sharing (spoken numbers, social handles, etc.)
@@ -1832,11 +1964,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await db.update(professionalProfiles).set({
         verificationStatus: "PENDING",
+        verificationLevel: "SELF_DECLARED",
         verificationDocumentUrl: documentUrl,
         verificationSubmittedAt: new Date(),
         licenseNumber: licenseNumber || profile.licenseNumber,
         updatedAt: new Date()
-      }).where(eq(professionalProfiles.userId, proId));
+      } as any).where(eq(professionalProfiles.userId, proId));
 
       await createNotification(proId, "VERIFICATION_SUBMITTED", "Verification submitted",
         "Your verification documents have been submitted and are pending admin review.", {});
@@ -1858,11 +1991,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const newStatus = approved ? "APPROVED" : "REJECTED";
       await db.update(professionalProfiles).set({
         isVerified: approved,
+        verificationLevel: approved ? "DOCUMENT_VERIFIED" : "NONE",
         verificationStatus: newStatus,
         verificationReviewedAt: new Date(),
         verificationReviewNote: note || null,
         updatedAt: new Date()
-      }).where(eq(professionalProfiles.userId, targetUserId));
+      } as any).where(eq(professionalProfiles.userId, targetUserId));
 
       await db.insert(adminAuditLogs).values({
         adminId: req.user!.userId, action: approved ? "VERIFY_PRO" : "REJECT_PRO",
@@ -2284,15 +2418,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const userId = req.user!.userId;
       const { targetUserId } = req.query;
-      const whereClause = targetUserId
-        ? eq(reviews.revieweeId, String(targetUserId))
-        : eq(reviews.revieweeId, userId);
-      const rows = await db
-        .select()
-        .from(reviews)
-        .where(whereClause)
-        .orderBy(desc(reviews.createdAt));
-      return res.json(rows);
+      const proId = targetUserId ? String(targetUserId) : userId;
+      const whereClause = and(eq(reviews.revieweeId, proId), eq(reviews.isVisible, true));
+
+      // Join reviewer name and pro name for context-rich display
+      const rows = await db.select({
+        id: reviews.id,
+        bookingId: reviews.bookingId,
+        reviewerId: reviews.reviewerId,
+        revieweeId: reviews.revieweeId,
+        rating: reviews.rating,
+        title: reviews.title,
+        comment: reviews.comment,
+        proReply: (reviews as any).proReply,
+        proRepliedAt: (reviews as any).proRepliedAt,
+        isVisible: reviews.isVisible,
+        createdAt: reviews.createdAt,
+      })
+      .from(reviews)
+      .where(whereClause)
+      .orderBy(desc(reviews.createdAt));
+
+      // Attach reviewer names separately to avoid complex join type issues
+      const enriched = await Promise.all(rows.map(async (r) => {
+        const [reviewer] = await db.select({
+          firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl
+        }).from(users).where(eq(users.id, r.reviewerId));
+        const [reviewee] = await db.select({
+          firstName: users.firstName, lastName: users.lastName
+        }).from(users).where(eq(users.id, r.revieweeId));
+        return {
+          ...r,
+          reviewerFirstName: reviewer?.firstName,
+          reviewerLastName: reviewer?.lastName,
+          reviewerAvatarUrl: reviewer?.avatarUrl,
+          revieweeFirstName: reviewee?.firstName,
+          revieweeLastName: reviewee?.lastName,
+          proName: reviewee ? `${reviewee.firstName} ${reviewee.lastName}` : undefined,
+        };
+      }));
+
+      return res.json(enriched);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -2304,9 +2470,50 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const rows = await db
         .select()
         .from(reviews)
-        .where(eq(reviews.reviewerId, userId))
+        .where(and(eq(reviews.reviewerId, userId), eq(reviews.isVisible, true)))
         .orderBy(desc(reviews.createdAt));
       return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Pro reply to a review ───────────────────────────────────────────────
+  app.post("/api/reviews/:id/reply", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { reply } = req.body;
+      if (!reply || reply.trim().length === 0) {
+        return res.status(400).json({ error: "Reply text is required" });
+      }
+      if (reply.trim().length > 1000) {
+        return res.status(400).json({ error: "Reply must be 1000 characters or fewer" });
+      }
+
+      const [review] = await db.select().from(reviews).where(eq(reviews.id, req.params.id));
+      if (!review || !review.isVisible) return res.status(404).json({ error: "Review not found" });
+
+      // Review must belong to this professional's profile
+      if (review.revieweeId !== req.user!.userId) {
+        return res.status(403).json({ error: "You can only reply to reviews on your own profile" });
+      }
+
+      // One reply only — immutable after submission
+      if ((review as any).proReply) {
+        return res.status(409).json({ error: "You have already replied to this review. Replies cannot be changed." });
+      }
+
+      // Moderate reply text
+      const replyMod = moderateText(reply, { fieldName: "reply" });
+      if (replyMod.blocked) {
+        return res.status(422).json({ error: replyMod.userMessage });
+      }
+
+      const [updated] = await db.update(reviews)
+        .set({ proReply: reply.trim(), proRepliedAt: new Date() } as any)
+        .where(eq(reviews.id, req.params.id))
+        .returning();
+
+      return res.json(updated);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -2394,17 +2601,72 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/auth/profile", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
+      const userRole = req.user!.role;
       const { firstName, lastName, phone, avatarUrl } = req.body;
+
+      // Customers cannot change their name after initial setup — admin override only
+      if (userRole === "CUSTOMER" && (firstName !== undefined || lastName !== undefined)) {
+        return res.status(403).json({
+          error: "Your name cannot be changed. If you need a correction, please contact support."
+        });
+      }
+
+      const updateData: Record<string, unknown> = { updatedAt: new Date() };
+      if (userRole !== "CUSTOMER") {
+        if (firstName !== undefined) updateData.firstName = firstName;
+        if (lastName !== undefined) updateData.lastName = lastName;
+      }
+      if (phone !== undefined) updateData.phone = phone || null;
+      if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl || null;
+
       const [updated] = await db
         .update(users)
-        .set({ firstName, lastName, phone: phone || null, avatarUrl: avatarUrl || null, updatedAt: new Date() })
+        .set(updateData)
         .where(eq(users.id, userId))
         .returning();
+
+      // Sanitized response — no internal id or passwordHash for customers
+      const isCustomer = updated.role === "CUSTOMER";
       return res.json({
-        id: updated.id, email: updated.email, firstName: updated.firstName,
-        lastName: updated.lastName, phone: updated.phone, role: updated.role,
-        creditBalance: updated.creditBalance, avatarUrl: updated.avatarUrl
+        ...(isCustomer ? {} : { id: updated.id }),
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        phone: updated.phone,
+        role: updated.role,
+        creditBalance: updated.creditBalance,
+        avatarUrl: updated.avatarUrl,
+        phoneVerified: (updated as any).phoneVerified ?? false,
+        emailVerified: updated.emailVerified,
       });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Admin: correct customer/user name ───────────────────────────────────
+  app.patch("/api/admin/users/:id/name", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { firstName, lastName } = req.body;
+      if (!firstName && !lastName) return res.status(400).json({ error: "Provide firstName or lastName to update" });
+
+      const updateData: Record<string, unknown> = { updatedAt: new Date() };
+      if (firstName) updateData.firstName = firstName;
+      if (lastName) updateData.lastName = lastName;
+
+      const [updated] = await db.update(users).set(updateData).where(eq(users.id, req.params.id)).returning();
+      if (!updated) return res.status(404).json({ error: "User not found" });
+
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId,
+        action: "UPDATE_USER_NAME",
+        resourceType: "USER",
+        resourceId: req.params.id,
+        changes: { firstName, lastName },
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true, firstName: updated.firstName, lastName: updated.lastName });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -2542,25 +2804,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const result = await generateQuoteSuggestion(
         job.title, job.description, cat?.name || "service",
         `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
-        (profile?.skills as string[]) || []
+        (profile?.serviceCategories as string[]) || []
       );
       return res.json(result);
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 
   // AI: Chat assistant
+  // Sandboxed AI widget — only two permitted actions: post_job guidance and support ticket creation
   app.post("/api/ai/chat", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const { message, history } = req.body;
+      const { message, history, mode } = req.body;
       if (!message) return res.status(400).json({ error: "message required" });
-      const userRole = req.user!.role as "CUSTOMER" | "PROFESSIONAL" | "ADMIN";
-      const result = await aiChatAssistant(message, userRole, history || []);
 
-      // If AI suggested creating a ticket, create it automatically
+      const userId = req.user!.userId;
+      const userRole = req.user!.role as "CUSTOMER" | "PROFESSIONAL" | "ADMIN";
+
+      // Fetch only the user's own name — nothing else is passed to AI
+      const [user] = await db.select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users).where(eq(users.id, userId));
+      const userName = user ? `${user.firstName} ${user.lastName}` : "User";
+
+      // Pass sandboxed context to restrict AI scope
+      const sandboxedContext = { userName, userRole };
+      const result = await aiChatAssistant(message, userRole, history || [], sandboxedContext);
+
+      // Support ticket creation — only permitted data action
       if (result.action === "create_ticket" && result.ticketData) {
         const td = result.ticketData;
         const [ticket] = await db.insert(supportTickets).values({
-          userId: req.user!.userId,
+          userId,
           subject: td.subject,
           description: td.description,
           category: td.category,
@@ -2598,7 +2871,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const proReviews = await db.select({
         rating: reviews.rating,
         comment: reviews.comment,
-      }).from(reviews).where(eq(reviews.professionalId, proId)).orderBy(desc(reviews.createdAt)).limit(10);
+      }).from(reviews).where(eq(reviews.revieweeId, proId)).orderBy(desc(reviews.createdAt)).limit(10);
 
       if (proReviews.length === 0) return res.json({ summary: "" });
 
