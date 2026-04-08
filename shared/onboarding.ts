@@ -46,7 +46,7 @@ export const customerJobDraftSchema = z.object({
   description: z.string().trim().default(""),
   categoryId: z.string().trim().default(""),
   categoryLabel: z.string().trim().default(""),
-  urgency: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
+  urgency: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).nullable().transform(v => v ?? "NORMAL").default("NORMAL"),
   locationText: z.string().trim().default(""),
   budgetMin: z.string().trim().nullable().default(null),
   budgetMax: z.string().trim().nullable().default(null),
