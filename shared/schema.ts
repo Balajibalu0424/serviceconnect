@@ -37,7 +37,7 @@ export const ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
-  phone: text("phone"),
+  phone: text("phone").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("CUSTOMER"),
   status: userStatusEnum("status").notNull().default("ACTIVE"),

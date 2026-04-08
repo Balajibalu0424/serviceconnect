@@ -6,14 +6,17 @@ interface AuthUser {
   email: string;
   firstName: string;
   lastName: string;
+  phone: string;
   role: "CUSTOMER" | "PROFESSIONAL" | "ADMIN" | "SUPPORT";
   status: string;
   creditBalance: number;
   onboardingCompleted: boolean;
   emailVerified: boolean;
+  phoneVerified?: boolean;
   firstJobId?: string | null;
   avatarUrl?: string;
   profile?: any;
+  createdAt?: string | Date;
 }
 
 interface AuthContextType {

@@ -165,8 +165,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const { email, password, firstName, lastName, phone, role } = req.body;
-      if (!email || !password || !firstName || !lastName) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (!email || !password || !firstName || !lastName || !phone) {
+        return res.status(400).json({ error: "Missing required fields (email, password, name, and phone are mandatory)" });
       }
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) {
@@ -175,7 +175,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const passwordHash = await hashPassword(password);
       const [user] = await db.insert(users).values({
         email: email.toLowerCase(), passwordHash, firstName, lastName,
-        phone: phone || null, role: role || "CUSTOMER", status: "ACTIVE",
+        phone, role: role || "CUSTOMER", status: "ACTIVE",
         emailVerified: false, onboardingCompleted: false
       }).returning();
 
@@ -252,7 +252,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       avatarUrl: user.avatarUrl,
       bio: user.bio,
       emailVerified: user.emailVerified,
-      phoneVerified: (user as any).phoneVerified ?? false,
+      phoneVerified: user.phoneVerified ?? false,
       onboardingCompleted: user.onboardingCompleted,
       creditBalance: user.creditBalance,
       createdAt: user.createdAt,
@@ -377,13 +377,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
 
-      if (!email || !password || !firstName || !lastName || !title || !description || !categoryId) {
-        return res.status(400).json({ error: "Missing required fields for customer onboarding." });
+      if (!email || !password || !firstName || !lastName || !phone || !title || !description || !categoryId) {
+        return res.status(400).json({ error: "Missing required fields for customer onboarding (including phone number)." });
       }
 
-      // Phone is mandatory for new customers — anti-ghost-lead protection
-      if (!phone || phone.trim().length < 7) {
-        return res.status(400).json({ error: "A valid phone number is required to verify your identity before your job goes live." });
+      // Phone length check
+      if (phone.trim().length < 7) {
+        return res.status(400).json({ error: "A valid phone number (min 7 digits) is required to verify your identity." });
       }
 
       // Moderate job description and title during onboarding
@@ -399,7 +399,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const passwordHash = await hashPassword(password);
         const [user] = await tx.insert(users).values({
           email: email.toLowerCase(), passwordHash, firstName, lastName,
-          phone: phone || null, role: "CUSTOMER", status: "ACTIVE",
+          phone, role: "CUSTOMER", status: "ACTIVE",
           emailVerified: false, onboardingCompleted: false
         }).returning();
 
@@ -706,7 +706,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/jobs/:id", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id as string));
     if (!job) return res.status(404).json({ error: "Job not found" });
     const [category] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
     const [customer] = await db.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl, phone: users.phone })
@@ -726,21 +726,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.patch("/api/jobs/:id", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id as string));
     if (!job) return res.status(404).json({ error: "Job not found" });
     if (job.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
     const { title, description, budgetMin, budgetMax, urgency, locationText } = req.body;
     const [updated] = await db.update(jobs)
       .set({ title, description, budgetMin, budgetMax, urgency, locationText, updatedAt: new Date() })
-      .where(eq(jobs.id, req.params.id)).returning();
+      .where(eq(jobs.id, req.params.id as string)).returning();
     return res.json(updated);
   });
 
   app.delete("/api/jobs/:id", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id as string));
     if (!job) return res.status(404).json({ error: "Job not found" });
     if (job.customerId !== req.user!.userId && req.user!.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
-    await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, req.params.id));
+    await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, req.params.id as string));
     return res.json({ success: true });
   });
 
@@ -748,7 +748,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Publish a DRAFT job to LIVE
   app.post("/api/jobs/:id/publish", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id as string));
       if (!job) return res.status(404).json({ error: "Job not found" });
       if (job.customerId !== req.user!.userId && req.user!.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
       if (job.status !== "DRAFT") return res.status(400).json({ error: "Only DRAFT jobs can be published" });
@@ -787,7 +787,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           aiQualityScore: qualityResult.score,
           aiQualityPrompt: qualityResult.prompt,
           updatedAt: new Date(),
-        }).where(eq(jobs.id, req.params.id));
+        }).where(eq(jobs.id, req.params.id as string));
         return res.status(422).json({
           error: "Job description needs more detail before going live.",
           code: "QUALITY_GATE_FAILED",
@@ -810,7 +810,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         aiIsUrgent: urgencyResult.isUrgent,
         aiUrgencyKeywords: urgencyResult.detectedKeywords,
         updatedAt: new Date(),
-      }).where(eq(jobs.id, req.params.id)).returning();
+      }).where(eq(jobs.id, req.params.id as string)).returning();
       return res.json(updated);
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -819,7 +819,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/jobs/:id/matchbook", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
     const proId = req.user!.userId;
-    const jobId = req.params.id;
+    const jobId = req.params.id as string;
     const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     if (!job) return res.status(404).json({ error: "Job not found" });
 
@@ -842,7 +842,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const proId = req.user!.userId;
     await db.update(jobMatchbooks)
       .set({ removedAt: new Date() })
-      .where(and(eq(jobMatchbooks.jobId, req.params.id), eq(jobMatchbooks.professionalId, proId)));
+      .where(and(eq(jobMatchbooks.jobId, req.params.id as string), eq(jobMatchbooks.professionalId, proId)));
     return res.json({ success: true });
   });
 
@@ -851,7 +851,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const proId = req.user!.userId;
       const { tier } = req.body as { tier: "FREE" | "STANDARD" };
-      const jobId = req.params.id;
+      const jobId = req.params.id as string;
 
       const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
       if (!job) return res.status(404).json({ error: "Job not found" });
@@ -949,7 +949,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/jobs/:id/upgrade", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
     try {
       const proId = req.user!.userId;
-      const jobId = req.params.id;
+      const jobId = req.params.id as string;
 
       const [unlock] = await db.select().from(jobUnlocks)
         .where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
@@ -995,7 +995,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/jobs/:id/aftercare/respond", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { sorted } = req.body;
-      const jobId = req.params.id;
+      const jobId = req.params.id as string;
       const userId = req.user!.userId;
 
       const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
@@ -1037,15 +1037,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!job) return res.status(404).json({ error: "Job not found or not authorized" });
 
       if (action === "close") {
-        await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, jobId));
+        await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, req.params.id as string));
         await db.update(jobAftercares).set({ closedAt: new Date() })
-          .where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+          .where(and(eq(jobAftercares.jobId, req.params.id as string), isNull(jobAftercares.closedAt)));
         return res.json({ success: true, action: "closed" });
       } else if (action === "leave_open") {
         // Mark blockedRepost so the customer cannot repost the same job category
-        await db.update(jobs).set({ blockedRepost: true, updatedAt: new Date() }).where(eq(jobs.id, jobId));
+        await db.update(jobs).set({ blockedRepost: true, updatedAt: new Date() }).where(eq(jobs.id, req.params.id as string));
         await db.update(jobAftercares).set({ closedAt: new Date() })
-          .where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+          .where(and(eq(jobAftercares.jobId, req.params.id as string), isNull(jobAftercares.closedAt)));
         return res.json({ success: true, action: "left_open" });
       } else {
         return res.status(400).json({ error: "Invalid action. Use 'close' or 'leave_open'." });
@@ -1103,11 +1103,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/jobs/:id/close", requireAuth, async (req: AuthRequest, res: Response) => {
     const { blockRepost } = req.body;
-    const [job] = await db.select().from(jobs).where(and(eq(jobs.id, req.params.id), eq(jobs.customerId, req.user!.userId)));
+    const [job] = await db.select().from(jobs).where(and(eq(jobs.id, req.params.id as string), eq(jobs.customerId, req.user!.userId)));
     if (!job) return res.status(404).json({ error: "Job not found" });
     await db.update(jobs).set({
       status: "CLOSED", blockedRepost: blockRepost ? true : false, updatedAt: new Date()
-    }).where(eq(jobs.id, req.params.id));
+    }).where(eq(jobs.id, req.params.id as string));
     return res.json({ success: true });
   });
 
@@ -1184,7 +1184,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/quotes/:id/accept", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id));
+      const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id as string));
       if (!quote) return res.status(404).json({ error: "Quote not found" });
       if (quote.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
 
@@ -1219,7 +1219,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/quotes/:id/reject", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id));
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id as string));
     if (!quote) return res.status(404).json({ error: "Quote not found" });
     if (quote.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
     await db.update(quotes).set({ status: "REJECTED", updatedAt: new Date() }).where(eq(quotes.id, quote.id));
@@ -1254,18 +1254,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/bookings/:id/in-progress", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id as string));
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (booking.professionalId !== req.user!.userId) {
       return res.status(403).json({ error: "Forbidden. Only the assigned professional can mark this in progress." });
     }
     await db.update(bookings).set({ status: "IN_PROGRESS", updatedAt: new Date() })
-      .where(eq(bookings.id, req.params.id));
+      .where(eq(bookings.id, req.params.id as string));
     return res.json({ success: true });
   });
 
   app.get("/api/bookings/:id", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id as string));
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     const userId = req.user!.userId;
     if (booking.customerId !== userId && booking.professionalId !== userId && req.user!.role !== "ADMIN") {
@@ -1275,31 +1275,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/bookings/:id/complete", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id as string));
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (booking.customerId !== req.user!.userId && booking.professionalId !== req.user!.userId) {
       return res.status(403).json({ error: "Forbidden" });
     }
     await db.update(bookings).set({ status: "COMPLETED", completedAt: new Date(), updatedAt: new Date() })
-      .where(eq(bookings.id, req.params.id));
+      .where(eq(bookings.id, req.params.id as string));
     await db.update(jobs).set({ status: "COMPLETED", updatedAt: new Date() }).where(eq(jobs.id, booking.jobId));
     return res.json({ success: true });
   });
 
   app.post("/api/bookings/:id/cancel", requireAuth, async (req: AuthRequest, res: Response) => {
     const { reason } = req.body;
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id as string));
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     await db.update(bookings).set({
       status: "CANCELLED", cancellationReason: reason || null, updatedAt: new Date()
-    }).where(eq(bookings.id, req.params.id));
+    }).where(eq(bookings.id, req.params.id as string));
     return res.json({ success: true });
   });
 
   app.post("/api/bookings/:id/review", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { rating, title, comment } = req.body;
-      const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
+      const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id as string));
       if (!booking) return res.status(404).json({ error: "Booking not found" });
 
       // Moderate review text — block phone numbers, profanity, contact attempts
@@ -1424,7 +1424,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Status must be ACCEPTED or DECLINED" });
       }
 
-      const [callReq] = await db.select().from(callRequests).where(eq(callRequests.id, req.params.id));
+      const [callReq] = await db.select().from(callRequests).where(eq(callRequests.id, req.params.id as string));
       if (!callReq) return res.status(404).json({ error: "Call request not found" });
       if (callReq.targetId !== userId) return res.status(403).json({ error: "Not authorized" });
       if (callReq.status !== "PENDING") return res.status(409).json({ error: "Call request already responded to" });
@@ -1549,7 +1549,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/chat/conversations/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const convId = req.params.id;
+      const convId = req.params.id as string;
       const { page = "1", limit = "50" } = req.query as any;
       const offset = (parseInt(page) - 1) * parseInt(limit);
 
@@ -1564,7 +1564,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Mark as read
       await db.update(conversationParticipants).set({ lastReadAt: new Date() })
-        .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
+        .where(and(eq(conversationParticipants.conversationId, req.params.id as string), eq(conversationParticipants.userId, userId)));
 
       return res.json(msgs);
     } catch (e: any) {
@@ -1575,7 +1575,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/chat/conversations/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const convId = req.params.id;
+      const convId = req.params.id as string;
       const { content, type = "TEXT" } = req.body;
 
       const [conv] = await db.select().from(conversations).where(eq(conversations.id, convId));
@@ -1631,7 +1631,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         isFiltered, filterFlags
       }).returning();
 
-      await db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, convId));
+      await db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, req.params.id as string));
 
       // Severity-based auto-flagging for admin attention
       if (severity === "CRITICAL") {
@@ -2033,12 +2033,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (msgMod.blocked) return res.status(422).json({ error: msgMod.userMessage });
     }
 
-    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id as string));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
     // Only staff can post internal notes
     const internal = isInternal && isStaff ? true : false;
     const [msg] = await db.insert(ticketMessages).values({
-      ticketId: ticket.id, senderId: req.user!.userId, message: message.trim(), isInternal: internal
+      ticketId: ticket.id as string, senderId: req.user!.userId, message: message.trim(), isInternal: internal
     }).returning();
     // Track first response time for SLA
     const updateFields: any = { updatedAt: new Date() };
@@ -2053,7 +2053,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!isStaff && ticket.status === "WAITING") {
       updateFields.status = "IN_PROGRESS";
     }
-    await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, ticket.id));
+    await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, ticket.id as string));
     // Notify the other party
     if (isStaff && !internal) {
       await createNotification(ticket.userId, "TICKET_REPLY", "Support reply",
@@ -2068,7 +2068,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Update ticket (admin/support only)
   app.patch("/api/support/tickets/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
     const { status, priority, assignedTo } = req.body;
-    const [existing] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    const [existing] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id as string));
     if (!existing) return res.status(404).json({ error: "Ticket not found" });
     const updateFields: any = { updatedAt: new Date() };
     if (status) updateFields.status = status;
@@ -2080,7 +2080,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (status === "RESOLVED") updateFields.resolvedAt = new Date();
     if (status === "CLOSED") updateFields.closedAt = new Date();
     const [ticket] = await db.update(supportTickets).set(updateFields)
-      .where(eq(supportTickets.id, req.params.id)).returning();
+      .where(eq(supportTickets.id, req.params.id as string)).returning();
     // Notify customer of status change
     if (status && status !== existing.status) {
       await createNotification(existing.userId, "TICKET_STATUS", "Ticket updated",
@@ -2089,7 +2089,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     // Audit log
     await db.insert(adminAuditLogs).values({
       adminId: req.user!.userId, action: "UPDATE_TICKET", resourceType: "SUPPORT_TICKET",
-      resourceId: req.params.id, changes: { status, priority, assignedTo },
+      resourceId: req.params.id as string, changes: { status, priority, assignedTo },
       ipAddress: req.ip
     });
     return res.json(ticket);
@@ -2100,14 +2100,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { rating, comment } = req.body;
       if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: "Rating must be 1-5" });
-      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id as string));
       if (!ticket) return res.status(404).json({ error: "Ticket not found" });
       if (ticket.userId !== req.user!.userId) return res.status(403).json({ error: "Not your ticket" });
       if (!["RESOLVED", "CLOSED"].includes(ticket.status)) return res.status(400).json({ error: "Ticket must be resolved first" });
       if (ticket.satisfactionRating) return res.status(409).json({ error: "Already rated" });
       const [updated] = await db.update(supportTickets).set({
         satisfactionRating: rating, satisfactionComment: comment?.trim() || null, ratedAt: new Date()
-      }).where(eq(supportTickets.id, req.params.id)).returning();
+      }).where(eq(supportTickets.id, req.params.id as string)).returning();
       return res.json(updated);
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
@@ -2116,7 +2116,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/support/tickets/:id/reopen", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { reason } = req.body;
-      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id as string));
       if (!ticket) return res.status(404).json({ error: "Ticket not found" });
       if (ticket.userId !== req.user!.userId) return res.status(403).json({ error: "Not your ticket" });
       if (!["RESOLVED", "CLOSED"].includes(ticket.status)) return res.status(400).json({ error: "Ticket is not resolved/closed" });
@@ -2125,11 +2125,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         status: "OPEN", reopenedAt: new Date(), reopenCount: ticket.reopenCount + 1,
         resolvedAt: null, closedAt: null, satisfactionRating: null, satisfactionComment: null, ratedAt: null,
         slaDeadline: calcSlaDeadline(ticket.priority), updatedAt: new Date()
-      }).where(eq(supportTickets.id, req.params.id)).returning();
+      }).where(eq(supportTickets.id, req.params.id as string)).returning();
       // Add reopen reason as message
       if (reason?.trim()) {
         await db.insert(ticketMessages).values({
-          ticketId: ticket.id, senderId: req.user!.userId,
+          ticketId: ticket.id as string, senderId: req.user!.userId,
           message: `[Ticket reopened] ${reason.trim()}`
         });
       }
@@ -2142,7 +2142,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Escalate ticket (admin/support)
   app.post("/api/support/tickets/:id/escalate", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
     try {
-      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id as string));
       if (!ticket) return res.status(404).json({ error: "Ticket not found" });
       // Bump priority up one level
       const levels = ["LOW", "MEDIUM", "HIGH", "URGENT"];
@@ -2151,10 +2151,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [updated] = await db.update(supportTickets).set({
         priority: newPriority as any, escalatedAt: new Date(), escalatedTo: req.user!.userId,
         slaDeadline: calcSlaDeadline(newPriority), updatedAt: new Date()
-      }).where(eq(supportTickets.id, req.params.id)).returning();
+      }).where(eq(supportTickets.id, req.params.id as string)).returning();
       // Add system message
       await db.insert(ticketMessages).values({
-        ticketId: ticket.id, senderId: req.user!.userId,
+        ticketId: ticket.id as string, senderId: req.user!.userId,
         message: `[Escalated] Priority changed from ${ticket.priority} to ${newPriority}`,
         isInternal: true
       });
@@ -2380,7 +2380,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/users/:id/verify", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     try {
       const { approved, note } = req.body as { approved: boolean; note?: string };
-      const targetUserId = req.params.id;
+      const targetUserId = req.params.id as string;
 
       const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, targetUserId));
       if (!profile) return res.status(404).json({ error: "Professional profile not found" });
@@ -2397,7 +2397,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await db.insert(adminAuditLogs).values({
         adminId: req.user!.userId, action: approved ? "VERIFY_PRO" : "REJECT_PRO",
-        resourceType: "USER", resourceId: targetUserId,
+        resourceType: "USER", resourceId: targetUserId as string,
         changes: { approved, note }, ipAddress: req.ip
       });
 
@@ -2415,9 +2415,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/pro/:id/profile", async (req: Request, res: Response) => {
-    const [user] = await db.select().from(users).where(eq(users.id, req.params.id));
+    const [user] = await db.select().from(users).where(eq(users.id, req.params.id as string));
     if (!user) return res.status(404).json({ error: "User not found" });
-    const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.params.id));
+    const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.params.id as string));
     const proReviews = await db.select().from(reviews).where(eq(reviews.revieweeId, req.params.id)).limit(10);
 
     // Compute trust signals
@@ -2439,7 +2439,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const convIds = proConvs.map(c => c.id);
         const firstMsgs = await db.select({ convId: messages.conversationId, sentAt: messages.createdAt })
           .from(messages)
-          .where(and(eq(messages.senderId, req.params.id), inArray(messages.conversationId, convIds)))
+          .where(and(eq(messages.senderId, req.params.id as string), inArray(messages.conversationId, convIds)))
           .orderBy(messages.createdAt);
         if (firstMsgs.length > 0) {
           const deltas: number[] = [];
@@ -2556,7 +2556,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     await db.insert(adminAuditLogs).values({
       adminId: req.user!.userId, action: "UPDATE_USER", resourceType: "USER",
-      resourceId: req.params.id, changes: { status, role }, ipAddress: req.ip
+      resourceId: req.params.id as string, changes: { status, role }, ipAddress: req.ip
     });
 
     return res.json({ ...user, passwordHash: undefined });
@@ -2660,7 +2660,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // GET /api/admin/conversations/:id/messages — full thread for admin
   app.get("/api/admin/conversations/:id/messages", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     try {
-      const convId = req.params.id;
+      const convId = req.params.id as string;
       const msgs = await db.select({
         id: messages.id, conversationId: messages.conversationId,
         senderId: messages.senderId, type: messages.type,
@@ -2683,7 +2683,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const [msg] = await db.update(messages)
         .set({ isFiltered: false, filterFlags: [] })
-        .where(eq(messages.id, req.params.id))
+        .where(eq(messages.id, req.params.id as string))
         .returning();
       return res.json(msg);
     } catch (e: any) {
@@ -2694,7 +2694,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // DELETE /api/admin/messages/:id — admin hard-deletes a message
   app.delete("/api/admin/messages/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     try {
-      await db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, req.params.id));
+      await db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, req.params.id as string));
       return res.json({ success: true });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -2717,7 +2717,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       isEnabled: isEnabled !== undefined ? isEnabled : undefined,
       rolloutPercentage: rolloutPercentage !== undefined ? rolloutPercentage : undefined,
       updatedBy: req.user!.userId, updatedAt: new Date()
-    }).where(eq(featureFlags.id, req.params.id)).returning();
+    }).where(eq(featureFlags.id, req.params.id as string)).returning();
     return res.json(flag);
   });
 
@@ -2913,7 +2913,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Reply must be 1000 characters or fewer" });
       }
 
-      const [review] = await db.select().from(reviews).where(eq(reviews.id, req.params.id));
+      const [review] = await db.select().from(reviews).where(eq(reviews.id, req.params.id as string));
       if (!review || !review.isVisible) return res.status(404).json({ error: "Review not found" });
 
       // Review must belong to this professional's profile
@@ -2955,38 +2955,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         bio, specialisations, yearsExperience, serviceRadius,
         categoryIds, location
       } = req.body;
-      if (!email || !password || !firstName || !lastName) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (!email || !password || !firstName || !lastName || !phone) {
+        return res.status(400).json({ error: "Missing required fields (email, password, name, and phone are mandatory)" });
       }
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
 
-      const passwordHash = await db.transaction(async (tx) => {
-        const hash = await require("bcryptjs").hash(password, 12);
-        return hash;
-      });
+      const passwordHash = await hashPassword(password);
 
       const result = await db.transaction(async (tx) => {
         const [user] = await tx.insert(users).values({
-          email: email.toLowerCase(), passwordHash: await require("bcryptjs").hash(password, 12),
-          firstName, lastName, phone: phone || null,
-          role: "PROFESSIONAL", status: "ACTIVE",
-          emailVerified: true, onboardingCompleted: true,
-          creditBalance: 20 // starter credits
+          email: email.toLowerCase(),
+          passwordHash,
+          firstName,
+          lastName,
+          phone,
+          bio: bio || "",
+          role: "PROFESSIONAL",
+          status: "ACTIVE",
+          emailVerified: false,
+          phoneVerified: false,
+          onboardingCompleted: true,
+          creditBalance: 20
         }).returning();
 
         const [profile] = await tx.insert(professionalProfiles).values({
           userId: user.id,
-          bio: bio || "",
-          specialisations: specialisations || [],
           yearsExperience: yearsExperience || 0,
-          serviceRadius: serviceRadius || 25,
-          categoryIds: categoryIds || [],
-          location: location || null,
+          radiusKm: serviceRadius || 25,
+          serviceCategories: categoryIds || [],
           isVerified: false,
-          averageRating: "0",
-          totalReviews: 0,
-          completedJobs: 0
+          ratingAvg: "0",
+          totalReviews: 0
         }).returning();
 
         // Add starter credit transaction
@@ -3000,7 +3000,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const { accessToken, refreshToken } = generateTokens(result.user.id, result.user.role);
       await db.insert(userSessions).values({
-        userId: result.user.id, refreshToken,
+        userId: result.user.id, refreshTokenHash: await hashPassword(refreshToken),
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       });
 
@@ -3078,14 +3078,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (firstName) updateData.firstName = firstName;
       if (lastName) updateData.lastName = lastName;
 
-      const [updated] = await db.update(users).set(updateData).where(eq(users.id, req.params.id)).returning();
+      const [updated] = await db.update(users).set(updateData).where(eq(users.id, req.params.id as string)).returning();
       if (!updated) return res.status(404).json({ error: "User not found" });
 
       await db.insert(adminAuditLogs).values({
         adminId: req.user!.userId,
         action: "UPDATE_USER_NAME",
         resourceType: "USER",
-        resourceId: req.params.id,
+        resourceId: req.params.id as string,
         changes: { firstName, lastName },
         ipAddress: req.ip,
       });
@@ -3103,10 +3103,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/users/:id/suspend", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     try {
       const { reason } = req.body;
-      await db.update(users).set({ status: "SUSPENDED" }).where(eq(users.id, req.params.id));
+      await db.update(users).set({ status: "SUSPENDED" }).where(eq(users.id, req.params.id as string));
       await db.insert(adminAuditLogs).values({
         adminId: req.user!.userId, action: "SUSPEND_USER", resourceType: "USER",
-        resourceId: req.params.id, changes: { reason }, ipAddress: req.ip
+        resourceId: req.params.id as string, changes: { reason }, ipAddress: req.ip
       });
       return res.json({ success: true });
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
@@ -3114,10 +3114,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/admin/users/:id/unsuspend", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     try {
-      await db.update(users).set({ status: "ACTIVE" }).where(eq(users.id, req.params.id));
+      await db.update(users).set({ status: "ACTIVE" }).where(eq(users.id, req.params.id as string));
       await db.insert(adminAuditLogs).values({
         adminId: req.user!.userId, action: "UNSUSPEND_USER", resourceType: "USER",
-        resourceId: req.params.id, changes: {}, ipAddress: req.ip
+        resourceId: req.params.id as string, changes: {}, ipAddress: req.ip
       });
       return res.json({ success: true });
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
@@ -3129,16 +3129,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { content, message: msgText, isInternal } = req.body;
       const text = (content || msgText || "").trim();
       if (!text) return res.status(400).json({ error: "Reply content is required" });
-      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id as string));
       if (!ticket) return res.status(404).json({ error: "Ticket not found" });
       const [msg] = await db.insert(ticketMessages).values({
-        ticketId: req.params.id, senderId: req.user!.userId,
+        ticketId: req.params.id as string, senderId: req.user!.userId,
         message: text, isInternal: isInternal ? true : false
       }).returning();
       const updateFields: any = { updatedAt: new Date() };
       if (!ticket.firstResponseAt) updateFields.firstResponseAt = new Date();
       if (ticket.status === "OPEN") updateFields.status = "IN_PROGRESS";
-      await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, req.params.id));
+      await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, req.params.id as string));
       if (!isInternal) {
         await createNotification(ticket.userId, "TICKET_REPLY", "Support reply",
           `New reply on: ${ticket.subject}`, { ticketId: ticket.id });
@@ -3151,7 +3151,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/support/tickets/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const rawMsgs = await db.select().from(ticketMessages)
-        .where(eq(ticketMessages.ticketId, req.params.id))
+        .where(eq(ticketMessages.ticketId, req.params.id as string))
         .orderBy(asc(ticketMessages.createdAt));
       const [viewer] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user!.userId));
       const isStaff = viewer?.role === "ADMIN" || viewer?.role === "SUPPORT";

@@ -25,6 +25,11 @@ export default function RegisterCustomer() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    if (!phone || phone.trim().length < 7) {
+      toast({ title: "Phone number required", description: "Please enter a valid phone number (at least 7 digits) to continue.", variant: "destructive" });
+      setLoading(false);
+      return;
+    }
     try {
       await register({
         firstName,
@@ -158,13 +163,14 @@ export default function RegisterCustomer() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="phone" className="text-sm font-medium">Phone Number (optional)</Label>
+                  <Label htmlFor="phone" className="text-sm font-medium">Phone Number</Label>
                   <Input
                     id="phone"
                     type="tel"
                     value={phone}
                     onChange={e => setPhone(e.target.value)}
                     placeholder="+353 8X XXX XXXX"
+                    required
                     className="h-11 rounded-xl border-border/60 focus:border-blue-500 focus:ring-blue-500/20"
                   />
                 </div>

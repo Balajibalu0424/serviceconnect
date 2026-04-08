@@ -186,7 +186,7 @@ export default function Settings() {
 
               <div className="space-y-1">
                 <Label htmlFor="phone">
-                  <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> Phone number</span>
+                  <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> Phone number *</span>
                 </Label>
                 <Input
                   id="phone"
@@ -194,6 +194,7 @@ export default function Settings() {
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
                   placeholder="+353 87 000 0000"
+                  required
                   data-testid="input-phone"
                 />
               </div>

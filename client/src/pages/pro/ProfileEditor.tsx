@@ -133,8 +133,8 @@ export default function ProProfileEditor() {
               </div>
             </div>
             <div>
-              <Label>Phone number</Label>
-              <Input type="tel" value={nameForm.phone} onChange={e => setNameForm(f => ({ ...f, phone: e.target.value }))} placeholder="+353 87 000 0000" data-testid="input-phone" />
+              <Label>Phone number *</Label>
+              <Input type="tel" required value={nameForm.phone} onChange={e => setNameForm(f => ({ ...f, phone: e.target.value }))} placeholder="+353 87 000 0000" data-testid="input-phone" />
             </div>
             <div>
               <Label>Email</Label>

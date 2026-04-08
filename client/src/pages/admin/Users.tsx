@@ -129,7 +129,7 @@ export default function AdminUsers() {
                       <Badge variant={STATUS_COLORS[u.status] as any} className="text-xs">{u.status}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {u.email} · Joined {formatDistanceToNow(new Date(u.createdAt), { addSuffix: true })}
+                      {u.phone || <span className="text-destructive">No phone</span>} · {u.email} · Joined {formatDistanceToNow(new Date(u.createdAt), { addSuffix: true })}
                     </p>
                     {u.role === "PROFESSIONAL" && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">

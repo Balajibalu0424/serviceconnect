@@ -30204,8 +30204,8 @@ var require_lt = __commonJS({
   "node_modules/jsonwebtoken/node_modules/semver/functions/lt.js"(exports, module) {
     "use strict";
     var compare = require_compare();
-    var lt3 = (a, b, loose) => compare(a, b, loose) < 0;
-    module.exports = lt3;
+    var lt2 = (a, b, loose) => compare(a, b, loose) < 0;
+    module.exports = lt2;
   }
 });
 
@@ -30257,7 +30257,7 @@ var require_cmp = __commonJS({
     var neq = require_neq();
     var gt2 = require_gt();
     var gte2 = require_gte();
-    var lt3 = require_lt();
+    var lt2 = require_lt();
     var lte2 = require_lte();
     var cmp = (a, op, b, loose) => {
       switch (op) {
@@ -30288,7 +30288,7 @@ var require_cmp = __commonJS({
         case ">=":
           return gte2(a, b, loose);
         case "<":
-          return lt3(a, b, loose);
+          return lt2(a, b, loose);
         case "<=":
           return lte2(a, b, loose);
         default:
@@ -31043,7 +31043,7 @@ var require_outside = __commonJS({
     var Range = require_range2();
     var satisfies = require_satisfies();
     var gt2 = require_gt();
-    var lt3 = require_lt();
+    var lt2 = require_lt();
     var lte2 = require_lte();
     var gte2 = require_gte();
     var outside = (version2, range, hilo, options) => {
@@ -31054,12 +31054,12 @@ var require_outside = __commonJS({
         case ">":
           gtfn = gt2;
           ltefn = lte2;
-          ltfn = lt3;
+          ltfn = lt2;
           comp = ">";
           ecomp = ">=";
           break;
         case "<":
-          gtfn = lt3;
+          gtfn = lt2;
           ltefn = gte2;
           ltfn = gt2;
           comp = "<";
@@ -31239,12 +31239,12 @@ var require_subset = __commonJS({
         }
       }
       const eqSet = /* @__PURE__ */ new Set();
-      let gt2, lt3;
+      let gt2, lt2;
       for (const c of sub) {
         if (c.operator === ">" || c.operator === ">=") {
           gt2 = higherGT(gt2, c, options);
         } else if (c.operator === "<" || c.operator === "<=") {
-          lt3 = lowerLT(lt3, c, options);
+          lt2 = lowerLT(lt2, c, options);
         } else {
           eqSet.add(c.semver);
         }
@@ -31253,11 +31253,11 @@ var require_subset = __commonJS({
         return null;
       }
       let gtltComp;
-      if (gt2 && lt3) {
-        gtltComp = compare(gt2.semver, lt3.semver, options);
+      if (gt2 && lt2) {
+        gtltComp = compare(gt2.semver, lt2.semver, options);
         if (gtltComp > 0) {
           return null;
-        } else if (gtltComp === 0 && (gt2.operator !== ">=" || lt3.operator !== "<=")) {
+        } else if (gtltComp === 0 && (gt2.operator !== ">=" || lt2.operator !== "<=")) {
           return null;
         }
       }
@@ -31265,7 +31265,7 @@ var require_subset = __commonJS({
         if (gt2 && !satisfies(eq2, String(gt2), options)) {
           return null;
         }
-        if (lt3 && !satisfies(eq2, String(lt3), options)) {
+        if (lt2 && !satisfies(eq2, String(lt2), options)) {
           return null;
         }
         for (const c of dom) {
@@ -31277,9 +31277,9 @@ var require_subset = __commonJS({
       }
       let higher, lower;
       let hasDomLT, hasDomGT;
-      let needDomLTPre = lt3 && !options.includePrerelease && lt3.semver.prerelease.length ? lt3.semver : false;
+      let needDomLTPre = lt2 && !options.includePrerelease && lt2.semver.prerelease.length ? lt2.semver : false;
       let needDomGTPre = gt2 && !options.includePrerelease && gt2.semver.prerelease.length ? gt2.semver : false;
-      if (needDomLTPre && needDomLTPre.prerelease.length === 1 && lt3.operator === "<" && needDomLTPre.prerelease[0] === 0) {
+      if (needDomLTPre && needDomLTPre.prerelease.length === 1 && lt2.operator === "<" && needDomLTPre.prerelease[0] === 0) {
         needDomLTPre = false;
       }
       for (const c of dom) {
@@ -31300,29 +31300,29 @@ var require_subset = __commonJS({
             return false;
           }
         }
-        if (lt3) {
+        if (lt2) {
           if (needDomLTPre) {
             if (c.semver.prerelease && c.semver.prerelease.length && c.semver.major === needDomLTPre.major && c.semver.minor === needDomLTPre.minor && c.semver.patch === needDomLTPre.patch) {
               needDomLTPre = false;
             }
           }
           if (c.operator === "<" || c.operator === "<=") {
-            lower = lowerLT(lt3, c, options);
-            if (lower === c && lower !== lt3) {
+            lower = lowerLT(lt2, c, options);
+            if (lower === c && lower !== lt2) {
               return false;
             }
-          } else if (lt3.operator === "<=" && !satisfies(lt3.semver, String(c), options)) {
+          } else if (lt2.operator === "<=" && !satisfies(lt2.semver, String(c), options)) {
             return false;
           }
         }
-        if (!c.operator && (lt3 || gt2) && gtltComp !== 0) {
+        if (!c.operator && (lt2 || gt2) && gtltComp !== 0) {
           return false;
         }
       }
-      if (gt2 && hasDomLT && !lt3 && gtltComp !== 0) {
+      if (gt2 && hasDomLT && !lt2 && gtltComp !== 0) {
         return false;
       }
-      if (lt3 && hasDomGT && !gt2 && gtltComp !== 0) {
+      if (lt2 && hasDomGT && !gt2 && gtltComp !== 0) {
         return false;
       }
       if (needDomGTPre || needDomLTPre) {
@@ -31372,7 +31372,7 @@ var require_semver2 = __commonJS({
     var sort = require_sort();
     var rsort = require_rsort();
     var gt2 = require_gt();
-    var lt3 = require_lt();
+    var lt2 = require_lt();
     var eq2 = require_eq();
     var neq = require_neq();
     var gte2 = require_gte();
@@ -31410,7 +31410,7 @@ var require_semver2 = __commonJS({
       sort,
       rsort,
       gt: gt2,
-      lt: lt3,
+      lt: lt2,
       eq: eq2,
       neq,
       gte: gte2,
@@ -35806,6 +35806,9 @@ function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelect
 function count(expression) {
   return sql`count(${expression || sql.raw("*")})`.mapWith(Number);
 }
+function avg(expression) {
+  return sql`avg(${expression})`.mapWith(String);
+}
 function sum(expression) {
   return sql`sum(${expression})`.mapWith(String);
 }
@@ -39100,6 +39103,7 @@ __export(schema_exports, {
   bookings: () => bookings,
   callRequestStatusEnum: () => callRequestStatusEnum,
   callRequests: () => callRequests,
+  cannedResponses: () => cannedResponses,
   convStatusEnum: () => convStatusEnum,
   convTypeEnum: () => convTypeEnum,
   conversationParticipants: () => conversationParticipants,
@@ -39108,8 +39112,11 @@ __export(schema_exports, {
   creditTransactions: () => creditTransactions,
   creditTxTypeEnum: () => creditTxTypeEnum,
   customerResponseEnum: () => customerResponseEnum,
+  faqArticles: () => faqArticles,
   featureFlags: () => featureFlags,
   insertBookingSchema: () => insertBookingSchema,
+  insertCannedResponseSchema: () => insertCannedResponseSchema,
+  insertFaqArticleSchema: () => insertFaqArticleSchema,
   insertJobSchema: () => insertJobSchema,
   insertMessageSchema: () => insertMessageSchema,
   insertNotificationSchema: () => insertNotificationSchema,
@@ -39138,6 +39145,7 @@ __export(schema_exports, {
   spinPrizeEnum: () => spinPrizeEnum,
   spinWheelEvents: () => spinWheelEvents,
   supportTickets: () => supportTickets,
+  ticketCategoryEnum: () => ticketCategoryEnum,
   ticketMessages: () => ticketMessages,
   ticketPriorityEnum: () => ticketPriorityEnum,
   ticketStatusEnum: () => ticketStatusEnum,
@@ -43480,7 +43488,7 @@ var ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "WAITING"
 var users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
-  phone: text("phone"),
+  phone: text("phone").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("CUSTOMER"),
   status: userStatusEnum("status").notNull().default("ACTIVE"),
@@ -43779,6 +43787,15 @@ var spinWheelEvents = pgTable("spin_wheel_events", {
   prizeValue: integer("prize_value"),
   prizeApplied: boolean("prize_applied").notNull().default(false)
 }, (t) => [index("spin_pro_idx").on(t.professionalId)]);
+var ticketCategoryEnum = pgEnum("ticket_category", [
+  "GENERAL",
+  "BILLING",
+  "JOB",
+  "PROFESSIONAL",
+  "TECHNICAL",
+  "SAFETY",
+  "ACCOUNT"
+]);
 var supportTickets = pgTable("support_tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -43788,12 +43805,27 @@ var supportTickets = pgTable("support_tickets", {
   status: ticketStatusEnum("status").notNull().default("OPEN"),
   subject: text("subject").notNull(),
   description: text("description").notNull(),
+  // SLA tracking
+  firstResponseAt: timestamp("first_response_at"),
+  slaDeadline: timestamp("sla_deadline"),
+  escalatedAt: timestamp("escalated_at"),
+  escalatedTo: varchar("escalated_to").references(() => users.id),
+  // Satisfaction
+  satisfactionRating: integer("satisfaction_rating"),
+  satisfactionComment: text("satisfaction_comment"),
+  ratedAt: timestamp("rated_at"),
+  // Lifecycle
   resolvedAt: timestamp("resolved_at"),
+  closedAt: timestamp("closed_at"),
+  reopenedAt: timestamp("reopened_at"),
+  reopenCount: integer("reopen_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`)
 }, (t) => [
   index("tickets_user_idx").on(t.userId),
-  index("tickets_status_idx").on(t.status)
+  index("tickets_status_idx").on(t.status),
+  index("tickets_assigned_idx").on(t.assignedTo),
+  index("tickets_priority_idx").on(t.priority)
 ]);
 var ticketMessages = pgTable("ticket_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -43803,6 +43835,33 @@ var ticketMessages = pgTable("ticket_messages", {
   isInternal: boolean("is_internal").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`)
 }, (t) => [index("ticket_msg_idx").on(t.ticketId)]);
+var faqArticles = pgTable("faq_articles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull().default("GENERAL"),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isPublished: boolean("is_published").notNull().default(true),
+  helpfulCount: integer("helpful_count").notNull().default(0),
+  notHelpfulCount: integer("not_helpful_count").notNull().default(0),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`)
+}, (t) => [
+  index("faq_cat_idx").on(t.category),
+  index("faq_published_idx").on(t.isPublished)
+]);
+var cannedResponses = pgTable("canned_responses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: text("category").notNull().default("GENERAL"),
+  shortcut: text("shortcut"),
+  usageCount: integer("usage_count").notNull().default(0),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`)
+}, (t) => [index("canned_cat_idx").on(t.category)]);
 var notifications = pgTable("notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -43871,6 +43930,8 @@ var insertBookingSchema = createInsertSchema(bookings).omit({ id: true, createdA
 var insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
 var insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 var insertSupportTicketSchema = createInsertSchema(supportTickets).omit({ id: true, createdAt: true, updatedAt: true });
+var insertFaqArticleSchema = createInsertSchema(faqArticles).omit({ id: true, createdAt: true, updatedAt: true });
+var insertCannedResponseSchema = createInsertSchema(cannedResponses).omit({ id: true, createdAt: true, updatedAt: true });
 
 // server/db.ts
 var pool = new Pool({
@@ -44278,10 +44339,32 @@ var EXTENDED_PHONE_PATTERNS = [
   // Partial obfuscation with asterisks: "087 123 ****" still reveals structure
   /\b0\d{2}\s+\d{3}\s+[\d\*]{4}\b/g,
   // Parenthetical format: (087) 123 4567
-  /\(\s*0\d{2}\s*\)\s*\d{3}[\s\-]\d{4}/g
+  /\(\s*0\d{2}\s*\)\s*\d{3}[\s\-]\d{4}/g,
+  // Digit-word-digit pattern: "oh 87 one two three four five six"
+  /\b(?:oh|zero|0)\s*(?:eight|8)\s*(?:\d|zero|one|two|three|four|five|six|seven|eight|nine)\s+(?:(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)[\s,]+){4,}/gi,
+  // Numbers disguised with dots/commas/underscores between every digit
+  /\b\d[._,]\d[._,]\d[._,]\d[._,]\d[._,]\d[._,]\d/g,
+  // "Call me on" / "text me" / "ring me" with any digit sequence
+  /(?:call|text|ring|phone|whatsapp|message|contact)\s+(?:me|us)\s+(?:on|at)?\s*\d/gi,
+  // "My number is" pattern
+  /(?:my\s+(?:number|phone|mobile|cell)\s+(?:is|:))\s*[\d\s\-\.\(\)]{7,}/gi
+];
+var CONTACT_INTENT_PATTERNS = [
+  // "reach me at" / "find me on" / "contact me via"
+  /(?:reach|find|contact|get|hit)\s+(?:me|us)\s+(?:at|on|via|through|@)/gi,
+  // "my insta is" / "my snap is" / "my whatsapp is"
+  /(?:my\s+(?:insta(?:gram)?|snap(?:chat)?|whatsapp|wa|tiktok|twitter|facebook|fb|telegram|signal|viber|number|email|phone|mobile)\s+(?:is|:))/gi,
+  // Direct "add me" patterns
+  /(?:add|follow|dm|message)\s+(?:me|us)\s+(?:on|@)/gi
 ];
 function hasExtendedPhonePattern(text2) {
   return EXTENDED_PHONE_PATTERNS.some((re) => {
+    re.lastIndex = 0;
+    return re.test(text2);
+  });
+}
+function hasContactIntentPattern(text2) {
+  return CONTACT_INTENT_PATTERNS.some((re) => {
     re.lastIndex = 0;
     return re.test(text2);
   });
@@ -44298,7 +44381,7 @@ function moderateText(text2, options = {}) {
     return {
       blocked: true,
       reason: "contact_info_detected",
-      userMessage: `Your ${fieldName} appears to contain contact information (phone number, email address, or social handle). Please keep all communication within the platform to stay safe and protected.`,
+      userMessage: `Your ${fieldName} appears to contain contact information (phone number, email, or social handle). For your safety, please keep all communication within ServiceConnect.`,
       cleanedText: processed.content,
       flags: processed.filterFlags,
       severity: processed.severity ?? void 0
@@ -44308,9 +44391,18 @@ function moderateText(text2, options = {}) {
     return {
       blocked: true,
       reason: "phone_pattern_detected",
-      userMessage: `Your ${fieldName} appears to contain a phone number. Contact details must stay within the platform's secure system.`,
+      userMessage: `Your ${fieldName} appears to contain a phone number. For your protection, contact details must stay within ServiceConnect's secure messaging system.`,
       cleanedText: text2,
       flags: ["EXTENDED_PHONE"]
+    };
+  }
+  if (!allowPhone && hasContactIntentPattern(text2)) {
+    return {
+      blocked: true,
+      reason: "contact_intent_detected",
+      userMessage: `Your ${fieldName} appears to invite off-platform contact. For your safety, all communication should stay within ServiceConnect.`,
+      cleanedText: text2,
+      flags: ["CONTACT_INTENT"]
     };
   }
   if (processed.severity === "CRITICAL") {
@@ -46031,15 +46123,21 @@ var GoogleGenerativeAI = class {
 
 // server/geminiService.ts
 var API_KEY = process.env.GEMINI_API_KEY || "";
-var genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+var genAI = null;
+if (API_KEY) {
+  genAI = new GoogleGenerativeAI(API_KEY);
+  console.log("[Gemini] API key configured, AI features enabled");
+} else {
+  console.warn("[Gemini] WARNING: GEMINI_API_KEY not set \u2014 all AI features will return fallbacks");
+}
 var safetySettings = [
-  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
 ];
 function getModel() {
-  if (!genAI) throw new Error("GEMINI_API_KEY not configured");
+  if (!genAI) throw new Error("GEMINI_API_KEY not configured \u2014 add it to your environment variables");
   return genAI.getGenerativeModel({
     model: "gemini-2.0-flash",
     safetySettings,
@@ -46049,13 +46147,22 @@ function getModel() {
 async function ask(prompt) {
   const model = getModel();
   const result = await model.generateContent(prompt);
-  return result.response.text();
+  const text2 = result.response.text();
+  if (!text2) {
+    console.warn("[Gemini] Model returned empty response");
+  }
+  return text2;
 }
 async function askJSON(prompt) {
   const raw = await ask(prompt);
   const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
   const cleaned = (jsonMatch[1] || raw).trim();
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch (parseErr) {
+    console.error("[Gemini] Failed to parse JSON from model response:", cleaned.substring(0, 200));
+    throw parseErr;
+  }
 }
 async function enhanceJobDescription(title, description, category) {
   const prompt = `You are a professional copywriter for a home services marketplace called ServiceConnect (similar to Bark.com) based in Ireland.
@@ -46078,7 +46185,8 @@ Return ONLY valid JSON:
 }`;
   try {
     return await askJSON(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] enhanceJobDescription failed:", error);
     return { enhanced: description, improvements: [] };
   }
 }
@@ -46101,7 +46209,8 @@ Classify this job into exactly ONE category. Return ONLY valid JSON:
 }`;
   try {
     return await askJSON(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] smartCategoryDetect failed:", error);
     return { categorySlug: "", confidence: 0, reason: "AI classification unavailable" };
   }
 }
@@ -46128,7 +46237,8 @@ Return ONLY valid JSON:
 }`;
   try {
     return await askJSON(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] generateQuoteSuggestion failed:", error);
     return { suggestedMin: 0, suggestedMax: 0, message: "", tips: [] };
   }
 }
@@ -46172,7 +46282,8 @@ JSON response:`);
       action: parsed.action === "create_ticket" ? "create_ticket" : void 0,
       ticketData: parsed.ticketData || void 0
     };
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] aiChatWidgetSandboxed failed:", error);
     return { reply: REDIRECT };
   }
 }
@@ -46234,10 +46345,12 @@ Return ONLY valid JSON \u2014 no markdown fences.`;
       const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
       const cleaned = (jsonMatch[1] || raw).trim();
       return JSON.parse(cleaned);
-    } catch {
+    } catch (parseErr) {
+      console.warn("[Gemini] aiChatAssistant JSON parse failed, returning raw text:", parseErr);
       return { reply: raw };
     }
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] aiChatAssistant failed:", error);
     return { reply: "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment, or contact our support team for help." };
   }
 }
@@ -46258,7 +46371,8 @@ ${reviewText}
 Write a 2-3 sentence professional summary highlighting their strengths based on customer feedback. Use third person. Keep it warm but professional. Do NOT use quotation marks around the summary.`;
   try {
     return await ask(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] generateReviewSummary failed:", error);
     return "";
   }
 }
@@ -46283,7 +46397,8 @@ Return ONLY valid JSON:
 }`;
   try {
     return await askJSON(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] enhanceProBio failed:", error);
     return { enhanced: currentBio, improvements: [] };
   }
 }
@@ -46368,8 +46483,28 @@ Analyse the conversation and respond with the JSON object:`;
   }
 }
 function isGeminiAvailable() {
-  return !!genAI;
+  if (!genAI) return false;
+  if (!API_KEY || API_KEY.length < 10) {
+    console.warn("[Gemini] API key appears invalid (too short)");
+    return false;
+  }
+  return true;
 }
+async function validateKeyOnStartup() {
+  if (!genAI) return;
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await model.generateContent("Reply with exactly: OK");
+    const text2 = result.response.text();
+    if (text2) {
+      console.log("[Gemini] \u2713 API key validated successfully \u2014 AI features are live");
+    }
+  } catch (error) {
+    console.error("[Gemini] \u2717 Startup validation failed:", error?.message || error);
+    console.error("[Gemini]   AI features may be degraded \u2014 will retry on first real request");
+  }
+}
+validateKeyOnStartup();
 
 // node_modules/stripe/esm/platform/NodePlatformFunctions.js
 import * as crypto3 from "crypto";
@@ -51886,8 +52021,8 @@ async function registerRoutes(httpServer, app2) {
   app2.post("/api/auth/register", async (req, res) => {
     try {
       const { email, password, firstName, lastName, phone, role } = req.body;
-      if (!email || !password || !firstName || !lastName) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (!email || !password || !firstName || !lastName || !phone) {
+        return res.status(400).json({ error: "Missing required fields (email, password, name, and phone are mandatory)" });
       }
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) {
@@ -51899,7 +52034,7 @@ async function registerRoutes(httpServer, app2) {
         passwordHash,
         firstName,
         lastName,
-        phone: phone || null,
+        phone,
         role: role || "CUSTOMER",
         status: "ACTIVE",
         emailVerified: false,
@@ -52065,9 +52200,16 @@ async function registerRoutes(httpServer, app2) {
   app2.post("/api/onboarding/customer", async (req, res) => {
     try {
       const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
-      if (!email || !password || !firstName || !lastName || !title || !description || !categoryId) {
-        return res.status(400).json({ error: "Missing required fields for customer onboarding." });
+      if (!email || !password || !firstName || !lastName || !phone || !title || !description || !categoryId) {
+        return res.status(400).json({ error: "Missing required fields for customer onboarding (including phone number)." });
       }
+      if (phone.trim().length < 7) {
+        return res.status(400).json({ error: "A valid phone number (min 7 digits) is required to verify your identity." });
+      }
+      const descMod = moderateText(description, { fieldName: "job description" });
+      if (descMod.blocked) return res.status(422).json({ error: descMod.userMessage });
+      const titleMod = moderateText(title, { fieldName: "job title" });
+      if (titleMod.blocked) return res.status(422).json({ error: titleMod.userMessage });
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
       const result = await db.transaction(async (tx) => {
@@ -52077,7 +52219,7 @@ async function registerRoutes(httpServer, app2) {
           passwordHash,
           firstName,
           lastName,
-          phone: phone || null,
+          phone,
           role: "CUSTOMER",
           status: "ACTIVE",
           emailVerified: false,
@@ -52590,12 +52732,12 @@ async function registerRoutes(httpServer, app2) {
       const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
       if (!job) return res.status(404).json({ error: "Job not found or not authorized" });
       if (action === "close") {
-        await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId));
-        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+        await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id));
+        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, req.params.id), isNull(jobAftercares.closedAt)));
         return res.json({ success: true, action: "closed" });
       } else if (action === "leave_open") {
-        await db.update(jobs).set({ blockedRepost: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId));
-        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, jobId), isNull(jobAftercares.closedAt)));
+        await db.update(jobs).set({ blockedRepost: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id));
+        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, req.params.id), isNull(jobAftercares.closedAt)));
         return res.json({ success: true, action: "left_open" });
       } else {
         return res.status(400).json({ error: "Invalid action. Use 'close' or 'leave_open'." });
@@ -52818,8 +52960,24 @@ async function registerRoutes(httpServer, app2) {
       const { rating, title, comment } = req.body;
       const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
       if (!booking) return res.status(404).json({ error: "Booking not found" });
+      if (comment) {
+        const commentMod = moderateText(comment, { fieldName: "review comment" });
+        if (commentMod.blocked) {
+          return res.status(422).json({ error: commentMod.userMessage });
+        }
+      }
+      if (title) {
+        const titleMod = moderateText(title, { fieldName: "review title" });
+        if (titleMod.blocked) {
+          return res.status(422).json({ error: titleMod.userMessage });
+        }
+      }
       const reviewerId = req.user.userId;
-      const revieweeId = reviewerId === booking.customerId ? booking.professionalId : booking.customerId;
+      const revieweeId = booking.professionalId;
+      const existingReview = await db.select({ id: reviews.id }).from(reviews).where(and(eq(reviews.bookingId, booking.id), eq(reviews.reviewerId, reviewerId)));
+      if (existingReview.length > 0) {
+        return res.status(409).json({ error: "You have already reviewed this booking." });
+      }
       const [review] = await db.insert(reviews).values({
         bookingId: booking.id,
         reviewerId,
@@ -52994,7 +53152,7 @@ async function registerRoutes(httpServer, app2) {
       const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
       const msgs = await db.select().from(messages).where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt))).orderBy(asc(messages.createdAt)).limit(parseInt(limit)).offset(offset);
-      await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
+      await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(eq(conversationParticipants.conversationId, req.params.id), eq(conversationParticipants.userId, userId)));
       return res.json(msgs);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -53044,7 +53202,7 @@ async function registerRoutes(httpServer, app2) {
         isFiltered,
         filterFlags
       }).returning();
-      await db.update(conversations).set({ lastMessageAt: /* @__PURE__ */ new Date() }).where(eq(conversations.id, convId));
+      await db.update(conversations).set({ lastMessageAt: /* @__PURE__ */ new Date() }).where(eq(conversations.id, req.params.id));
       if (severity === "CRITICAL") {
         await createNotification(
           "admin",
@@ -53284,19 +53442,49 @@ async function registerRoutes(httpServer, app2) {
     await db.update(notifications).set({ isRead: true, readAt: /* @__PURE__ */ new Date() }).where(and(eq(notifications.id, req.params.id), eq(notifications.userId, req.user.userId)));
     return res.json({ success: true });
   });
+  const SLA_HOURS = { LOW: 72, MEDIUM: 48, HIGH: 24, URGENT: 4 };
+  function calcSlaDeadline(priority) {
+    const hours = SLA_HOURS[priority] || 48;
+    return new Date(Date.now() + hours * 60 * 60 * 1e3);
+  }
+  async function autoAssignTicket() {
+    const supportStaff = await db.select({ id: users.id }).from(users).where(or(eq(users.role, "ADMIN"), eq(users.role, "SUPPORT")));
+    if (supportStaff.length === 0) return null;
+    const loads = await Promise.all(supportStaff.map(async (s) => {
+      const [result] = await db.select({ c: count() }).from(supportTickets).where(and(eq(supportTickets.assignedTo, s.id), or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))));
+      return { id: s.id, count: Number(result?.c || 0) };
+    }));
+    loads.sort((a, b) => a.count - b.count);
+    return loads[0]?.id || null;
+  }
   app2.post("/api/support/tickets", requireAuth, async (req, res) => {
     try {
       const { subject, description, message, category, priority } = req.body;
       if (!subject) return res.status(400).json({ error: "Subject is required" });
       const ticketDescription = description || message || null;
       if (!ticketDescription) return res.status(400).json({ error: "Description is required" });
+      const descMod = moderateText(ticketDescription, { fieldName: "ticket description" });
+      if (descMod.blocked) return res.status(422).json({ error: descMod.userMessage });
+      const subjMod = moderateText(subject, { fieldName: "ticket subject" });
+      if (subjMod.blocked) return res.status(422).json({ error: subjMod.userMessage });
+      const ticketPriority = priority || "MEDIUM";
+      const assignee = await autoAssignTicket();
       const [ticket] = await db.insert(supportTickets).values({
         userId: req.user.userId,
         subject,
         description: ticketDescription,
         category: category || "GENERAL",
-        priority: priority || "MEDIUM"
+        priority: ticketPriority,
+        assignedTo: assignee,
+        slaDeadline: calcSlaDeadline(ticketPriority)
       }).returning();
+      await createNotification(
+        "admin",
+        "NEW_TICKET",
+        "New support ticket",
+        `${subject} \u2014 Priority: ${ticketPriority}`,
+        { ticketId: ticket.id }
+      );
       return res.status(201).json(ticket);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -53307,38 +53495,373 @@ async function registerRoutes(httpServer, app2) {
     const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
     let conditions = [];
     if (user.role !== "ADMIN" && user.role !== "SUPPORT") conditions.push(eq(supportTickets.userId, userId));
+    const { status, priority: pFilter, category: cFilter } = req.query;
+    if (status && status !== "all") conditions.push(eq(supportTickets.status, status));
+    if (pFilter && pFilter !== "all") conditions.push(eq(supportTickets.priority, pFilter));
+    if (cFilter && cFilter !== "all") conditions.push(eq(supportTickets.category, cFilter));
     const tickets = await db.select().from(supportTickets).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(supportTickets.createdAt));
-    return res.json(tickets);
+    const enriched = await Promise.all(tickets.map(async (t) => {
+      const [user2] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email, role: users.role }).from(users).where(eq(users.id, t.userId));
+      const [msgCount] = await db.select({ c: count() }).from(ticketMessages).where(and(eq(ticketMessages.ticketId, t.id), eq(ticketMessages.isInternal, false)));
+      const isOverdue = t.slaDeadline && new Date(t.slaDeadline) < /* @__PURE__ */ new Date() && !["RESOLVED", "CLOSED"].includes(t.status);
+      return {
+        ...t,
+        userName: user2 ? `${user2.firstName} ${user2.lastName}` : "Unknown",
+        userEmail: user2?.email,
+        userRole: user2?.role,
+        messageCount: Number(msgCount?.c || 0),
+        isOverdue
+      };
+    }));
+    return res.json(enriched);
   });
   app2.get("/api/support/tickets/:id", requireAuth, async (req, res) => {
     const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
-    const msgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, ticket.id)).orderBy(asc(ticketMessages.createdAt));
-    return res.json({ ...ticket, messages: msgs });
+    const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user.userId));
+    if (user.role !== "ADMIN" && user.role !== "SUPPORT" && ticket.userId !== req.user.userId) {
+      return res.status(403).json({ error: "Not authorized" });
+    }
+    const rawMsgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, ticket.id)).orderBy(asc(ticketMessages.createdAt));
+    const msgs = await Promise.all(rawMsgs.map(async (m) => {
+      const [sender] = await db.select({ firstName: users.firstName, lastName: users.lastName, role: users.role }).from(users).where(eq(users.id, m.senderId));
+      return {
+        ...m,
+        senderName: sender ? `${sender.firstName} ${sender.lastName}` : "System",
+        senderRole: sender?.role || "SYSTEM",
+        isStaff: sender?.role === "ADMIN" || sender?.role === "SUPPORT"
+      };
+    }));
+    const filteredMsgs = user.role === "ADMIN" || user.role === "SUPPORT" ? msgs : msgs.filter((m) => !m.isInternal);
+    const [creator] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email, role: users.role }).from(users).where(eq(users.id, ticket.userId));
+    let assigneeName = null;
+    if (ticket.assignedTo) {
+      const [assignee] = await db.select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, ticket.assignedTo));
+      assigneeName = assignee ? `${assignee.firstName} ${assignee.lastName}` : null;
+    }
+    const isOverdue = ticket.slaDeadline && new Date(ticket.slaDeadline) < /* @__PURE__ */ new Date() && !["RESOLVED", "CLOSED"].includes(ticket.status);
+    return res.json({
+      ...ticket,
+      messages: filteredMsgs,
+      isOverdue,
+      userName: creator ? `${creator.firstName} ${creator.lastName}` : "Unknown",
+      userEmail: creator?.email,
+      userRole: creator?.role,
+      assigneeName
+    });
   });
   app2.post("/api/support/tickets/:id/messages", requireAuth, async (req, res) => {
     const { message, isInternal } = req.body;
+    if (!message?.trim()) return res.status(400).json({ error: "Message is required" });
+    const [sender] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user.userId));
+    const isStaff = sender?.role === "ADMIN" || sender?.role === "SUPPORT";
+    if (!isStaff) {
+      const msgMod = moderateText(message, { fieldName: "message" });
+      if (msgMod.blocked) return res.status(422).json({ error: msgMod.userMessage });
+    }
     const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    const internal = isInternal && isStaff ? true : false;
     const [msg] = await db.insert(ticketMessages).values({
       ticketId: ticket.id,
       senderId: req.user.userId,
-      message,
-      isInternal: isInternal ? true : false
+      message: message.trim(),
+      isInternal: internal
     }).returning();
-    await db.update(supportTickets).set({ status: "IN_PROGRESS", updatedAt: /* @__PURE__ */ new Date() }).where(eq(supportTickets.id, ticket.id));
-    return res.status(201).json(msg);
+    const updateFields = { updatedAt: /* @__PURE__ */ new Date() };
+    if (isStaff && !ticket.firstResponseAt) {
+      updateFields.firstResponseAt = /* @__PURE__ */ new Date();
+    }
+    if (isStaff && ticket.status === "OPEN") {
+      updateFields.status = "IN_PROGRESS";
+    }
+    if (!isStaff && ticket.status === "WAITING") {
+      updateFields.status = "IN_PROGRESS";
+    }
+    await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, ticket.id));
+    if (isStaff && !internal) {
+      await createNotification(
+        ticket.userId,
+        "TICKET_REPLY",
+        "Support reply",
+        `New reply on: ${ticket.subject}`,
+        { ticketId: ticket.id }
+      );
+    } else if (!isStaff) {
+      await createNotification(
+        "admin",
+        "TICKET_CUSTOMER_REPLY",
+        "Customer replied",
+        `Reply on: ${ticket.subject}`,
+        { ticketId: ticket.id }
+      );
+    }
+    return res.status(201).json({ ...msg, isStaff });
   });
   app2.patch("/api/support/tickets/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
     const { status, priority, assignedTo } = req.body;
-    const [ticket] = await db.update(supportTickets).set({
-      status: status || void 0,
-      priority: priority || void 0,
-      assignedTo: assignedTo || void 0,
-      updatedAt: /* @__PURE__ */ new Date(),
-      resolvedAt: status === "RESOLVED" ? /* @__PURE__ */ new Date() : void 0
-    }).where(eq(supportTickets.id, req.params.id)).returning();
+    const [existing] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    if (!existing) return res.status(404).json({ error: "Ticket not found" });
+    const updateFields = { updatedAt: /* @__PURE__ */ new Date() };
+    if (status) updateFields.status = status;
+    if (priority) {
+      updateFields.priority = priority;
+      updateFields.slaDeadline = calcSlaDeadline(priority);
+    }
+    if (assignedTo !== void 0) updateFields.assignedTo = assignedTo || null;
+    if (status === "RESOLVED") updateFields.resolvedAt = /* @__PURE__ */ new Date();
+    if (status === "CLOSED") updateFields.closedAt = /* @__PURE__ */ new Date();
+    const [ticket] = await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, req.params.id)).returning();
+    if (status && status !== existing.status) {
+      await createNotification(
+        existing.userId,
+        "TICKET_STATUS",
+        "Ticket updated",
+        `Your ticket "${existing.subject}" is now ${status}`,
+        { ticketId: existing.id }
+      );
+    }
+    await db.insert(adminAuditLogs).values({
+      adminId: req.user.userId,
+      action: "UPDATE_TICKET",
+      resourceType: "SUPPORT_TICKET",
+      resourceId: req.params.id,
+      changes: { status, priority, assignedTo },
+      ipAddress: req.ip
+    });
     return res.json(ticket);
+  });
+  app2.post("/api/support/tickets/:id/rate", requireAuth, async (req, res) => {
+    try {
+      const { rating, comment } = req.body;
+      if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: "Rating must be 1-5" });
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      if (ticket.userId !== req.user.userId) return res.status(403).json({ error: "Not your ticket" });
+      if (!["RESOLVED", "CLOSED"].includes(ticket.status)) return res.status(400).json({ error: "Ticket must be resolved first" });
+      if (ticket.satisfactionRating) return res.status(409).json({ error: "Already rated" });
+      const [updated] = await db.update(supportTickets).set({
+        satisfactionRating: rating,
+        satisfactionComment: comment?.trim() || null,
+        ratedAt: /* @__PURE__ */ new Date()
+      }).where(eq(supportTickets.id, req.params.id)).returning();
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.post("/api/support/tickets/:id/reopen", requireAuth, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      if (ticket.userId !== req.user.userId) return res.status(403).json({ error: "Not your ticket" });
+      if (!["RESOLVED", "CLOSED"].includes(ticket.status)) return res.status(400).json({ error: "Ticket is not resolved/closed" });
+      if (ticket.reopenCount >= 3) return res.status(400).json({ error: "Maximum reopens reached. Please create a new ticket." });
+      const [updated] = await db.update(supportTickets).set({
+        status: "OPEN",
+        reopenedAt: /* @__PURE__ */ new Date(),
+        reopenCount: ticket.reopenCount + 1,
+        resolvedAt: null,
+        closedAt: null,
+        satisfactionRating: null,
+        satisfactionComment: null,
+        ratedAt: null,
+        slaDeadline: calcSlaDeadline(ticket.priority),
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(supportTickets.id, req.params.id)).returning();
+      if (reason?.trim()) {
+        await db.insert(ticketMessages).values({
+          ticketId: ticket.id,
+          senderId: req.user.userId,
+          message: `[Ticket reopened] ${reason.trim()}`
+        });
+      }
+      await createNotification(
+        "admin",
+        "TICKET_REOPENED",
+        "Ticket reopened",
+        `"${ticket.subject}" was reopened by customer`,
+        { ticketId: ticket.id }
+      );
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.post("/api/support/tickets/:id/escalate", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      const levels = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+      const currentIdx = levels.indexOf(ticket.priority);
+      const newPriority = currentIdx < levels.length - 1 ? levels[currentIdx + 1] : "URGENT";
+      const [updated] = await db.update(supportTickets).set({
+        priority: newPriority,
+        escalatedAt: /* @__PURE__ */ new Date(),
+        escalatedTo: req.user.userId,
+        slaDeadline: calcSlaDeadline(newPriority),
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(supportTickets.id, req.params.id)).returning();
+      await db.insert(ticketMessages).values({
+        ticketId: ticket.id,
+        senderId: req.user.userId,
+        message: `[Escalated] Priority changed from ${ticket.priority} to ${newPriority}`,
+        isInternal: true
+      });
+      await createNotification(
+        "admin",
+        "TICKET_ESCALATED",
+        "Ticket escalated",
+        `"${ticket.subject}" escalated to ${newPriority}`,
+        { ticketId: ticket.id }
+      );
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/support/analytics", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const [totalTickets] = await db.select({ c: count() }).from(supportTickets);
+      const [openTickets] = await db.select({ c: count() }).from(supportTickets).where(or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS")));
+      const [resolvedTickets] = await db.select({ c: count() }).from(supportTickets).where(eq(supportTickets.status, "RESOLVED"));
+      const [closedTickets] = await db.select({ c: count() }).from(supportTickets).where(eq(supportTickets.status, "CLOSED"));
+      const [waitingTickets] = await db.select({ c: count() }).from(supportTickets).where(eq(supportTickets.status, "WAITING"));
+      const [overdueTickets] = await db.select({ c: count() }).from(supportTickets).where(and(
+        lt(supportTickets.slaDeadline, /* @__PURE__ */ new Date()),
+        or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))
+      ));
+      const [avgSat] = await db.select({ avg: avg(supportTickets.satisfactionRating) }).from(supportTickets).where(isNotNull(supportTickets.satisfactionRating));
+      const byCat = await db.select({ category: supportTickets.category, c: count() }).from(supportTickets).groupBy(supportTickets.category);
+      const byPriority = await db.select({ priority: supportTickets.priority, c: count() }).from(supportTickets).groupBy(supportTickets.priority);
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
+      const [recentCreated] = await db.select({ c: count() }).from(supportTickets).where(gte(supportTickets.createdAt, sevenDaysAgo));
+      const [recentResolved] = await db.select({ c: count() }).from(supportTickets).where(and(isNotNull(supportTickets.resolvedAt), gte(supportTickets.resolvedAt, sevenDaysAgo)));
+      return res.json({
+        total: Number(totalTickets?.c || 0),
+        open: Number(openTickets?.c || 0),
+        resolved: Number(resolvedTickets?.c || 0),
+        closed: Number(closedTickets?.c || 0),
+        waiting: Number(waitingTickets?.c || 0),
+        overdue: Number(overdueTickets?.c || 0),
+        avgSatisfaction: avgSat?.avg ? parseFloat(String(avgSat.avg)) : null,
+        byCategory: byCat.map((r) => ({ category: r.category, count: Number(r.c) })),
+        byPriority: byPriority.map((r) => ({ priority: r.priority, count: Number(r.c) })),
+        last7Days: { created: Number(recentCreated?.c || 0), resolved: Number(recentResolved?.c || 0) }
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/support/faq", async (req, res) => {
+    try {
+      const { category } = req.query;
+      let conditions = [eq(faqArticles.isPublished, true)];
+      if (category && category !== "all") conditions.push(eq(faqArticles.category, category));
+      const articles = await db.select().from(faqArticles).where(and(...conditions)).orderBy(asc(faqArticles.sortOrder), desc(faqArticles.createdAt));
+      return res.json(articles);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.post("/api/support/faq/:id/vote", async (req, res) => {
+    try {
+      const { helpful } = req.body;
+      const field = helpful ? faqArticles.helpfulCount : faqArticles.notHelpfulCount;
+      const [article] = await db.update(faqArticles).set({
+        [helpful ? "helpfulCount" : "notHelpfulCount"]: sql`${field} + 1`
+      }).where(eq(faqArticles.id, req.params.id)).returning();
+      return res.json(article);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/support/faq", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    const articles = await db.select().from(faqArticles).orderBy(asc(faqArticles.sortOrder), desc(faqArticles.createdAt));
+    return res.json(articles);
+  });
+  app2.post("/api/admin/support/faq", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const { question, answer, category, sortOrder, isPublished } = req.body;
+      if (!question?.trim() || !answer?.trim()) return res.status(400).json({ error: "Question and answer required" });
+      const [article] = await db.insert(faqArticles).values({
+        question: question.trim(),
+        answer: answer.trim(),
+        category: category || "GENERAL",
+        sortOrder: sortOrder || 0,
+        isPublished: isPublished !== false,
+        createdBy: req.user.userId
+      }).returning();
+      return res.status(201).json(article);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/support/faq/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const { question, answer, category, sortOrder, isPublished } = req.body;
+      const [article] = await db.update(faqArticles).set({
+        question,
+        answer,
+        category,
+        sortOrder,
+        isPublished,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(faqArticles.id, req.params.id)).returning();
+      return res.json(article);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.delete("/api/admin/support/faq/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    await db.delete(faqArticles).where(eq(faqArticles.id, req.params.id));
+    return res.json({ success: true });
+  });
+  app2.get("/api/admin/support/canned-responses", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    const responses = await db.select().from(cannedResponses).orderBy(asc(cannedResponses.category), desc(cannedResponses.usageCount));
+    return res.json(responses);
+  });
+  app2.post("/api/admin/support/canned-responses", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const { title, content, category, shortcut } = req.body;
+      if (!title?.trim() || !content?.trim()) return res.status(400).json({ error: "Title and content required" });
+      const [response] = await db.insert(cannedResponses).values({
+        title: title.trim(),
+        content: content.trim(),
+        category: category || "GENERAL",
+        shortcut: shortcut?.trim() || null,
+        createdBy: req.user.userId
+      }).returning();
+      return res.status(201).json(response);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/support/canned-responses/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    try {
+      const { title, content, category, shortcut } = req.body;
+      const [response] = await db.update(cannedResponses).set({
+        title,
+        content,
+        category,
+        shortcut,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(cannedResponses.id, req.params.id)).returning();
+      return res.json(response);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.delete("/api/admin/support/canned-responses/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    await db.delete(cannedResponses).where(eq(cannedResponses.id, req.params.id));
+    return res.json({ success: true });
+  });
+  app2.post("/api/admin/support/canned-responses/:id/use", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    await db.update(cannedResponses).set({
+      usageCount: sql`${cannedResponses.usageCount} + 1`
+    }).where(eq(cannedResponses.id, req.params.id));
+    return res.json({ success: true });
   });
   app2.get("/api/pro/profile", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
     const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.user.userId));
@@ -53450,7 +53973,30 @@ async function registerRoutes(httpServer, app2) {
       }
     } catch (_) {
     }
-    return res.json({ ...user, passwordHash: void 0, profile, reviews: proReviews, totalHires, avgResponseMinutes });
+    const enrichedReviews = await Promise.all(proReviews.map(async (r) => {
+      const [reviewer] = await db.select({ firstName: users.firstName }).from(users).where(eq(users.id, r.reviewerId));
+      return { ...r, reviewerFirstName: reviewer?.firstName || "Customer" };
+    }));
+    const safeProfile = profile ? {
+      ...profile,
+      // Strip sensitive verification docs from public view
+      verificationDocumentUrl: void 0,
+      verificationReviewNote: void 0
+    } : null;
+    return res.json({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      role: user.role,
+      status: user.status,
+      createdAt: user.createdAt,
+      // No phone, no email, no internal ID, no passwordHash
+      profile: safeProfile,
+      reviews: enrichedReviews,
+      totalHires,
+      avgResponseMinutes
+    });
   });
   app2.get("/api/admin/dashboard", requireAuth, requireRole("ADMIN"), async (req, res) => {
     const [totalUsers] = await db.select({ c: count() }).from(users).where(isNull(users.deletedAt));
@@ -53835,41 +54381,35 @@ async function registerRoutes(httpServer, app2) {
         categoryIds,
         location
       } = req.body;
-      if (!email || !password || !firstName || !lastName) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (!email || !password || !firstName || !lastName || !phone) {
+        return res.status(400).json({ error: "Missing required fields (email, password, name, and phone are mandatory)" });
       }
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
-      const passwordHash = await db.transaction(async (tx) => {
-        const hash = await __require("bcryptjs").hash(password, 12);
-        return hash;
-      });
+      const passwordHash = await hashPassword(password);
       const result = await db.transaction(async (tx) => {
         const [user] = await tx.insert(users).values({
           email: email.toLowerCase(),
-          passwordHash: await __require("bcryptjs").hash(password, 12),
+          passwordHash,
           firstName,
           lastName,
-          phone: phone || null,
+          phone,
+          bio: bio || "",
           role: "PROFESSIONAL",
           status: "ACTIVE",
-          emailVerified: true,
+          emailVerified: false,
+          phoneVerified: false,
           onboardingCompleted: true,
           creditBalance: 20
-          // starter credits
         }).returning();
         const [profile] = await tx.insert(professionalProfiles).values({
           userId: user.id,
-          bio: bio || "",
-          specialisations: specialisations || [],
           yearsExperience: yearsExperience || 0,
-          serviceRadius: serviceRadius || 25,
-          categoryIds: categoryIds || [],
-          location: location || null,
+          radiusKm: serviceRadius || 25,
+          serviceCategories: categoryIds || [],
           isVerified: false,
-          averageRating: "0",
-          totalReviews: 0,
-          completedJobs: 0
+          ratingAvg: "0",
+          totalReviews: 0
         }).returning();
         await tx.insert(creditTransactions).values({
           userId: user.id,
@@ -53883,7 +54423,7 @@ async function registerRoutes(httpServer, app2) {
       const { accessToken, refreshToken } = generateTokens(result.user.id, result.user.role);
       await db.insert(userSessions).values({
         userId: result.user.id,
-        refreshToken,
+        refreshTokenHash: await hashPassword(refreshToken),
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3)
       });
       return res.status(201).json({
@@ -53995,13 +54535,30 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.post("/api/support/tickets/:id/reply", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
     try {
-      const { content } = req.body;
+      const { content, message: msgText, isInternal } = req.body;
+      const text2 = (content || msgText || "").trim();
+      if (!text2) return res.status(400).json({ error: "Reply content is required" });
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
       const [msg] = await db.insert(ticketMessages).values({
         ticketId: req.params.id,
         senderId: req.user.userId,
-        content
+        message: text2,
+        isInternal: isInternal ? true : false
       }).returning();
-      await db.update(supportTickets).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq(supportTickets.id, req.params.id));
+      const updateFields = { updatedAt: /* @__PURE__ */ new Date() };
+      if (!ticket.firstResponseAt) updateFields.firstResponseAt = /* @__PURE__ */ new Date();
+      if (ticket.status === "OPEN") updateFields.status = "IN_PROGRESS";
+      await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, req.params.id));
+      if (!isInternal) {
+        await createNotification(
+          ticket.userId,
+          "TICKET_REPLY",
+          "Support reply",
+          `New reply on: ${ticket.subject}`,
+          { ticketId: ticket.id }
+        );
+      }
       return res.json(msg);
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -54009,8 +54566,20 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.get("/api/support/tickets/:id/messages", requireAuth, async (req, res) => {
     try {
-      const msgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, req.params.id)).orderBy(asc(ticketMessages.createdAt));
-      return res.json(msgs);
+      const rawMsgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, req.params.id)).orderBy(asc(ticketMessages.createdAt));
+      const [viewer] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user.userId));
+      const isStaff = viewer?.role === "ADMIN" || viewer?.role === "SUPPORT";
+      const msgs = await Promise.all(rawMsgs.map(async (m) => {
+        const [sender] = await db.select({ firstName: users.firstName, lastName: users.lastName, role: users.role }).from(users).where(eq(users.id, m.senderId));
+        return {
+          ...m,
+          senderName: sender ? `${sender.firstName} ${sender.lastName}` : "System",
+          senderRole: sender?.role,
+          isStaff: sender?.role === "ADMIN" || sender?.role === "SUPPORT"
+        };
+      }));
+      const filtered = isStaff ? msgs : msgs.filter((m) => !m.isInternal);
+      return res.json(filtered);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

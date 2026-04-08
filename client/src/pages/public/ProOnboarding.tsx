@@ -78,8 +78,12 @@ export default function ProOnboarding() {
   };
 
   const handleSubmit = async () => {
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.password) {
-      toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.password || !form.phone.trim()) {
+      toast({ title: "Missing fields", description: "Please fill in all required fields (including phone number).", variant: "destructive" });
+      return;
+    }
+    if (form.phone.trim().length < 7) {
+      toast({ title: "Invalid phone", description: "Please enter a valid phone number (at least 7 digits).", variant: "destructive" });
       return;
     }
     if (form.password.length < 8) {
@@ -391,10 +395,10 @@ export default function ProOnboarding() {
                   </div>
 
                   <div>
-                    <Label>Phone number <span className="text-muted-foreground font-normal">(recommended)</span></Label>
+                    <Label>Phone number *</Label>
                     <Input
                       type="tel" value={form.phone} onChange={e => update("phone", e.target.value)}
-                      placeholder="+353 87 123 4567" className="mt-1.5"
+                      placeholder="+353 87 123 4567" required className="mt-1.5"
                     />
                     <p className="text-xs text-muted-foreground mt-1">Customers with Standard unlocks can see your phone number</p>
                   </div>
