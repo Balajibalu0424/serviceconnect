@@ -21,3 +21,8 @@ vite.config.ts.*
 # Test/scratch scripts — may contain credentials
 test_*.js
 test_*.ts
+
+# Scripts with secrets — never commit
+scripts/add_vercel_env*
+scripts/*_env*
+*.ps1
