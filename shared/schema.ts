@@ -365,6 +365,10 @@ export const spinWheelEvents = pgTable("spin_wheel_events", {
 }, (t) => [index("spin_pro_idx").on(t.professionalId)]);
 
 // ─── Support & Admin ──────────────────────────────────────────────────────────
+export const ticketCategoryEnum = pgEnum("ticket_category", [
+  "GENERAL", "BILLING", "JOB", "PROFESSIONAL", "TECHNICAL", "SAFETY", "ACCOUNT"
+]);
+
 export const supportTickets = pgTable("support_tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -374,12 +378,27 @@ export const supportTickets = pgTable("support_tickets", {
   status: ticketStatusEnum("status").notNull().default("OPEN"),
   subject: text("subject").notNull(),
   description: text("description").notNull(),
+  // SLA tracking
+  firstResponseAt: timestamp("first_response_at"),
+  slaDeadline: timestamp("sla_deadline"),
+  escalatedAt: timestamp("escalated_at"),
+  escalatedTo: varchar("escalated_to").references(() => users.id),
+  // Satisfaction
+  satisfactionRating: integer("satisfaction_rating"),
+  satisfactionComment: text("satisfaction_comment"),
+  ratedAt: timestamp("rated_at"),
+  // Lifecycle
   resolvedAt: timestamp("resolved_at"),
+  closedAt: timestamp("closed_at"),
+  reopenedAt: timestamp("reopened_at"),
+  reopenCount: integer("reopen_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
 }, (t) => [
   index("tickets_user_idx").on(t.userId),
   index("tickets_status_idx").on(t.status),
+  index("tickets_assigned_idx").on(t.assignedTo),
+  index("tickets_priority_idx").on(t.priority),
 ]);
 
 export const ticketMessages = pgTable("ticket_messages", {
@@ -390,6 +409,37 @@ export const ticketMessages = pgTable("ticket_messages", {
   isInternal: boolean("is_internal").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => [index("ticket_msg_idx").on(t.ticketId)]);
+
+// FAQ / Knowledge Base
+export const faqArticles = pgTable("faq_articles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull().default("GENERAL"),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isPublished: boolean("is_published").notNull().default(true),
+  helpfulCount: integer("helpful_count").notNull().default(0),
+  notHelpfulCount: integer("not_helpful_count").notNull().default(0),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("faq_cat_idx").on(t.category),
+  index("faq_published_idx").on(t.isPublished),
+]);
+
+// Canned responses for support staff
+export const cannedResponses = pgTable("canned_responses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: text("category").notNull().default("GENERAL"),
+  shortcut: text("shortcut"),
+  usageCount: integer("usage_count").notNull().default(0),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (t) => [index("canned_cat_idx").on(t.category)]);
 
 export const notifications = pgTable("notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -467,6 +517,8 @@ export const insertBookingSchema = createInsertSchema(bookings).omit({ id: true,
 export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertSupportTicketSchema = createInsertSchema(supportTickets).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertFaqArticleSchema = createInsertSchema(faqArticles).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertCannedResponseSchema = createInsertSchema(cannedResponses).omit({ id: true, createdAt: true, updatedAt: true });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
@@ -491,6 +543,8 @@ export type Payment = typeof payments.$inferSelect;
 export type SpinWheelEvent = typeof spinWheelEvents.$inferSelect;
 export type SupportTicket = typeof supportTickets.$inferSelect;
 export type TicketMessage = typeof ticketMessages.$inferSelect;
+export type FaqArticle = typeof faqArticles.$inferSelect;
+export type CannedResponse = typeof cannedResponses.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
 export type PlatformMetric = typeof platformMetrics.$inferSelect;

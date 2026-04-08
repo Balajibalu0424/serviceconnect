@@ -13,17 +13,24 @@ import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/ge
 // ─── Initialise Client ───────────────────────────────────────────────────────
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
-const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+let genAI: GoogleGenerativeAI | null = null;
+
+if (API_KEY) {
+  genAI = new GoogleGenerativeAI(API_KEY);
+  console.log("[Gemini] API key configured, AI features enabled");
+} else {
+  console.warn("[Gemini] WARNING: GEMINI_API_KEY not set — all AI features will return fallbacks");
+}
 
 const safetySettings = [
-  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
 function getModel() {
-  if (!genAI) throw new Error("GEMINI_API_KEY not configured");
+  if (!genAI) throw new Error("GEMINI_API_KEY not configured — add it to your environment variables");
   return genAI.getGenerativeModel({
     model: "gemini-2.0-flash",
     safetySettings,
@@ -36,7 +43,11 @@ function getModel() {
 async function ask(prompt: string): Promise<string> {
   const model = getModel();
   const result = await model.generateContent(prompt);
-  return result.response.text();
+  const text = result.response.text();
+  if (!text) {
+    console.warn("[Gemini] Model returned empty response");
+  }
+  return text;
 }
 
 async function askJSON<T>(prompt: string): Promise<T> {
@@ -44,7 +55,12 @@ async function askJSON<T>(prompt: string): Promise<T> {
   // Extract JSON from markdown code fences if present
   const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
   const cleaned = (jsonMatch[1] || raw).trim();
-  return JSON.parse(cleaned) as T;
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (parseErr) {
+    console.error("[Gemini] Failed to parse JSON from model response:", cleaned.substring(0, 200));
+    throw parseErr;
+  }
 }
 
 // ─── 1. ENHANCE JOB DESCRIPTION ──────────────────────────────────────────────
@@ -80,7 +96,8 @@ Return ONLY valid JSON:
 
   try {
     return await askJSON<EnhanceDescriptionResult>(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] enhanceJobDescription failed:", error);
     return { enhanced: description, improvements: [] };
   }
 }
@@ -118,7 +135,8 @@ Classify this job into exactly ONE category. Return ONLY valid JSON:
 
   try {
     return await askJSON<SmartCategoryResult>(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] smartCategoryDetect failed:", error);
     return { categorySlug: "", confidence: 0, reason: "AI classification unavailable" };
   }
 }
@@ -166,7 +184,8 @@ Return ONLY valid JSON:
 
   try {
     return await askJSON<DeepFakeResult>(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] deepFakeAnalysis failed:", error);
     return { isSuspicious: false, riskScore: 0, reasons: [], recommendation: "APPROVE" };
   }
 }
@@ -210,7 +229,8 @@ Return ONLY valid JSON:
 
   try {
     return await askJSON<QuoteSuggestion>(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] generateQuoteSuggestion failed:", error);
     return { suggestedMin: 0, suggestedMax: 0, message: "", tips: [] };
   }
 }
@@ -270,7 +290,8 @@ Respond in JSON: { "reply": "string", "action": "none" | "create_ticket", "ticke
       action: parsed.action === "create_ticket" ? "create_ticket" : undefined,
       ticketData: parsed.ticketData || undefined,
     };
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] aiChatWidgetSandboxed failed:", error);
     return { reply: REDIRECT };
   }
 }
@@ -344,11 +365,12 @@ Return ONLY valid JSON — no markdown fences.`;
       const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
       const cleaned = (jsonMatch[1] || raw).trim();
       return JSON.parse(cleaned) as AiChatResponse;
-    } catch {
-      // If AI didn't return valid JSON, wrap the raw text
+    } catch (parseErr) {
+      console.warn("[Gemini] aiChatAssistant JSON parse failed, returning raw text:", parseErr);
       return { reply: raw };
     }
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] aiChatAssistant failed:", error);
     return { reply: "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment, or contact our support team for help." };
   }
 }
@@ -399,7 +421,8 @@ Return ONLY a valid JSON array:
 
   try {
     return await askJSON<ProMatchScore[]>(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] smartProMatch failed:", error);
     return proProfiles.map(p => ({
       proId: p.id,
       score: 50,
@@ -433,7 +456,8 @@ Write a 2-3 sentence professional summary highlighting their strengths based on 
 
   try {
     return await ask(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] generateReviewSummary failed:", error);
     return "";
   }
 }
@@ -471,7 +495,8 @@ Return ONLY valid JSON:
 
   try {
     return await askJSON<EnhanceBioResult>(prompt);
-  } catch {
+  } catch (error) {
+    console.error("[Gemini] enhanceProBio failed:", error);
     return { enhanced: currentBio, improvements: [] };
   }
 }
@@ -565,5 +590,32 @@ Return ONLY valid JSON in this format:
 // ─── HEALTH CHECK ───────────────────────────────────────────────────────────
 
 export function isGeminiAvailable(): boolean {
-  return !!genAI;
+  if (!genAI) return false;
+  // Verify the key looks valid (Gemini keys start with "AI" and are 39 chars)
+  if (!API_KEY || API_KEY.length < 10) {
+    console.warn("[Gemini] API key appears invalid (too short)");
+    return false;
+  }
+  return true;
 }
+
+// ─── VALIDATE KEY ON STARTUP (non-blocking) ─────────────────────────────────
+
+async function validateKeyOnStartup(): Promise<void> {
+  if (!genAI) return;
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await model.generateContent("Reply with exactly: OK");
+    const text = result.response.text();
+    if (text) {
+      console.log("[Gemini] ✓ API key validated successfully — AI features are live");
+    }
+  } catch (error: any) {
+    console.error("[Gemini] ✗ API key validation FAILED:", error?.message || error);
+    console.error("[Gemini]   AI features will return fallbacks until the key is fixed");
+    genAI = null; // Disable AI so we don't keep hitting a bad key
+  }
+}
+
+// Fire-and-forget validation on module load
+validateKeyOnStartup();

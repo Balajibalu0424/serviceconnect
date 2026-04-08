@@ -8,7 +8,7 @@ import {
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
   adminAuditLogs, platformMetrics, featureFlags, callRequests,
-  phoneVerificationTokens
+  phoneVerificationTokens, faqArticles, cannedResponses
 } from "@shared/schema";
 import { pusher } from "./pusher";
 import {
@@ -1864,62 +1864,412 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SUPPORT TICKETS
+  // SUPPORT TICKETS — COMPLETE SYSTEM
   // ═══════════════════════════════════════════════════════════════════════════
+
+  // SLA deadlines by priority (hours from creation)
+  const SLA_HOURS: Record<string, number> = { LOW: 72, MEDIUM: 48, HIGH: 24, URGENT: 4 };
+
+  // Helper: calculate SLA deadline
+  function calcSlaDeadline(priority: string): Date {
+    const hours = SLA_HOURS[priority] || 48;
+    return new Date(Date.now() + hours * 60 * 60 * 1000);
+  }
+
+  // Helper: auto-assign ticket to least-loaded support staff
+  async function autoAssignTicket(): Promise<string | null> {
+    const supportStaff = await db.select({ id: users.id }).from(users)
+      .where(or(eq(users.role, "ADMIN"), eq(users.role, "SUPPORT"))!);
+    if (supportStaff.length === 0) return null;
+    // Find who has the fewest open tickets
+    const loads = await Promise.all(supportStaff.map(async (s) => {
+      const [result] = await db.select({ c: count() }).from(supportTickets)
+        .where(and(eq(supportTickets.assignedTo, s.id), or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))!));
+      return { id: s.id, count: Number(result?.c || 0) };
+    }));
+    loads.sort((a, b) => a.count - b.count);
+    return loads[0]?.id || null;
+  }
+
+  // Create support ticket
   app.post("/api/support/tickets", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { subject, description, message, category, priority } = req.body;
       if (!subject) return res.status(400).json({ error: "Subject is required" });
       const ticketDescription = description || message || null;
       if (!ticketDescription) return res.status(400).json({ error: "Description is required" });
+      const ticketPriority = priority || "MEDIUM";
+      const assignee = await autoAssignTicket();
       const [ticket] = await db.insert(supportTickets).values({
         userId: req.user!.userId, subject, description: ticketDescription,
-        category: category || "GENERAL", priority: priority || "MEDIUM"
+        category: category || "GENERAL", priority: ticketPriority,
+        assignedTo: assignee, slaDeadline: calcSlaDeadline(ticketPriority)
       }).returning();
+      // Notify support staff
+      await createNotification("admin", "NEW_TICKET", "New support ticket",
+        `${subject} — Priority: ${ticketPriority}`, { ticketId: ticket.id });
       return res.status(201).json(ticket);
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
   });
 
+  // List tickets (role-based)
   app.get("/api/support/tickets", requireAuth, async (req: AuthRequest, res: Response) => {
     const userId = req.user!.userId;
     const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
     let conditions: any[] = [];
     if (user.role !== "ADMIN" && user.role !== "SUPPORT") conditions.push(eq(supportTickets.userId, userId));
+    // Optional query filters
+    const { status, priority: pFilter, category: cFilter } = req.query as Record<string, string>;
+    if (status && status !== "all") conditions.push(eq(supportTickets.status, status as any));
+    if (pFilter && pFilter !== "all") conditions.push(eq(supportTickets.priority, pFilter as any));
+    if (cFilter && cFilter !== "all") conditions.push(eq(supportTickets.category, cFilter));
     const tickets = await db.select().from(supportTickets)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(supportTickets.createdAt));
-    return res.json(tickets);
+    // Enrich with user info and message count
+    const enriched = await Promise.all(tickets.map(async (t) => {
+      const [user] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email, role: users.role })
+        .from(users).where(eq(users.id, t.userId));
+      const [msgCount] = await db.select({ c: count() }).from(ticketMessages)
+        .where(and(eq(ticketMessages.ticketId, t.id), eq(ticketMessages.isInternal, false)));
+      const isOverdue = t.slaDeadline && new Date(t.slaDeadline) < new Date() && !["RESOLVED", "CLOSED"].includes(t.status);
+      return { ...t, userName: user ? `${user.firstName} ${user.lastName}` : "Unknown",
+        userEmail: user?.email, userRole: user?.role, messageCount: Number(msgCount?.c || 0), isOverdue };
+    }));
+    return res.json(enriched);
   });
 
+  // Get single ticket with messages and sender info
   app.get("/api/support/tickets/:id", requireAuth, async (req: AuthRequest, res: Response) => {
     const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
-    const msgs = await db.select().from(ticketMessages).where(eq(ticketMessages.ticketId, ticket.id)).orderBy(asc(ticketMessages.createdAt));
-    return res.json({ ...ticket, messages: msgs });
+    // Verify access: user owns ticket or is admin/support
+    const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user!.userId));
+    if (user.role !== "ADMIN" && user.role !== "SUPPORT" && ticket.userId !== req.user!.userId) {
+      return res.status(403).json({ error: "Not authorized" });
+    }
+    const rawMsgs = await db.select().from(ticketMessages)
+      .where(eq(ticketMessages.ticketId, ticket.id)).orderBy(asc(ticketMessages.createdAt));
+    // Enrich messages with sender names
+    const msgs = await Promise.all(rawMsgs.map(async (m) => {
+      const [sender] = await db.select({ firstName: users.firstName, lastName: users.lastName, role: users.role })
+        .from(users).where(eq(users.id, m.senderId));
+      return { ...m, senderName: sender ? `${sender.firstName} ${sender.lastName}` : "System",
+        senderRole: sender?.role || "SYSTEM", isStaff: sender?.role === "ADMIN" || sender?.role === "SUPPORT" };
+    }));
+    // Filter internal notes from non-staff
+    const filteredMsgs = (user.role === "ADMIN" || user.role === "SUPPORT")
+      ? msgs : msgs.filter(m => !m.isInternal);
+    // Ticket creator info
+    const [creator] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email, role: users.role })
+      .from(users).where(eq(users.id, ticket.userId));
+    // Assignee info
+    let assigneeName = null;
+    if (ticket.assignedTo) {
+      const [assignee] = await db.select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users).where(eq(users.id, ticket.assignedTo));
+      assigneeName = assignee ? `${assignee.firstName} ${assignee.lastName}` : null;
+    }
+    const isOverdue = ticket.slaDeadline && new Date(ticket.slaDeadline) < new Date() && !["RESOLVED", "CLOSED"].includes(ticket.status);
+    return res.json({
+      ...ticket, messages: filteredMsgs, isOverdue,
+      userName: creator ? `${creator.firstName} ${creator.lastName}` : "Unknown",
+      userEmail: creator?.email, userRole: creator?.role, assigneeName
+    });
   });
 
+  // Add message to ticket (any authenticated user who owns or is staff)
   app.post("/api/support/tickets/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
     const { message, isInternal } = req.body;
+    if (!message?.trim()) return res.status(400).json({ error: "Message is required" });
     const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    const [sender] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user!.userId));
+    const isStaff = sender?.role === "ADMIN" || sender?.role === "SUPPORT";
+    // Only staff can post internal notes
+    const internal = isInternal && isStaff ? true : false;
     const [msg] = await db.insert(ticketMessages).values({
-      ticketId: ticket.id, senderId: req.user!.userId, message,
-      isInternal: isInternal ? true : false
+      ticketId: ticket.id, senderId: req.user!.userId, message: message.trim(), isInternal: internal
     }).returning();
-    await db.update(supportTickets).set({ status: "IN_PROGRESS", updatedAt: new Date() }).where(eq(supportTickets.id, ticket.id));
-    return res.status(201).json(msg);
+    // Track first response time for SLA
+    const updateFields: any = { updatedAt: new Date() };
+    if (isStaff && !ticket.firstResponseAt) {
+      updateFields.firstResponseAt = new Date();
+    }
+    // Auto-set status to IN_PROGRESS if staff replies to OPEN ticket
+    if (isStaff && ticket.status === "OPEN") {
+      updateFields.status = "IN_PROGRESS";
+    }
+    // If customer replies to WAITING ticket, set back to IN_PROGRESS
+    if (!isStaff && ticket.status === "WAITING") {
+      updateFields.status = "IN_PROGRESS";
+    }
+    await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, ticket.id));
+    // Notify the other party
+    if (isStaff && !internal) {
+      await createNotification(ticket.userId, "TICKET_REPLY", "Support reply",
+        `New reply on: ${ticket.subject}`, { ticketId: ticket.id });
+    } else if (!isStaff) {
+      await createNotification("admin", "TICKET_CUSTOMER_REPLY", "Customer replied",
+        `Reply on: ${ticket.subject}`, { ticketId: ticket.id });
+    }
+    return res.status(201).json({ ...msg, isStaff });
   });
 
+  // Update ticket (admin/support only)
   app.patch("/api/support/tickets/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
     const { status, priority, assignedTo } = req.body;
-    const [ticket] = await db.update(supportTickets).set({
-      status: status || undefined, priority: priority || undefined,
-      assignedTo: assignedTo || undefined, updatedAt: new Date(),
-      resolvedAt: status === "RESOLVED" ? new Date() : undefined
-    }).where(eq(supportTickets.id, req.params.id)).returning();
+    const [existing] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    if (!existing) return res.status(404).json({ error: "Ticket not found" });
+    const updateFields: any = { updatedAt: new Date() };
+    if (status) updateFields.status = status;
+    if (priority) {
+      updateFields.priority = priority;
+      updateFields.slaDeadline = calcSlaDeadline(priority);
+    }
+    if (assignedTo !== undefined) updateFields.assignedTo = assignedTo || null;
+    if (status === "RESOLVED") updateFields.resolvedAt = new Date();
+    if (status === "CLOSED") updateFields.closedAt = new Date();
+    const [ticket] = await db.update(supportTickets).set(updateFields)
+      .where(eq(supportTickets.id, req.params.id)).returning();
+    // Notify customer of status change
+    if (status && status !== existing.status) {
+      await createNotification(existing.userId, "TICKET_STATUS", "Ticket updated",
+        `Your ticket "${existing.subject}" is now ${status}`, { ticketId: existing.id });
+    }
+    // Audit log
+    await db.insert(adminAuditLogs).values({
+      adminId: req.user!.userId, action: "UPDATE_TICKET", resourceType: "SUPPORT_TICKET",
+      resourceId: req.params.id, changes: { status, priority, assignedTo },
+      ipAddress: req.ip
+    });
     return res.json(ticket);
+  });
+
+  // Customer rates a resolved ticket (satisfaction survey)
+  app.post("/api/support/tickets/:id/rate", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { rating, comment } = req.body;
+      if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: "Rating must be 1-5" });
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      if (ticket.userId !== req.user!.userId) return res.status(403).json({ error: "Not your ticket" });
+      if (!["RESOLVED", "CLOSED"].includes(ticket.status)) return res.status(400).json({ error: "Ticket must be resolved first" });
+      if (ticket.satisfactionRating) return res.status(409).json({ error: "Already rated" });
+      const [updated] = await db.update(supportTickets).set({
+        satisfactionRating: rating, satisfactionComment: comment?.trim() || null, ratedAt: new Date()
+      }).where(eq(supportTickets.id, req.params.id)).returning();
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // Customer reopens a resolved/closed ticket
+  app.post("/api/support/tickets/:id/reopen", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { reason } = req.body;
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      if (ticket.userId !== req.user!.userId) return res.status(403).json({ error: "Not your ticket" });
+      if (!["RESOLVED", "CLOSED"].includes(ticket.status)) return res.status(400).json({ error: "Ticket is not resolved/closed" });
+      if (ticket.reopenCount >= 3) return res.status(400).json({ error: "Maximum reopens reached. Please create a new ticket." });
+      const [updated] = await db.update(supportTickets).set({
+        status: "OPEN", reopenedAt: new Date(), reopenCount: ticket.reopenCount + 1,
+        resolvedAt: null, closedAt: null, satisfactionRating: null, satisfactionComment: null, ratedAt: null,
+        slaDeadline: calcSlaDeadline(ticket.priority), updatedAt: new Date()
+      }).where(eq(supportTickets.id, req.params.id)).returning();
+      // Add reopen reason as message
+      if (reason?.trim()) {
+        await db.insert(ticketMessages).values({
+          ticketId: ticket.id, senderId: req.user!.userId,
+          message: `[Ticket reopened] ${reason.trim()}`
+        });
+      }
+      await createNotification("admin", "TICKET_REOPENED", "Ticket reopened",
+        `"${ticket.subject}" was reopened by customer`, { ticketId: ticket.id });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // Escalate ticket (admin/support)
+  app.post("/api/support/tickets/:id/escalate", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    try {
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      // Bump priority up one level
+      const levels = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+      const currentIdx = levels.indexOf(ticket.priority);
+      const newPriority = currentIdx < levels.length - 1 ? levels[currentIdx + 1] : "URGENT";
+      const [updated] = await db.update(supportTickets).set({
+        priority: newPriority as any, escalatedAt: new Date(), escalatedTo: req.user!.userId,
+        slaDeadline: calcSlaDeadline(newPriority), updatedAt: new Date()
+      }).where(eq(supportTickets.id, req.params.id)).returning();
+      // Add system message
+      await db.insert(ticketMessages).values({
+        ticketId: ticket.id, senderId: req.user!.userId,
+        message: `[Escalated] Priority changed from ${ticket.priority} to ${newPriority}`,
+        isInternal: true
+      });
+      await createNotification("admin", "TICKET_ESCALATED", "Ticket escalated",
+        `"${ticket.subject}" escalated to ${newPriority}`, { ticketId: ticket.id });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // Support analytics (admin only)
+  app.get("/api/support/analytics", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    try {
+      const [totalTickets] = await db.select({ c: count() }).from(supportTickets);
+      const [openTickets] = await db.select({ c: count() }).from(supportTickets)
+        .where(or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))!);
+      const [resolvedTickets] = await db.select({ c: count() }).from(supportTickets)
+        .where(eq(supportTickets.status, "RESOLVED"));
+      const [closedTickets] = await db.select({ c: count() }).from(supportTickets)
+        .where(eq(supportTickets.status, "CLOSED"));
+      const [waitingTickets] = await db.select({ c: count() }).from(supportTickets)
+        .where(eq(supportTickets.status, "WAITING"));
+      // Overdue count
+      const [overdueTickets] = await db.select({ c: count() }).from(supportTickets)
+        .where(and(
+          lt(supportTickets.slaDeadline, new Date()),
+          or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))!
+        ));
+      // Average satisfaction
+      const [avgSat] = await db.select({ avg: avg(supportTickets.satisfactionRating) }).from(supportTickets)
+        .where(isNotNull(supportTickets.satisfactionRating));
+      // By category
+      const byCat = await db.select({ category: supportTickets.category, c: count() }).from(supportTickets)
+        .groupBy(supportTickets.category);
+      // By priority
+      const byPriority = await db.select({ priority: supportTickets.priority, c: count() }).from(supportTickets)
+        .groupBy(supportTickets.priority);
+      // Recent 7 days trend
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const [recentCreated] = await db.select({ c: count() }).from(supportTickets)
+        .where(gte(supportTickets.createdAt, sevenDaysAgo));
+      const [recentResolved] = await db.select({ c: count() }).from(supportTickets)
+        .where(and(isNotNull(supportTickets.resolvedAt), gte(supportTickets.resolvedAt, sevenDaysAgo)));
+
+      return res.json({
+        total: Number(totalTickets?.c || 0),
+        open: Number(openTickets?.c || 0),
+        resolved: Number(resolvedTickets?.c || 0),
+        closed: Number(closedTickets?.c || 0),
+        waiting: Number(waitingTickets?.c || 0),
+        overdue: Number(overdueTickets?.c || 0),
+        avgSatisfaction: avgSat?.avg ? parseFloat(String(avgSat.avg)) : null,
+        byCategory: byCat.map(r => ({ category: r.category, count: Number(r.c) })),
+        byPriority: byPriority.map(r => ({ priority: r.priority, count: Number(r.c) })),
+        last7Days: { created: Number(recentCreated?.c || 0), resolved: Number(recentResolved?.c || 0) }
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FAQ / KNOWLEDGE BASE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Public: list published FAQ articles
+  app.get("/api/support/faq", async (req: Request, res: Response) => {
+    try {
+      const { category } = req.query as Record<string, string>;
+      let conditions: any[] = [eq(faqArticles.isPublished, true)];
+      if (category && category !== "all") conditions.push(eq(faqArticles.category, category));
+      const articles = await db.select().from(faqArticles)
+        .where(and(...conditions))
+        .orderBy(asc(faqArticles.sortOrder), desc(faqArticles.createdAt));
+      return res.json(articles);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // Vote FAQ helpfulness
+  app.post("/api/support/faq/:id/vote", async (req: Request, res: Response) => {
+    try {
+      const { helpful } = req.body;
+      const field = helpful ? faqArticles.helpfulCount : faqArticles.notHelpfulCount;
+      const [article] = await db.update(faqArticles).set({
+        [helpful ? "helpfulCount" : "notHelpfulCount"]: sql`${field} + 1`
+      }).where(eq(faqArticles.id, req.params.id)).returning();
+      return res.json(article);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // Admin: CRUD for FAQ articles
+  app.get("/api/admin/support/faq", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    const articles = await db.select().from(faqArticles).orderBy(asc(faqArticles.sortOrder), desc(faqArticles.createdAt));
+    return res.json(articles);
+  });
+
+  app.post("/api/admin/support/faq", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { question, answer, category, sortOrder, isPublished } = req.body;
+      if (!question?.trim() || !answer?.trim()) return res.status(400).json({ error: "Question and answer required" });
+      const [article] = await db.insert(faqArticles).values({
+        question: question.trim(), answer: answer.trim(), category: category || "GENERAL",
+        sortOrder: sortOrder || 0, isPublished: isPublished !== false, createdBy: req.user!.userId
+      }).returning();
+      return res.status(201).json(article);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/support/faq/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { question, answer, category, sortOrder, isPublished } = req.body;
+      const [article] = await db.update(faqArticles).set({
+        question, answer, category, sortOrder, isPublished, updatedAt: new Date()
+      }).where(eq(faqArticles.id, req.params.id)).returning();
+      return res.json(article);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/admin/support/faq/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    await db.delete(faqArticles).where(eq(faqArticles.id, req.params.id));
+    return res.json({ success: true });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANNED RESPONSES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/support/canned-responses", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    const responses = await db.select().from(cannedResponses).orderBy(asc(cannedResponses.category), desc(cannedResponses.usageCount));
+    return res.json(responses);
+  });
+
+  app.post("/api/admin/support/canned-responses", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { title, content, category, shortcut } = req.body;
+      if (!title?.trim() || !content?.trim()) return res.status(400).json({ error: "Title and content required" });
+      const [response] = await db.insert(cannedResponses).values({
+        title: title.trim(), content: content.trim(), category: category || "GENERAL",
+        shortcut: shortcut?.trim() || null, createdBy: req.user!.userId
+      }).returning();
+      return res.status(201).json(response);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/support/canned-responses/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { title, content, category, shortcut } = req.body;
+      const [response] = await db.update(cannedResponses).set({
+        title, content, category, shortcut, updatedAt: new Date()
+      }).where(eq(cannedResponses.id, req.params.id)).returning();
+      return res.json(response);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/admin/support/canned-responses/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    await db.delete(cannedResponses).where(eq(cannedResponses.id, req.params.id));
+    return res.json({ success: true });
+  });
+
+  // Track canned response usage
+  app.post("/api/admin/support/canned-responses/:id/use", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    await db.update(cannedResponses).set({
+      usageCount: sql`${cannedResponses.usageCount} + 1`
+    }).where(eq(cannedResponses.id, req.params.id));
+    return res.json({ success: true });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2699,26 +3049,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
   });
 
-  // Admin support ticket update  
+  // Admin quick-reply (convenience alias — uses the main /messages endpoint logic)
   app.post("/api/support/tickets/:id/reply", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
     try {
-      const { content } = req.body;
+      const { content, message: msgText, isInternal } = req.body;
+      const text = (content || msgText || "").trim();
+      if (!text) return res.status(400).json({ error: "Reply content is required" });
+      const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
       const [msg] = await db.insert(ticketMessages).values({
-        ticketId: req.params.id, senderId: req.user!.userId, content
+        ticketId: req.params.id, senderId: req.user!.userId,
+        message: text, isInternal: isInternal ? true : false
       }).returning();
-      // Update ticket updatedAt
-      await db.update(supportTickets).set({ updatedAt: new Date() }).where(eq(supportTickets.id, req.params.id));
+      const updateFields: any = { updatedAt: new Date() };
+      if (!ticket.firstResponseAt) updateFields.firstResponseAt = new Date();
+      if (ticket.status === "OPEN") updateFields.status = "IN_PROGRESS";
+      await db.update(supportTickets).set(updateFields).where(eq(supportTickets.id, req.params.id));
+      if (!isInternal) {
+        await createNotification(ticket.userId, "TICKET_REPLY", "Support reply",
+          `New reply on: ${ticket.subject}`, { ticketId: ticket.id });
+      }
       return res.json(msg);
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
   });
 
-  // Get ticket messages
+  // Get ticket messages (enriched with sender info)
   app.get("/api/support/tickets/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const msgs = await db.select().from(ticketMessages)
+      const rawMsgs = await db.select().from(ticketMessages)
         .where(eq(ticketMessages.ticketId, req.params.id))
         .orderBy(asc(ticketMessages.createdAt));
-      return res.json(msgs);
+      const [viewer] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user!.userId));
+      const isStaff = viewer?.role === "ADMIN" || viewer?.role === "SUPPORT";
+      const msgs = await Promise.all(rawMsgs.map(async (m) => {
+        const [sender] = await db.select({ firstName: users.firstName, lastName: users.lastName, role: users.role })
+          .from(users).where(eq(users.id, m.senderId));
+        return { ...m, senderName: sender ? `${sender.firstName} ${sender.lastName}` : "System",
+          senderRole: sender?.role, isStaff: sender?.role === "ADMIN" || sender?.role === "SUPPORT" };
+      }));
+      // Filter internal notes from non-staff
+      const filtered = isStaff ? msgs : msgs.filter(m => !m.isInternal);
+      return res.json(filtered);
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
   });
 
