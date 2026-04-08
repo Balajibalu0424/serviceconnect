@@ -67,6 +67,14 @@ function ProtectedRoute({ children, roles, requireVerified = false }: { children
   return <>{children}</>;
 }
 
+// Unauthenticated users hitting /post-job get routed into the customer onboarding flow
+function PostJobRoute() {
+  const { isLoading, isAuthenticated } = useAuth();
+  if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="text-muted-foreground">Loading...</div></div>;
+  if (!isAuthenticated) return <Redirect to="/register?role=CUSTOMER" />;
+  return <PostJob />;
+}
+
 function AppRoutes() {
   return (
     <Switch>
@@ -77,7 +85,7 @@ function AppRoutes() {
       <Route path="/register/customer" component={RegisterCustomer} />
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/services" component={Services} />
-      <Route path="/post-job" component={PostJob} />
+      <Route path="/post-job" component={PostJobRoute} />
       <Route path="/pro/onboarding" component={ProOnboarding} />
       <Route path="/pro/:id/profile" component={ProPublicProfile} />
 
