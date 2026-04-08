@@ -611,9 +611,10 @@ async function validateKeyOnStartup(): Promise<void> {
       console.log("[Gemini] ✓ API key validated successfully — AI features are live");
     }
   } catch (error: any) {
-    console.error("[Gemini] ✗ API key validation FAILED:", error?.message || error);
-    console.error("[Gemini]   AI features will return fallbacks until the key is fixed");
-    genAI = null; // Disable AI so we don't keep hitting a bad key
+    console.error("[Gemini] ✗ Startup validation failed:", error?.message || error);
+    console.error("[Gemini]   AI features may be degraded — will retry on first real request");
+    // Do NOT set genAI = null — let real requests attempt the API
+    // Transient failures (cold start, rate limit, network) should not permanently disable AI
   }
 }
 
