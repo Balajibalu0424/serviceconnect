@@ -50,31 +50,52 @@ export default function ProDashboard() {
           </Link>
         </div>
 
-        {/* Spin wheel banner */}
-        {spinStatus?.eligible && (
-          <div className="relative overflow-hidden group rounded-2xl border border-primary/20 dark:border-primary/10 bg-gradient-to-r from-primary/10 via-primary/5 to-indigo-500/10 shadow-sm p-5 md:p-6">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 dark:bg-primary/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
-            <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-indigo-600 flex items-center justify-center shrink-0 shadow-md">
-                  <Dices className="w-5 h-5 text-white" />
+        {/* Spin wheel banner — always visible, with countdown when on cooldown */}
+        {spinStatus && (
+          <Link href="/pro/spin">
+            <div className={`relative overflow-hidden group rounded-2xl border shadow-sm p-5 md:p-6 cursor-pointer transition-all hover:shadow-md ${
+              spinStatus.eligible
+                ? "border-primary/20 dark:border-primary/10 bg-gradient-to-r from-primary/10 via-primary/5 to-indigo-500/10"
+                : "border-amber-200 dark:border-amber-800 bg-gradient-to-r from-amber-50 via-amber-25 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/10"
+            }`}>
+              <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 dark:bg-primary/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+              <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-md ${
+                    spinStatus.eligible
+                      ? "bg-gradient-to-br from-primary to-indigo-600"
+                      : "bg-gradient-to-br from-amber-400 to-orange-500"
+                  }`}>
+                    <Dices className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className={`font-semibold text-base font-outfit ${
+                      spinStatus.eligible ? "text-primary dark:text-primary/90" : "text-amber-700 dark:text-amber-400"
+                    }`}>
+                      {spinStatus.eligible ? "🎉 Spin the Wheel is ready!" : "Spin the Wheel"}
+                    </h3>
+                    <p className={`text-sm mt-0.5 ${
+                      spinStatus.eligible ? "text-primary/80 dark:text-primary/70" : "text-amber-600/80 dark:text-amber-400/70"
+                    }`}>
+                      {spinStatus.eligible
+                        ? "Win free credits, boosts, profile badges & more. Tap to spin!"
+                        : spinStatus.nextEligibleAt
+                          ? `Next spin available ${formatDistanceToNow(new Date(spinStatus.nextEligibleAt), { addSuffix: true })}${spinStatus.spinStreak > 1 ? ` · ${spinStatus.spinStreak} streak 🔥` : ""}`
+                          : "Win free credits, boosts & badges every 72 hours"
+                      }
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-primary dark:text-primary/90 text-base font-outfit">
-                    Spin the Wheel is available!
-                  </h3>
-                  <p className="text-sm text-primary/80 dark:text-primary/70 mt-0.5">
-                    Win free credits, boosts, profile badges & more — available every 72 hours.
-                  </p>
-                </div>
-              </div>
-              <Link href="/pro/spin">
-                <Button className="gap-2 shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground shadow-md shadow-primary/20 rounded-xl">
-                  <Dices className="w-4 h-4" /> Spin Now
+                <Button className={`gap-2 shrink-0 shadow-md rounded-xl ${
+                  spinStatus.eligible
+                    ? "bg-primary hover:bg-primary/90 text-primary-foreground shadow-primary/20"
+                    : "bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20"
+                }`}>
+                  <Dices className="w-4 h-4" /> {spinStatus.eligible ? "Spin Now" : "View Spin Wheel"}
                 </Button>
-              </Link>
+              </div>
             </div>
-          </div>
+          </Link>
         )}
 
         {/* Stats grid */}
