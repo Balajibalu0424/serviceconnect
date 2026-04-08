@@ -360,3 +360,43 @@ The swap should primarily happen inside the centralized verification service rat
 2. Current tests focus on the new onboarding shell and backend route/service behaviour, not full browser e2e coverage.
 3. Existing legacy onboarding endpoints are deprecated and blocked as primary signup paths, but some logged-in legacy verification UX still remains where appropriate.
 4. Real-world SMS/email resend timing and provider failures are not yet represented because the provider layer is not live.
+
+---
+
+## UI Premium Overhaul (Session 2 — 2026-04-08)
+
+### OTP Input
+- 6 individual digit boxes replacing a single text input
+- Auto-advance on digit entry; backspace moves focus backwards; arrow keys navigate left/right
+- Full clipboard paste support — pastes fills all 6 boxes at once
+- `fillDemoOtp()` — tapping the displayed demo code fills all digits instantly
+- Demo code displayed prominently in a clickable hint chip
+
+### Password Stage
+- 5-segment strength bar: grey (empty) → red (weak) → orange → yellow → green (strong)
+- Scoring considers: minimum length, uppercase, digit, and symbol presence
+- Confirm password field with real-time match indicator (red cross / green check)
+- Show/hide password toggles (eye icon) on both fields
+- Submit is blocked until passwords match and minimum strength is met
+
+### Chat UX
+- Enter submits; Shift+Enter inserts a newline (standard chat convention)
+- 3-dot bouncing typing indicator while waiting for AI response
+- User and bot avatar chips on each message bubble
+
+### Progress Sidebar
+- Gradient role badge (blue for customer, purple for professional)
+- Step tracker with three visual states: completed (emerald + check), active (dark ring), pending (grey)
+- Live snapshot panel — populates with collected job or profile details in real time
+- Phone/email verified status badges in the snapshot
+
+### Completion Screen
+- Animated ping pulse behind success icon
+- Auto-redirects after a brief pause to the correct dashboard
+
+### Routing Fix
+- `PostJobRoute` wrapper in `App.tsx` detects unauthenticated users on `/post-job` and redirects them to `/register?role=CUSTOMER` so they enter the proper guided flow
+
+### Gemini API Fix
+- Removed `genAI = null` from `validateKeyOnStartup` catch block — transient cold-start failures no longer disable AI for the lifetime of the process
+- Updated revoked API key to new working key
