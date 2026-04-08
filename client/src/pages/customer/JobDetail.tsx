@@ -399,16 +399,21 @@ export default function JobDetail() {
           </CardContent>
         </Card>
 
-        {/* Leave a review */}
+        {/* Leave a review for the professional */}
         {isCompleted && !showReview && (
           <Button variant="outline" className="gap-2 w-full"
             onClick={() => setShowReview(true)} data-testid="button-leave-review">
-            <Star className="w-4 h-4 text-yellow-500" /> Leave a review
+            <Star className="w-4 h-4 text-yellow-500" /> Review this professional
           </Button>
         )}
         {showReview && (
           <Card>
-            <CardHeader><CardTitle className="text-sm">Leave a Review</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                How was your experience with {acceptedQuote ? `this professional` : "the professional"}?
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">Your review will appear on their profile and help other customers.</p>
+            </CardHeader>
             <CardContent className="space-y-3">
               <div>
                 <p className="text-sm mb-2">Rating</p>

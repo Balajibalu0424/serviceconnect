@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, setTokens } from "@/lib/queryClient";
-import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, Lightbulb, Flame, Clock, Users, Star, Shield } from "lucide-react";
+import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, Lightbulb, Flame, Clock, Users, Star, Shield, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
@@ -429,9 +429,10 @@ export default function PostJob() {
         return;
       }
 
-      // New user — phone is mandatory to prevent ghost leads
-      if (!account.phone || account.phone.trim().length < 7) {
-        toast({ title: "Phone number required", description: "A valid phone number is required to verify your identity before your job goes live.", variant: "destructive" });
+      // New user — phone is mandatory to prevent ghost leads (anti-abuse protection)
+      const cleanPhone = (account.phone || "").replace(/[\s\-\(\)]/g, "");
+      if (!cleanPhone || cleanPhone.length < 7) {
+        toast({ title: "Phone number required", description: "Please enter a valid phone number. This is required to verify your identity before your job goes live.", variant: "destructive" });
         setLoading(false);
         return;
       }
@@ -525,120 +526,125 @@ export default function PostJob() {
 
 
 
-        {/* Step 2: Account */}
+        {/* Step 2: Urgency + Quick Review + Account */}
         {step === 2 && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             <div>
-              <h1 className="text-2xl font-bold mb-1">{isLoggedIn ? "Confirm your details" : "Create your account"}</h1>
-              <p className="text-muted-foreground">{isLoggedIn ? "Review before posting" : "Free to join — get quotes fast"}</p>
+              <h1 className="text-2xl font-bold mb-1">{isLoggedIn ? "Almost there — confirm & post" : "Quick details to get your quotes"}</h1>
+              <p className="text-muted-foreground text-sm">{isLoggedIn ? "Review your request and post" : "Free account — takes 30 seconds"}</p>
             </div>
 
-            {/* AI summary + hiring intent */}
-            {analyzing ? (
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="pt-4 space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-primary animate-pulse">
-                    <Sparkles className="w-4 h-4" />
-                    AI is analyzing your job request...
+            {/* Compact job summary card */}
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="pt-4 space-y-2 text-sm">
+                <div className="flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-medium">{job.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{(categories as any[]).find((c: any) => c.id === job.categoryId)?.name} · {job.locationText || "Location not set"}</p>
                   </div>
-                  <div className="space-y-2">
-                    <div className="h-4 bg-primary/10 rounded w-3/4 animate-pulse"></div>
-                    <div className="h-4 bg-primary/10 rounded w-1/2 animate-pulse"></div>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (aiAnalysis || hiringIntent) && (
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="pt-4 space-y-2">
                   {aiAnalysis && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">Job quality</span>
-                      <Badge variant={aiAnalysis.quality.passed ? "default" : "secondary"}>{aiAnalysis.quality.score}/100</Badge>
-                    </div>
+                    <Badge variant={aiAnalysis.quality.passed ? "default" : "secondary"} className="shrink-0">{aiAnalysis.quality.score}/100</Badge>
                   )}
-                  {hiringIntent && (
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Clock className="w-3.5 h-3.5 text-primary" />
-                      <span>Timeline: <strong className="text-foreground">{hiringIntent}</strong></span>
-                    </div>
-                  )}
-                  {aiAnalysis?.urgency.isUrgent && (
-                    <div className="flex items-center gap-1.5 text-xs text-red-600">
-                      <Flame className="w-3.5 h-3.5" /><span>Urgent — pros notified instantly on post</span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Inline urgency selector — clean, one-tap */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">How urgent is this?</Label>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { value: "LOW", label: "No rush", icon: "🟢", sub: "Within weeks" },
+                  { value: "NORMAL", label: "Normal", icon: "🔵", sub: "This week" },
+                  { value: "HIGH", label: "Soon", icon: "🟠", sub: "1–2 days" },
+                  { value: "URGENT", label: "ASAP", icon: "🔴", sub: "Today" },
+                ].map(u => (
+                  <button
+                    key={u.value}
+                    type="button"
+                    onClick={() => setJob(j => ({ ...j, urgency: u.value }))}
+                    className={cn(
+                      "rounded-xl border-2 p-3 text-center transition-all hover:shadow-sm",
+                      job.urgency === u.value
+                        ? "border-primary bg-primary/5 shadow-sm"
+                        : "border-border hover:border-primary/40"
+                    )}
+                  >
+                    <p className="text-lg">{u.icon}</p>
+                    <p className="text-xs font-semibold mt-1">{u.label}</p>
+                    <p className="text-[10px] text-muted-foreground">{u.sub}</p>
+                  </button>
+                ))}
+              </div>
+              {job.urgency === "URGENT" && (
+                <p className="text-xs text-red-600 flex items-center gap-1">
+                  <Flame className="w-3 h-3" /> Pros will be notified immediately when your job goes live
+                </p>
+              )}
+            </div>
 
             {!isLoggedIn && (
               <>
-                <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label>First Name</Label>
-                    <Input 
-                      type="text" 
-                      value={account.firstName} 
-                      onChange={e => setAccount(a => ({...a, firstName: e.target.value}))} 
-                      required 
-                      placeholder="Jane" 
-                      className="mt-1" 
+                    <Label>First name</Label>
+                    <Input
+                      type="text"
+                      value={account.firstName}
+                      onChange={e => setAccount(a => ({...a, firstName: e.target.value}))}
+                      required
+                      placeholder="Jane"
+                      className="mt-1"
                     />
                   </div>
                   <div>
-                    <Label>Last Name</Label>
-                    <Input 
-                      type="text" 
-                      value={account.lastName} 
-                      onChange={e => setAccount(a => ({...a, lastName: e.target.value}))} 
-                      required 
-                      placeholder="Doe" 
-                      className="mt-1" 
+                    <Label>Last name</Label>
+                    <Input
+                      type="text"
+                      value={account.lastName}
+                      onChange={e => setAccount(a => ({...a, lastName: e.target.value}))}
+                      required
+                      placeholder="Doe"
+                      className="mt-1"
                     />
                   </div>
                 </div>
-                <div className="mb-3">
+                <div>
                   <Label>Email</Label>
-                  <Input 
-                    type="email" 
-                    value={account.email} 
-                    onChange={e => setAccount(a => ({...a, email: e.target.value}))} 
-                    required 
-                    placeholder="jane@example.com" 
-                    className="mt-1" 
+                  <Input
+                    type="email"
+                    value={account.email}
+                    onChange={e => setAccount(a => ({...a, email: e.target.value}))}
+                    required
+                    placeholder="jane@example.com"
+                    className="mt-1"
                   />
                 </div>
-                <div className="mb-4">
-                  <Label>Phone (Optional)</Label>
-                  <Input 
-                    type="tel" 
-                    value={account.phone} 
-                    onChange={e => setAccount(a => ({...a, phone: e.target.value}))} 
-                    placeholder="08X XXX XXXX" 
-                    className="mt-1" 
+                <div>
+                  <Label className="flex items-center gap-1">
+                    <Phone className="w-3 h-3" /> Phone number <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    type="tel"
+                    value={account.phone}
+                    onChange={e => setAccount(a => ({...a, phone: e.target.value}))}
+                    required
+                    placeholder="08X XXX XXXX"
+                    className="mt-1"
                   />
+                  <p className="text-[11px] text-muted-foreground mt-1">Required to verify your identity. We'll never share it with pros.</p>
                 </div>
                 <div className="pt-2 border-t border-border">
-                  <Label>Create password to secure your account</Label>
+                  <Label>Create a password</Label>
                   <Input type="password" value={account.password} onChange={e => setAccount(a => ({...a, password: e.target.value}))} minLength={8} required data-testid="input-password" placeholder="••••••••" className="mt-1" />
                 </div>
               </>
             )}
-            {isLoggedIn && (
-              <Card><CardContent className="pt-4 space-y-2 text-sm">
-                <p><strong>Job:</strong> {job.title}</p>
-                <p><strong>Category:</strong> {(categories as any[]).find((c: any) => c.id === job.categoryId)?.name}</p>
-                <p><strong>Location:</strong> {job.locationText}</p>
-                {Object.entries(catAnswers).slice(0, 2).map(([k, v]) => (
-                  <p key={k} className="text-muted-foreground text-xs">{k}: {Array.isArray(v) ? v.join(", ") : v}</p>
-                ))}
-                {hiringIntent && <p className="text-xs text-muted-foreground">Timeline: {hiringIntent}</p>}
-              </CardContent></Card>
-            )}
 
             <div className="flex gap-3">
               <Button variant="outline" className="gap-2" onClick={() => setStep(1)}>
-                <ArrowLeft className="w-4 h-4" /> Back to Chat
+                <ArrowLeft className="w-4 h-4" /> Edit
               </Button>
               <Button className="flex-1 gap-2" onClick={handleAccountSubmit} disabled={loading} data-testid="button-submit">
                 {loading ? "Processing..." : isLoggedIn ? "Post Job" : "Create Account & Post"} <ArrowRight className="w-4 h-4" />

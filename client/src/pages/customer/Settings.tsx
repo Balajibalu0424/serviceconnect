@@ -269,19 +269,19 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Account Info */}
+        {/* Account Info — no internal IDs shown to customers */}
         <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
           <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
-            <CardTitle className="text-base font-heading font-semibold text-foreground/80">System Info</CardTitle>
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80">Account</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm pt-6">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Account ID</span>
-              <span className="font-mono text-xs">{user?.id}</span>
+              <span className="text-muted-foreground">Account type</span>
+              <Badge variant="secondary" className="capitalize">{user?.role?.toLowerCase()}</Badge>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Role</span>
-              <Badge variant="secondary" className="capitalize">{user?.role?.toLowerCase()}</Badge>
+              <span className="text-muted-foreground">Member since</span>
+              <span className="text-xs">{user?.createdAt ? new Date(user.createdAt).toLocaleDateString("en-IE", { month: "long", year: "numeric" }) : "—"}</span>
             </div>
             {(user as any)?.creditBalance !== undefined && (
               <div className="flex justify-between">

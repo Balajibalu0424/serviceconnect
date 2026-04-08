@@ -381,6 +381,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Missing required fields for customer onboarding." });
       }
 
+      // Phone is mandatory for new customers — anti-ghost-lead protection
+      if (!phone || phone.trim().length < 7) {
+        return res.status(400).json({ error: "A valid phone number is required to verify your identity before your job goes live." });
+      }
+
+      // Moderate job description and title during onboarding
+      const descMod = moderateText(description, { fieldName: "job description" });
+      if (descMod.blocked) return res.status(422).json({ error: descMod.userMessage });
+      const titleMod = moderateText(title, { fieldName: "job title" });
+      if (titleMod.blocked) return res.status(422).json({ error: titleMod.userMessage });
+
       const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
       if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
 
@@ -1291,8 +1302,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [booking] = await db.select().from(bookings).where(eq(bookings.id, req.params.id));
       if (!booking) return res.status(404).json({ error: "Booking not found" });
 
+      // Moderate review text — block phone numbers, profanity, contact attempts
+      if (comment) {
+        const commentMod = moderateText(comment, { fieldName: "review comment" });
+        if (commentMod.blocked) {
+          return res.status(422).json({ error: commentMod.userMessage });
+        }
+      }
+      if (title) {
+        const titleMod = moderateText(title, { fieldName: "review title" });
+        if (titleMod.blocked) {
+          return res.status(422).json({ error: titleMod.userMessage });
+        }
+      }
+
       const reviewerId = req.user!.userId;
-      const revieweeId = reviewerId === booking.customerId ? booking.professionalId : booking.customerId;
+      // Reviews always go TO the professional (the reviewee)
+      const revieweeId = booking.professionalId;
+
+      // Prevent duplicate reviews
+      const existingReview = await db.select({ id: reviews.id }).from(reviews)
+        .where(and(eq(reviews.bookingId, booking.id), eq(reviews.reviewerId, reviewerId)));
+      if (existingReview.length > 0) {
+        return res.status(409).json({ error: "You have already reviewed this booking." });
+      }
 
       const [review] = await db.insert(reviews).values({
         bookingId: booking.id, reviewerId, revieweeId,
@@ -1898,6 +1931,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!subject) return res.status(400).json({ error: "Subject is required" });
       const ticketDescription = description || message || null;
       if (!ticketDescription) return res.status(400).json({ error: "Description is required" });
+
+      // Moderate support ticket text — block phone/contact in descriptions
+      const descMod = moderateText(ticketDescription, { fieldName: "ticket description" });
+      if (descMod.blocked) return res.status(422).json({ error: descMod.userMessage });
+      const subjMod = moderateText(subject, { fieldName: "ticket subject" });
+      if (subjMod.blocked) return res.status(422).json({ error: subjMod.userMessage });
+
       const ticketPriority = priority || "MEDIUM";
       const assignee = await autoAssignTicket();
       const [ticket] = await db.insert(supportTickets).values({
@@ -1984,10 +2024,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/support/tickets/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
     const { message, isInternal } = req.body;
     if (!message?.trim()) return res.status(400).json({ error: "Message is required" });
-    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
-    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    // Moderate ticket message content (staff internal notes skip moderation)
     const [sender] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user!.userId));
     const isStaff = sender?.role === "ADMIN" || sender?.role === "SUPPORT";
+    if (!isStaff) {
+      const msgMod = moderateText(message, { fieldName: "message" });
+      if (msgMod.blocked) return res.status(422).json({ error: msgMod.userMessage });
+    }
+
+    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
     // Only staff can post internal notes
     const internal = isInternal && isStaff ? true : false;
     const [msg] = await db.insert(ticketMessages).values({
@@ -2405,7 +2452,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     } catch (_) { /* non-blocking */ }
 
-    return res.json({ ...user, passwordHash: undefined, profile, reviews: proReviews, totalHires, avgResponseMinutes });
+    // Public profile: strip sensitive fields (phone, email, passwordHash, internal IDs)
+    // Phone is GDPR-sensitive and must not be exposed in public profiles
+    const enrichedReviews = await Promise.all(proReviews.map(async (r) => {
+      const [reviewer] = await db.select({ firstName: users.firstName }).from(users).where(eq(users.id, r.reviewerId));
+      return { ...r, reviewerFirstName: reviewer?.firstName || "Customer" };
+    }));
+
+    const safeProfile = profile ? {
+      ...profile,
+      // Strip sensitive verification docs from public view
+      verificationDocumentUrl: undefined,
+      verificationReviewNote: undefined,
+    } : null;
+
+    return res.json({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      role: user.role,
+      status: user.status,
+      createdAt: user.createdAt,
+      // No phone, no email, no internal ID, no passwordHash
+      profile: safeProfile,
+      reviews: enrichedReviews,
+      totalHires,
+      avgResponseMinutes,
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

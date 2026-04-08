@@ -32,10 +32,35 @@ const EXTENDED_PHONE_PATTERNS: RegExp[] = [
   /\b0\d{2}\s+\d{3}\s+[\d\*]{4}\b/g,
   // Parenthetical format: (087) 123 4567
   /\(\s*0\d{2}\s*\)\s*\d{3}[\s\-]\d{4}/g,
+  // Digit-word-digit pattern: "oh 87 one two three four five six"
+  /\b(?:oh|zero|0)\s*(?:eight|8)\s*(?:\d|zero|one|two|three|four|five|six|seven|eight|nine)\s+(?:(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)[\s,]+){4,}/gi,
+  // Numbers disguised with dots/commas/underscores between every digit
+  /\b\d[._,]\d[._,]\d[._,]\d[._,]\d[._,]\d[._,]\d/g,
+  // "Call me on" / "text me" / "ring me" with any digit sequence
+  /(?:call|text|ring|phone|whatsapp|message|contact)\s+(?:me|us)\s+(?:on|at)?\s*\d/gi,
+  // "My number is" pattern
+  /(?:my\s+(?:number|phone|mobile|cell)\s+(?:is|:))\s*[\d\s\-\.\(\)]{7,}/gi,
+];
+
+// Detect attempts to share contact info through creative language
+const CONTACT_INTENT_PATTERNS: RegExp[] = [
+  // "reach me at" / "find me on" / "contact me via"
+  /(?:reach|find|contact|get|hit)\s+(?:me|us)\s+(?:at|on|via|through|@)/gi,
+  // "my insta is" / "my snap is" / "my whatsapp is"
+  /(?:my\s+(?:insta(?:gram)?|snap(?:chat)?|whatsapp|wa|tiktok|twitter|facebook|fb|telegram|signal|viber|number|email|phone|mobile)\s+(?:is|:))/gi,
+  // Direct "add me" patterns
+  /(?:add|follow|dm|message)\s+(?:me|us)\s+(?:on|@)/gi,
 ];
 
 function hasExtendedPhonePattern(text: string): boolean {
   return EXTENDED_PHONE_PATTERNS.some(re => {
+    re.lastIndex = 0;
+    return re.test(text);
+  });
+}
+
+function hasContactIntentPattern(text: string): boolean {
+  return CONTACT_INTENT_PATTERNS.some(re => {
     re.lastIndex = 0;
     return re.test(text);
   });
@@ -67,7 +92,7 @@ export function moderateText(text: string, options: ModerationOptions = {}): Mod
     return {
       blocked: true,
       reason: "contact_info_detected",
-      userMessage: `Your ${fieldName} appears to contain contact information (phone number, email address, or social handle). Please keep all communication within the platform to stay safe and protected.`,
+      userMessage: `Your ${fieldName} appears to contain contact information (phone number, email, or social handle). For your safety, please keep all communication within ServiceConnect.`,
       cleanedText: processed.content,
       flags: processed.filterFlags,
       severity: processed.severity ?? undefined,
@@ -79,9 +104,20 @@ export function moderateText(text: string, options: ModerationOptions = {}): Mod
     return {
       blocked: true,
       reason: "phone_pattern_detected",
-      userMessage: `Your ${fieldName} appears to contain a phone number. Contact details must stay within the platform's secure system.`,
+      userMessage: `Your ${fieldName} appears to contain a phone number. For your protection, contact details must stay within ServiceConnect's secure messaging system.`,
       cleanedText: text,
       flags: ["EXTENDED_PHONE"],
+    };
+  }
+
+  // Contact intent detection (e.g., "reach me at", "my insta is")
+  if (!allowPhone && hasContactIntentPattern(text)) {
+    return {
+      blocked: true,
+      reason: "contact_intent_detected",
+      userMessage: `Your ${fieldName} appears to invite off-platform contact. For your safety, all communication should stay within ServiceConnect.`,
+      cleanedText: text,
+      flags: ["CONTACT_INTENT"],
     };
   }
 

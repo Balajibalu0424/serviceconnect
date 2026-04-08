@@ -64,7 +64,7 @@ export default function Home() {
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
             <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
             <a href="#categories" className="hover:text-foreground transition-colors">Services</a>
-            <a href="#testimonials" className="hover:text-foreground transition-colors">Reviews</a>
+            <a href="#testimonials" className="hover:text-foreground transition-colors">Testimonials</a>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/login">
@@ -280,13 +280,13 @@ export default function Home() {
               <div className="space-y-6">
                 <Badge className="bg-white/20 text-white border-0 px-3 py-1.5 text-xs font-semibold gap-1.5 backdrop-blur-sm">
                   <Sparkles className="w-3.5 h-3.5" />
-                  Powered by Google Gemini AI
+                  Built-in AI Intelligence
                 </Badge>
                 <h2 className="text-4xl font-extrabold tracking-tight leading-tight">
                   AI That Works<br />For You
                 </h2>
                 <p className="text-blue-100 leading-relaxed max-w-md">
-                  ServiceConnect uses cutting-edge AI to enhance every step — from writing better job descriptions
+                  ServiceConnect's AI enhances every step — from writing better job descriptions
                   to matching you with the perfect professional.
                 </p>
               </div>
@@ -314,8 +314,9 @@ export default function Home() {
       <section id="testimonials" className="py-24 px-6 bg-gradient-to-b from-background to-blue-50/30 dark:to-gray-900/30">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <Badge className="bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border-0 px-3 py-1 text-xs font-semibold mb-4">Trusted by Thousands</Badge>
-            <h2 className="text-4xl font-extrabold tracking-tight">What Our Users Say</h2>
+            <Badge className="bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border-0 px-3 py-1 text-xs font-semibold mb-4">Real Experiences</Badge>
+            <h2 className="text-4xl font-extrabold tracking-tight">What Customers & Pros Say</h2>
+            <p className="text-muted-foreground mt-3 max-w-xl mx-auto">Every review is tied to a real booking between a customer and their professional.</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
