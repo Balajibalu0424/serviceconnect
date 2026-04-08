@@ -15,6 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
 import PhoneVerificationModal from "@/components/auth/PhoneVerificationModal";
+import { DEMO_OTP_CODE } from "@shared/verification";
 const ICON_MAP: Record<string, any> = { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator };
 
 type Step = 1 | 1.5 | 2 | 2.5 | 3 | 4;
@@ -212,11 +213,11 @@ function OtpStep({ email, otp, setOtp, onVerify, loading }: {
 
   const handleResend = async () => {
     // NOTE: Real email OTP delivery is deferred (requires SendGrid/Resend integration).
-    // This button shows UI readiness — in demo mode the code remains 123456.
+    // This button shows UI readiness — in demo mode the code remains centralized.
     setResending(true);
     setResendCooldown(60);
     setResending(false);
-    toast({ title: "Code resent", description: "Demo mode: use code 123456." });
+    toast({ title: "Code resent", description: `Demo mode: use code ${DEMO_OTP_CODE}.` });
   };
 
   return (
@@ -225,14 +226,14 @@ function OtpStep({ email, otp, setOtp, onVerify, loading }: {
         <h1 className="text-2xl font-bold mb-1">Verify your email</h1>
         <p className="text-muted-foreground">Enter the 6-digit code sent to <strong>{email}</strong></p>
         <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mt-1 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-3 py-1.5 inline-block">
-          Demo mode — use code: <strong className="font-mono tracking-widest">123456</strong>
+          Demo mode — use code: <strong className="font-mono tracking-widest">{DEMO_OTP_CODE}</strong>
         </p>
       </div>
       <div className="max-w-xs mx-auto space-y-3">
         <Input
           type="text" maxLength={6} value={otp}
           onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
-          placeholder="123456"
+          placeholder={DEMO_OTP_CODE}
           className="text-center text-2xl tracking-widest h-14 font-mono"
           data-testid="input-otp"
         />
@@ -270,7 +271,7 @@ export default function PostJob() {
   const params = new URLSearchParams(search);
   const preselectedCategory = params.get("category") || "";
   const verifyMode = params.get("verify") === "1";
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -314,6 +315,21 @@ export default function PostJob() {
   });
 
   const isLoggedIn = !!user;
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      const nextSearch = search ? `&${search.replace(/^\?/, "")}` : "";
+      setLocation(`/register?role=CUSTOMER${nextSearch}`);
+    }
+  }, [authLoading, search, setLocation, user]);
+
+  if (!authLoading && !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-sm text-muted-foreground">Redirecting to guided onboarding...</div>
+      </div>
+    );
+  }
 
   // Get category slug for questionnaire lookup
   const selectedCat = (categories as any[]).find((c: any) => c.id === job.categoryId);

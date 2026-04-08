@@ -70,12 +70,12 @@ export default function Home() {
             <Link href="/login">
               <Button variant="ghost" size="sm" className="text-sm font-medium">Sign In</Button>
             </Link>
-            <Link href="/pro/onboarding">
+            <Link href="/register?role=PROFESSIONAL">
               <Button variant="outline" size="sm" className="text-sm font-medium hidden sm:flex gap-1.5 border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30">
                 <Wrench className="w-3.5 h-3.5" /> I'm a Pro
               </Button>
             </Link>
-            <Link href="/post-job">
+            <Link href="/register?role=CUSTOMER">
               <Button size="sm" className="bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-lg shadow-blue-500/25 text-sm font-medium gap-1.5">
                 <Briefcase className="w-3.5 h-3.5" /> Post a Job
               </Button>
@@ -115,7 +115,7 @@ export default function Home() {
             {/* Two clear entry paths matching flowchart */}
             <div className="grid sm:grid-cols-2 gap-4">
               {/* Customer path */}
-              <Link href="/post-job">
+              <Link href="/register?role=CUSTOMER">
                 <div className="group p-5 rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-950/20 hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10 transition-all cursor-pointer">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow">
@@ -130,7 +130,7 @@ export default function Home() {
                 </div>
               </Link>
               {/* Pro path */}
-              <Link href="/pro/onboarding">
+              <Link href="/register?role=PROFESSIONAL">
                 <div className="group p-5 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50/60 dark:bg-violet-950/20 hover:border-violet-500 hover:shadow-lg hover:shadow-violet-500/10 transition-all cursor-pointer">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow">
@@ -251,7 +251,7 @@ export default function Home() {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {CATEGORIES.map((cat) => (
-              <Link key={cat.name} href="/post-job">
+              <Link key={cat.name} href="/register?role=CUSTOMER">
                 <div className="group bg-card border border-border/50 rounded-xl p-5 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-300 hover:-translate-y-0.5 cursor-pointer">
                   <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${cat.color} flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-sm`}>
                     <cat.icon className="w-5 h-5 text-white" />
@@ -357,7 +357,7 @@ export default function Home() {
                 Every 72 hours, verified pros get to spin the wheel for a chance to win free credits, profile boosts, and exclusive badges. No catch.
               </p>
             </div>
-            <Link href="/pro/onboarding">
+            <Link href="/register?role=PROFESSIONAL">
               <Button size="lg" className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg shadow-amber-500/25 gap-2 flex-shrink-0">
                 <Dices className="w-4 h-4" /> Join to Spin
               </Button>
@@ -376,13 +376,13 @@ export default function Home() {
             Post your first job in under 2 minutes — completely free. Our AI will help you craft the perfect brief.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/post-job">
+            <Link href="/register?role=CUSTOMER">
               <Button size="lg" className="bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-xl shadow-blue-500/25 h-13 px-10 text-base font-semibold gap-2 group">
                 Post a Job Free
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Button>
             </Link>
-            <Link href="/pro/onboarding">
+            <Link href="/register?role=PROFESSIONAL">
               <Button size="lg" variant="outline" className="h-13 px-10 text-base font-semibold border-2">
                 Join as a Professional
               </Button>

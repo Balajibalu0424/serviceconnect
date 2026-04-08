@@ -8,7 +8,7 @@ import {
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
   adminAuditLogs, platformMetrics, featureFlags, callRequests,
-  phoneVerificationTokens, faqArticles, cannedResponses
+  faqArticles, cannedResponses
 } from "@shared/schema";
 import { pusher } from "./pusher";
 import {
@@ -28,14 +28,16 @@ import {
 import {
   enhanceJobDescription, smartCategoryDetect, deepFakeAnalysis,
   generateQuoteSuggestion, aiChatAssistant, smartProMatch,
-  generateReviewSummary, enhanceProBio, isGeminiAvailable,
-  handleOnboardingChat
+  generateReviewSummary, enhanceProBio, isGeminiAvailable
 } from "./geminiService";
 import { z } from "zod";
 import Stripe from "stripe";
+import { registerOnboardingRoutes } from "./onboardingRoutes";
+import { DEMO_OTP_CODE } from "@shared/verification";
+import { issueVerificationChallenge, verifyVerificationChallenge } from "./verificationService";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder", {
-  apiVersion: "2024-12-18.acacia"
+  apiVersion: "2026-02-25.clover"
 });
 
 // ─── Pusher Initialization (Imported from ./pusher) ──────────────────────────
@@ -79,6 +81,13 @@ async function createNotification(userIdOrRole: string, type: string, title: str
     console.error("Database error creating notification:", err);
     throw err;
   }
+}
+
+function routeParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
 }
 
 // ─── Helper: credit engine (atomic) ──────────────────────────────────────────
@@ -163,6 +172,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // AUTH ROUTES
   // ═══════════════════════════════════════════════════════════════════════════
   app.post("/api/auth/register", async (req: Request, res: Response) => {
+    const requestedRole = req.body?.role || "CUSTOMER";
+    if (requestedRole === "CUSTOMER" || requestedRole === "PROFESSIONAL") {
+      return res.status(410).json({
+        error: "Public registration now runs through the role-aware onboarding flow. Start at /register.",
+      });
+    }
+
     try {
       const { email, password, firstName, lastName, phone, role } = req.body;
       if (!email || !password || !firstName || !lastName || !phone) {
@@ -271,6 +287,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ success: true });
   });
 
+  registerOnboardingRoutes(app);
+
   app.post("/api/auth/logout", requireAuth, async (req: AuthRequest, res: Response) => {
     const { refreshToken } = req.body;
     if (refreshToken) {
@@ -291,25 +309,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if ((user as any).phoneVerified) return res.json({ success: true, alreadyVerified: true });
       if (!user.phone) return res.status(400).json({ error: "No phone number on file. Please add your phone number first." });
 
-      // Generate 6-digit code
-      const { randomInt } = await import("crypto");
-      const code = String(randomInt(100000, 999999));
-      const hashedCode = await hashPassword(code);
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      const result = await issueVerificationChallenge({
+        userId,
+        channel: "PHONE",
+        target: user.phone,
+        purpose: "PHONE_UPDATE",
+      });
 
-      // Invalidate existing unused tokens
-      await db.delete(phoneVerificationTokens).where(
-        and(eq(phoneVerificationTokens.userId, userId), eq(phoneVerificationTokens.used, false))
-      );
-
-      await db.insert(phoneVerificationTokens).values({ userId, hashedCode, expiresAt });
-
-      // Development: log code to console. Production: integrate SMS provider (e.g. Twilio)
-      if (process.env.NODE_ENV !== "production") {
-        console.log(`[DEV] Phone OTP for ${user.phone}: ${code}`);
-      }
-
-      return res.json({ success: true, message: "Verification code sent to your phone." });
+      return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -322,31 +329,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { code } = req.body;
       if (!code) return res.status(400).json({ error: "Verification code required" });
 
-      const [token] = await db.select().from(phoneVerificationTokens)
-        .where(and(
-          eq(phoneVerificationTokens.userId, userId),
-          eq(phoneVerificationTokens.used, false),
-          gt(phoneVerificationTokens.expiresAt, new Date())
-        ))
-        .orderBy(desc(phoneVerificationTokens.createdAt))
-        .limit(1);
-
-      let valid = false;
-      // Dev master code for testing
-      if (process.env.NODE_ENV !== "production" && code === "123456") {
-        valid = true;
-      } else if (token) {
-        valid = await comparePassword(code, token.hashedCode);
-      }
+      const valid = await verifyVerificationChallenge({
+        userId,
+        channel: "PHONE",
+        code,
+      });
 
       if (!valid) {
         return res.status(400).json({ error: "Invalid or expired verification code. Please request a new one." });
-      }
-
-      if (token) {
-        await db.update(phoneVerificationTokens)
-          .set({ used: true })
-          .where(eq(phoneVerificationTokens.id, token.id));
       }
 
       await db.update(users).set({ phoneVerified: true, updatedAt: new Date() } as any).where(eq(users.id, userId));
@@ -361,106 +351,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ONBOARDING
   // ═══════════════════════════════════════════════════════════════════════════
   app.post("/api/ai/onboarding-chat", async (req: Request, res: Response) => {
-    try {
-      const { messages, mode, isLoggedIn } = req.body;
-      if (!messages || !mode) return res.status(400).json({ error: "Missing messages or mode" });
-
-      const allCats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
-      const result = await handleOnboardingChat(messages, mode, allCats, isLoggedIn);
-      return res.json(result);
-    } catch (e: any) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(410).json({
+      error: "This onboarding endpoint has been replaced. Use /api/onboarding/sessions instead.",
+    });
   });
 
   app.post("/api/onboarding/customer", async (req: Request, res: Response) => {
-    try {
-      const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
-
-      if (!email || !password || !firstName || !lastName || !phone || !title || !description || !categoryId) {
-        return res.status(400).json({ error: "Missing required fields for customer onboarding (including phone number)." });
-      }
-
-      // Phone length check
-      if (phone.trim().length < 7) {
-        return res.status(400).json({ error: "A valid phone number (min 7 digits) is required to verify your identity." });
-      }
-
-      // Moderate job description and title during onboarding
-      const descMod = moderateText(description, { fieldName: "job description" });
-      if (descMod.blocked) return res.status(422).json({ error: descMod.userMessage });
-      const titleMod = moderateText(title, { fieldName: "job title" });
-      if (titleMod.blocked) return res.status(422).json({ error: titleMod.userMessage });
-
-      const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
-      if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
-
-      const result = await db.transaction(async (tx) => {
-        const passwordHash = await hashPassword(password);
-        const [user] = await tx.insert(users).values({
-          email: email.toLowerCase(), passwordHash, firstName, lastName,
-          phone, role: "CUSTOMER", status: "ACTIVE",
-          emailVerified: false, onboardingCompleted: false
-        }).returning();
-
-        const [cat] = await tx.select().from(serviceCategories).where(eq(serviceCategories.id, categoryId));
-        const creditCost = cat?.baseCreditCost || 2;
-
-        const [job] = await tx.insert(jobs).values({
-          customerId: user.id, categoryId, title, description,
-          budgetMin: budgetMin ? String(budgetMin) : null,
-          budgetMax: budgetMax ? String(budgetMax) : null,
-          urgency: urgency || "NORMAL", status: "DRAFT",
-          locationText: locationText || null, creditCost, originalCreditCost: creditCost,
-          preferredDate: preferredDate ? new Date(preferredDate) : null
-        }).returning();
-
-        await tx.update(users).set({ firstJobId: job.id }).where(eq(users.id, user.id));
-
-        return { user, job };
-      });
-
-      const { accessToken, refreshToken } = generateTokens(result.user.id, result.user.role);
-      // In real app, send OTP email here
-      const mockOtp = "123456"; // dev mode
-
-      return res.status(201).json({
-        accessToken, refreshToken,
-        user: { ...result.user, passwordHash: undefined },
-        jobId: result.job.id,
-        otp: mockOtp // only in dev
-      });
-    } catch (e: any) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(410).json({
+      error: "Customer onboarding now runs through the role-aware onboarding flow at /register.",
+    });
   });
 
   app.post("/api/onboarding/customer/verify", requireAuth, async (req: AuthRequest, res: Response) => {
-    try {
-      const { otp } = req.body;
-      // Accept "123456" as the dev/demo OTP on all environments (real OTP email not yet wired)
-      if (otp !== "123456") {
-        return res.status(400).json({ error: "Invalid OTP code. In demo mode use: 123456" });
-      }
-
-      const [user] = await db.select().from(users).where(eq(users.id, req.user!.userId));
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      await db.update(users).set({ emailVerified: true, onboardingCompleted: true, updatedAt: new Date() })
-        .where(eq(users.id, user.id));
-
-      // Set first job to LIVE
-      if (user.firstJobId) {
-        await db.update(jobs).set({ status: "LIVE", updatedAt: new Date() }).where(eq(jobs.id, user.firstJobId));
-
-        const [job] = await db.select().from(jobs).where(eq(jobs.id, user.firstJobId));
-        return res.json({ success: true, job });
-      }
-
-      return res.json({ success: true });
-    } catch (e: any) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(410).json({
+      error: `Customer onboarding verification has moved into the onboarding session flow. Demo OTP remains ${DEMO_OTP_CODE}.`,
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1030,7 +935,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/jobs/:id/aftercare/decline-boost", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { action } = req.body as { action: "close" | "leave_open" };
-      const jobId = req.params.id;
+      const jobId = routeParam(req.params.id);
       const userId = req.user!.userId;
 
       const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
@@ -1057,7 +962,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/jobs/:id/boost", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const jobId = req.params.id;
+      const jobId = routeParam(req.params.id);
       const userId = req.user!.userId;
 
       const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
@@ -1246,7 +1151,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ...b, 
         job, 
         customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl } : null,
-        professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: professional.businessName } : null
+        professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: null } : null
       };
     }));
 
@@ -1702,7 +1607,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       await db.update(conversationParticipants).set({ lastReadAt: new Date() })
         .where(and(
-          eq(conversationParticipants.conversationId, req.params.id),
+          eq(conversationParticipants.conversationId, routeParam(req.params.id)),
           eq(conversationParticipants.userId, req.user!.userId)
         ));
       return res.json({ success: true });
@@ -1892,7 +1797,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/notifications/:id/read", requireAuth, async (req: AuthRequest, res: Response) => {
     await db.update(notifications).set({ isRead: true, readAt: new Date() })
-      .where(and(eq(notifications.id, req.params.id), eq(notifications.userId, req.user!.userId)));
+      .where(and(eq(notifications.id, routeParam(req.params.id)), eq(notifications.userId, req.user!.userId)));
     return res.json({ success: true });
   });
 
@@ -1983,7 +1888,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Get single ticket with messages and sender info
   app.get("/api/support/tickets/:id", requireAuth, async (req: AuthRequest, res: Response) => {
-    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, routeParam(req.params.id)));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
     // Verify access: user owns ticket or is admin/support
     const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user!.userId));
@@ -2237,7 +2142,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const field = helpful ? faqArticles.helpfulCount : faqArticles.notHelpfulCount;
       const [article] = await db.update(faqArticles).set({
         [helpful ? "helpfulCount" : "notHelpfulCount"]: sql`${field} + 1`
-      }).where(eq(faqArticles.id, req.params.id)).returning();
+      }).where(eq(faqArticles.id, routeParam(req.params.id))).returning();
       return res.json(article);
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
@@ -2265,13 +2170,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { question, answer, category, sortOrder, isPublished } = req.body;
       const [article] = await db.update(faqArticles).set({
         question, answer, category, sortOrder, isPublished, updatedAt: new Date()
-      }).where(eq(faqArticles.id, req.params.id)).returning();
+      }).where(eq(faqArticles.id, routeParam(req.params.id))).returning();
       return res.json(article);
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/admin/support/faq/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    await db.delete(faqArticles).where(eq(faqArticles.id, req.params.id));
+    await db.delete(faqArticles).where(eq(faqArticles.id, routeParam(req.params.id)));
     return res.json({ success: true });
   });
 
@@ -2301,13 +2206,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { title, content, category, shortcut } = req.body;
       const [response] = await db.update(cannedResponses).set({
         title, content, category, shortcut, updatedAt: new Date()
-      }).where(eq(cannedResponses.id, req.params.id)).returning();
+      }).where(eq(cannedResponses.id, routeParam(req.params.id))).returning();
       return res.json(response);
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/admin/support/canned-responses/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    await db.delete(cannedResponses).where(eq(cannedResponses.id, req.params.id));
+    await db.delete(cannedResponses).where(eq(cannedResponses.id, routeParam(req.params.id)));
     return res.json({ success: true });
   });
 
@@ -2315,7 +2220,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/support/canned-responses/:id/use", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
     await db.update(cannedResponses).set({
       usageCount: sql`${cannedResponses.usageCount} + 1`
-    }).where(eq(cannedResponses.id, req.params.id));
+    }).where(eq(cannedResponses.id, routeParam(req.params.id)));
     return res.json({ success: true });
   });
 
@@ -2418,12 +2323,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const [user] = await db.select().from(users).where(eq(users.id, req.params.id as string));
     if (!user) return res.status(404).json({ error: "User not found" });
     const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.params.id as string));
-    const proReviews = await db.select().from(reviews).where(eq(reviews.revieweeId, req.params.id)).limit(10);
+    const targetProId = routeParam(req.params.id);
+    const proReviews = await db.select().from(reviews).where(eq(reviews.revieweeId, targetProId)).limit(10);
 
     // Compute trust signals
     // Total hires = completed bookings as professional
     const [hiresRow] = await db.select({ c: count() }).from(bookings)
-      .where(and(eq(bookings.professionalId, req.params.id), eq(bookings.status, "COMPLETED")));
+      .where(and(eq(bookings.professionalId, targetProId), eq(bookings.status, "COMPLETED")));
     const totalHires = hiresRow?.c ?? 0;
 
     // Avg response time in minutes — time between job created and first message from pro
@@ -2433,7 +2339,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const proConvs = await db.select({ id: conversations.id, createdAt: conversations.createdAt })
         .from(conversations)
         .innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id))
-        .where(eq(conversationParticipants.userId, req.params.id))
+        .where(eq(conversationParticipants.userId, targetProId))
         .limit(20);
       if (proConvs.length > 0) {
         const convIds = proConvs.map(c => c.id);
@@ -2551,12 +2457,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/admin/users/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     const { status, role } = req.body;
+    const targetUserId = routeParam(req.params.id);
     const [user] = await db.update(users).set({ status: status || undefined, role: role || undefined, updatedAt: new Date() })
-      .where(eq(users.id, req.params.id)).returning();
+      .where(eq(users.id, targetUserId)).returning();
 
     await db.insert(adminAuditLogs).values({
       adminId: req.user!.userId, action: "UPDATE_USER", resourceType: "USER",
-      resourceId: req.params.id as string, changes: { status, role }, ipAddress: req.ip
+      resourceId: targetUserId, changes: { status, role }, ipAddress: req.ip
     });
 
     return res.json({ ...user, passwordHash: undefined });
@@ -2934,7 +2841,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const [updated] = await db.update(reviews)
         .set({ proReply: reply.trim(), proRepliedAt: new Date() } as any)
-        .where(eq(reviews.id, req.params.id))
+        .where(eq(reviews.id, routeParam(req.params.id)))
         .returning();
 
       return res.json(updated);
@@ -2949,6 +2856,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Unified pro onboarding: register + create profile in one shot
   app.post("/api/onboarding/professional", async (req: Request, res: Response) => {
+    return res.status(410).json({
+      error: "Professional onboarding now runs through the role-aware onboarding flow at /register.",
+    });
+
     try {
       const {
         email, password, firstName, lastName, phone,
@@ -3312,7 +3223,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // AI: Review summary for a pro
   app.get("/api/ai/review-summary/:proId", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const { proId } = req.params;
+      const proId = routeParam(req.params.proId);
       const proReviews = await db.select({
         rating: reviews.rating,
         comment: reviews.comment,

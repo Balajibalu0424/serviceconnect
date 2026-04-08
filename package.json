@@ -9,6 +9,8 @@
     "vercel-build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit push --force",
     "db:seed": "tsx server/seed.ts"
@@ -92,6 +94,8 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.18",
     "@types/connect-pg-simple": "^7.0.3",
@@ -102,16 +106,20 @@
     "@types/passport-local": "^1.0.38",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
+    "@types/supertest": "^6.0.3",
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.8",
     "esbuild": "^0.25.0",
+    "jsdom": "^25.0.1",
     "postcss": "^8.4.47",
+    "supertest": "^7.1.0",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
-    "vite": "^7.3.0"
+    "vite": "^7.3.0",
+    "vitest": "^2.1.8"
   },
   "overrides": {
     "drizzle-kit": {

@@ -163,9 +163,9 @@ export default function Login() {
           <div className="space-y-3 text-center text-sm">
             <p className="text-muted-foreground">
               Don&apos;t have an account?{" "}
-              <Link href="/post-job" className="text-blue-600 hover:text-blue-700 font-medium hover:underline">Post a job to register</Link>
+              <Link href="/register?role=CUSTOMER" className="text-blue-600 hover:text-blue-700 font-medium hover:underline">Start customer onboarding</Link>
               {" "}or{" "}
-              <Link href="/register" className="text-blue-600 hover:text-blue-700 font-medium hover:underline">join as a professional</Link>
+              <Link href="/register?role=PROFESSIONAL" className="text-blue-600 hover:text-blue-700 font-medium hover:underline">join as a professional</Link>
             </p>
             <p className="text-xs text-muted-foreground">
               Admin? <Link href="/admin/login" className="text-blue-600 hover:underline">Admin login</Link>

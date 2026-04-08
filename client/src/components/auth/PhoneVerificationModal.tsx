@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Phone, ShieldCheck } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { DEMO_OTP_CODE } from "@shared/verification";
 
 interface PhoneVerificationModalProps {
   open: boolean;
@@ -114,7 +115,7 @@ export default function PhoneVerificationModal({
                 id="otp-input"
                 value={code}
                 onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="123456"
+                placeholder={DEMO_OTP_CODE}
                 maxLength={6}
                 className="text-center text-xl tracking-[0.3em] font-mono h-12"
                 onKeyDown={e => e.key === "Enter" && verifyOtp()}

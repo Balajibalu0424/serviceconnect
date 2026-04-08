@@ -32,12 +32,29 @@ export const paymentStatusEnum = pgEnum("payment_status", ["PENDING", "COMPLETED
 export const spinPrizeEnum = pgEnum("spin_prize", ["CREDITS", "BOOST", "BADGE", "DISCOUNT", "NONE"]);
 export const ticketPriorityEnum = pgEnum("ticket_priority", ["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "WAITING", "RESOLVED", "CLOSED"]);
+export const onboardingRoleEnum = pgEnum("onboarding_role", ["CUSTOMER", "PROFESSIONAL"]);
+export const onboardingStepEnum = pgEnum("onboarding_step", [
+  "ROLE_SELECTION",
+  "JOB_INTAKE",
+  "JOB_REVIEW",
+  "PROFILE_INTAKE",
+  "PROFILE_REVIEW",
+  "PERSONAL_DETAILS",
+  "PERSONAL_REVIEW",
+  "PHONE_OTP",
+  "EMAIL_OTP",
+  "PASSWORD",
+  "COMPLETE",
+]);
+export const onboardingStatusEnum = pgEnum("onboarding_status", ["ACTIVE", "COMPLETED", "ABANDONED", "EXPIRED"]);
+export const verificationChannelEnum = pgEnum("verification_channel", ["EMAIL", "PHONE"]);
+export const verificationPurposeEnum = pgEnum("verification_purpose", ["ONBOARDING", "PHONE_UPDATE"]);
 
 // ─── Users & Auth ─────────────────────────────────────────────────────────────
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
-  phone: text("phone").notNull(),
+  phone: text("phone"),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("CUSTOMER"),
   status: userStatusEnum("status").notNull().default("ACTIVE"),
@@ -77,12 +94,55 @@ export const phoneVerificationTokens = pgTable("phone_verification_tokens", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => [index("phone_tokens_user_idx").on(t.userId)]);
 
+export const onboardingSessions = pgTable("onboarding_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  role: onboardingRoleEnum("role").notNull(),
+  currentStep: onboardingStepEnum("current_step").notNull().default("ROLE_SELECTION"),
+  status: onboardingStatusEnum("status").notNull().default("ACTIVE"),
+  payload: json("payload").$type<Record<string, unknown>>().notNull().default({}),
+  transcript: json("transcript").$type<Array<Record<string, unknown>>>().notNull().default([]),
+  verificationState: json("verification_state").$type<Record<string, unknown>>().notNull().default({}),
+  expiresAt: timestamp("expires_at").notNull(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("onboarding_status_idx").on(t.status),
+  index("onboarding_expires_idx").on(t.expiresAt),
+  index("onboarding_role_idx").on(t.role),
+]);
+
+export const verificationChallenges = pgTable("verification_challenges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").references(() => onboardingSessions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
+  channel: verificationChannelEnum("channel").notNull(),
+  purpose: verificationPurposeEnum("purpose").notNull().default("ONBOARDING"),
+  target: text("target").notNull(),
+  hashedCode: text("hashed_code").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  sentCount: integer("sent_count").notNull().default(1),
+  expiresAt: timestamp("expires_at").notNull(),
+  verifiedAt: timestamp("verified_at"),
+  invalidatedAt: timestamp("invalidated_at"),
+  lastSentAt: timestamp("last_sent_at").notNull().default(sql`now()`),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("verification_session_idx").on(t.sessionId),
+  index("verification_user_idx").on(t.userId),
+  index("verification_target_idx").on(t.target),
+  index("verification_channel_idx").on(t.channel),
+]);
+
 export const verificationLevelEnum = pgEnum("verification_level", ["NONE", "SELF_DECLARED", "DOCUMENT_VERIFIED"]);
 
 export const professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   businessName: text("business_name"),
+  credentials: text("credentials"),
   licenseNumber: text("license_number"),
   insuranceVerified: boolean("insurance_verified").notNull().default(false),
   yearsExperience: integer("years_experience"),
@@ -552,3 +612,7 @@ export type FeatureFlag = typeof featureFlags.$inferSelect;
 export type CallRequest = typeof callRequests.$inferSelect;
 export type PhoneVerificationToken = typeof phoneVerificationTokens.$inferSelect;
 export type InsertPhoneVerificationToken = typeof phoneVerificationTokens.$inferInsert;
+export type OnboardingSession = typeof onboardingSessions.$inferSelect;
+export type InsertOnboardingSession = typeof onboardingSessions.$inferInsert;
+export type VerificationChallenge = typeof verificationChallenges.$inferSelect;
+export type InsertVerificationChallenge = typeof verificationChallenges.$inferInsert;
