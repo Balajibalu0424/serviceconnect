@@ -42,12 +42,12 @@ export const personalDetailsSchema = z.object({
 });
 
 export const customerJobDraftSchema = z.object({
-  title: z.string().trim().min(1).default(""),
-  description: z.string().trim().min(1).default(""),
-  categoryId: z.string().trim().min(1).default(""),
+  title: z.string().trim().default(""),
+  description: z.string().trim().default(""),
+  categoryId: z.string().trim().default(""),
   categoryLabel: z.string().trim().default(""),
   urgency: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
-  locationText: z.string().trim().min(1).default(""),
+  locationText: z.string().trim().default(""),
   budgetMin: z.string().trim().nullable().default(null),
   budgetMax: z.string().trim().nullable().default(null),
   preferredDate: z.string().trim().nullable().default(null),
@@ -57,13 +57,13 @@ export const customerJobDraftSchema = z.object({
 });
 
 export const professionalProfileDraftSchema = z.object({
-  categoryIds: z.array(z.string().trim().min(1)).default([]),
+  categoryIds: z.array(z.string().trim()).default([]),
   categoryLabels: z.array(z.string().trim()).default([]),
-  location: z.string().trim().min(1).default(""),
-  serviceAreas: z.array(z.string().trim().min(1)).default([]),
+  location: z.string().trim().default(""),
+  serviceAreas: z.array(z.string().trim()).default([]),
   serviceRadius: z.number().int().min(1).max(500).nullable().default(25),
   yearsExperience: z.number().int().min(0).max(80).nullable().default(null),
-  bio: z.string().trim().min(1).default(""),
+  bio: z.string().trim().default(""),
   businessName: z.string().trim().nullable().default(null),
   credentials: z.string().trim().nullable().default(null),
 });
