@@ -70,8 +70,9 @@ function normalizePhone(phone: string): string {
   return phone.trim().replace(/\s+/g, " ");
 }
 
-function trimNullable(value?: string | null): string | null {
-  const next = value?.trim() ?? "";
+function trimNullable(value?: string | number | null): string | null {
+  if (value == null) return null;
+  const next = String(value).trim();
   return next.length > 0 ? next : null;
 }
 
@@ -227,11 +228,12 @@ function validateCustomerJobDraft(
 ): IntakeValidationResult<CustomerJobDraft> {
   const draft = customerJobDraftSchema.parse({
     ...input,
-    title: trimNullable(input?.title) ?? deriveTitle(input?.description ?? ""),
-    description: input?.description?.trim() ?? "",
-    locationText: input?.locationText?.trim() ?? "",
-    categoryId: input?.categoryId?.trim() ?? "",
-    categoryLabel: input?.categoryLabel?.trim() ?? "",
+    title: trimNullable(input?.title) ?? deriveTitle(String(input?.description ?? "")),
+    description: String(input?.description ?? "").trim(),
+    locationText: String(input?.locationText ?? "").trim(),
+    categoryId: String(input?.categoryId ?? "").trim(),
+    categoryLabel: String(input?.categoryLabel ?? "").trim(),
+    urgency: typeof input?.urgency === "string" ? input.urgency : "NORMAL",
     budgetMin: trimNullable(input?.budgetMin),
     budgetMax: trimNullable(input?.budgetMax),
     preferredDate: trimNullable(input?.preferredDate),
@@ -350,9 +352,13 @@ function validateProfessionalProfileDraft(
   const rawCategoryIds = uniqueResolved.map((c) => c.id);
   const categoryLabels = uniqueResolved.map((c) => c.name);
 
-  const location = input?.location?.trim() ?? "";
-  const bio = input?.bio?.trim() ?? "";
-  const serviceAreas = (input?.serviceAreas ?? []).map((area) => area.trim()).filter(Boolean);
+  const location = String(input?.location ?? "").trim();
+  const bio = String(input?.bio ?? "").trim();
+  const serviceAreas = (input?.serviceAreas ?? []).map((area) => String(area).trim()).filter(Boolean);
+
+  // Coerce serviceRadius and yearsExperience from AI (may arrive as strings)
+  const serviceRadius = input?.serviceRadius != null ? Number(input.serviceRadius) || 25 : 25;
+  const yearsExperience = input?.yearsExperience != null ? Number(input.yearsExperience) || null : null;
 
   const draft = professionalProfileDraftSchema.parse({
     ...input,
@@ -360,8 +366,8 @@ function validateProfessionalProfileDraft(
     categoryLabels,
     location,
     serviceAreas: serviceAreas.length > 0 ? serviceAreas : location ? [location] : [],
-    serviceRadius: input?.serviceRadius ?? 25,
-    yearsExperience: input?.yearsExperience ?? null,
+    serviceRadius,
+    yearsExperience,
     bio,
     businessName: trimNullable(input?.businessName),
     credentials: trimNullable(input?.credentials),
