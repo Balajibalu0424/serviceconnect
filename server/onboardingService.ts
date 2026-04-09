@@ -251,6 +251,19 @@ function validateCustomerJobDraft(
     }
   }
 
+  // Resolve categoryId: the AI may return a name, slug, or actual UUID
+  if (draft.categoryId) {
+    const resolved = resolveCategoryId(draft.categoryId, categories);
+    if (resolved) {
+      draft.categoryId = resolved.id;
+      draft.categoryLabel = resolved.name;
+    } else {
+      // The AI returned a value that doesn't match any category — clear it so fallback detection runs
+      draft.categoryId = "";
+      draft.categoryLabel = "";
+    }
+  }
+
   if (!draft.categoryId && (draft.title || draft.description)) {
     const detected = detectCategory(draft.title, draft.description, categories);
     if (detected.categorySlug) {
@@ -259,11 +272,6 @@ function validateCustomerJobDraft(
         draft.categoryId = match.id;
         draft.categoryLabel = match.name;
       }
-    }
-  } else if (draft.categoryId && !draft.categoryLabel) {
-    const match = categories.find((category) => category.id === draft.categoryId);
-    if (match) {
-      draft.categoryLabel = match.name;
     }
   }
 
@@ -308,14 +316,39 @@ function validateCustomerJobDraft(
   };
 }
 
+function resolveCategoryId(value: string, categories: CategoryOption[]): CategoryOption | undefined {
+  // Try exact ID match first
+  const byId = categories.find((c) => c.id === value);
+  if (byId) return byId;
+  // Try slug match (case-insensitive)
+  const bySlug = categories.find((c) => c.slug.toLowerCase() === value.toLowerCase());
+  if (bySlug) return bySlug;
+  // Try name match (case-insensitive)
+  const byName = categories.find((c) => c.name.toLowerCase() === value.toLowerCase());
+  if (byName) return byName;
+  // Try partial name match (the value contains the category name or vice versa)
+  const byPartial = categories.find(
+    (c) =>
+      c.name.toLowerCase().includes(value.toLowerCase()) ||
+      value.toLowerCase().includes(c.name.toLowerCase()),
+  );
+  if (byPartial) return byPartial;
+  return undefined;
+}
+
 function validateProfessionalProfileDraft(
   input: Partial<ProfessionalProfileDraft> | null | undefined,
   categories: CategoryOption[],
 ): IntakeValidationResult<ProfessionalProfileDraft> {
-  const rawCategoryIds = input?.categoryIds?.filter(Boolean) ?? [];
-  const categoryLabels = rawCategoryIds
-    .map((categoryId) => categories.find((category) => category.id === categoryId)?.name)
-    .filter((label): label is string => Boolean(label));
+  // Resolve category IDs: the AI may return names, slugs, or actual IDs
+  const rawInputIds = input?.categoryIds?.filter(Boolean) ?? [];
+  const resolvedCategories = rawInputIds
+    .map((val) => resolveCategoryId(val, categories))
+    .filter((c): c is CategoryOption => c !== undefined);
+  // Deduplicate by ID
+  const uniqueResolved = [...new Map(resolvedCategories.map((c) => [c.id, c])).values()];
+  const rawCategoryIds = uniqueResolved.map((c) => c.id);
+  const categoryLabels = uniqueResolved.map((c) => c.name);
 
   const location = input?.location?.trim() ?? "";
   const bio = input?.bio?.trim() ?? "";
@@ -477,7 +510,10 @@ export async function patchOnboardingSession(
     };
     const validation = validateCustomerJobDraft(merged, categories);
     session.payload.customerJob = validation.draft;
-    session.currentStep = validation.isReady ? "JOB_REVIEW" : "JOB_INTAKE";
+    // Only change step if we're still in the intake/review phase; don't regress from later steps
+    if (["JOB_INTAKE", "JOB_REVIEW"].includes(session.currentStep)) {
+      session.currentStep = validation.isReady ? "JOB_REVIEW" : "JOB_INTAKE";
+    }
   }
 
   if (parsedPatch.professionalProfile && session.role === "PROFESSIONAL") {
@@ -487,7 +523,10 @@ export async function patchOnboardingSession(
     };
     const validation = validateProfessionalProfileDraft(merged, categories);
     session.payload.professionalProfile = validation.draft;
-    session.currentStep = validation.isReady ? "PROFILE_REVIEW" : "PROFILE_INTAKE";
+    // Only change step if we're still in the intake/review phase; don't regress from later steps
+    if (["PROFILE_INTAKE", "PROFILE_REVIEW"].includes(session.currentStep)) {
+      session.currentStep = validation.isReady ? "PROFILE_REVIEW" : "PROFILE_INTAKE";
+    }
   }
 
   if (parsedPatch.personalDetails) {

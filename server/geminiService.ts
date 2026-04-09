@@ -523,50 +523,60 @@ You need to collect the following information conversationally:
 2. Location
 3. Urgency (Low, Normal, High, Urgent)
 4. Budget (optional, but good to ask)
-5. The most appropriate category ID from this list:
+5. The most appropriate category from this list (return the exact ID value):
 ${catList}
 ${!isLoggedIn ? `6. First Name\n7. Last Name\n8. Email address\n9. Phone Number (optional)\n(Since the user is not logged in, ask for their name and contact info so we can set up their account.)` : ""}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional. You do NOT have to ask about budget or phone number if they provide everything else, but you must ask for Name and Email if they are not logged in.
-If you have collected enough information to post the job, you MUST set "isComplete" to true and populate "extractedData".
+
+CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have enough info to post the job (at minimum: description, location, and category).
 
 Return ONLY valid JSON in this format:
 {
   "reply": "Your next conversational response to the user",
   "isComplete": boolean,
   "extractedData": {
-    "title": "Short title",
-    "description": "Detailed description",
-    "categoryId": "number or uuid",
-    "locationText": "string",
-    "urgency": "LOW|NORMAL|HIGH|URGENT",
+    "title": "Short title derived from description (or empty string if unknown)",
+    "description": "Detailed description (or empty string if unknown)",
+    "categoryId": "the exact ID from the list above (or empty string if unknown)",
+    "categoryLabel": "the category name (or empty string if unknown)",
+    "locationText": "location string (or empty string if unknown)",
+    "urgency": "LOW|NORMAL|HIGH|URGENT (default NORMAL if unknown)",
     "budgetMin": null,
-    "budgetMax": null${!isLoggedIn ? `,\n    "firstName": "string",\n    "lastName": "string",\n    "email": "string",\n    "phone": "string"` : ""}
+    "budgetMax": null${!isLoggedIn ? `,\n    "firstName": "string or empty",\n    "lastName": "string or empty",\n    "email": "string or empty",\n    "phone": "string or empty"` : ""}
   }
 }`;
 
   const proPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a PROFESSIONAL sign up to the platform.
 You need to collect the following information conversationally:
-1. What services they offer (to map to category IDs)
-2. Their location and service radius
+1. What services they offer (map to category IDs from the list below — return the exact ID values)
+2. Their base location and service areas they cover
 3. Years of experience
-4. A short bio/description of their business
-Here are the available categories:
+4. A short bio/description of their business (at least 30 words — describe what they do, their experience, and what makes them good)
+Here are the available service categories (use the exact ID values in categoryIds):
 ${catList}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
-If you have collected enough information (services, location, experience, bio), you MUST set "isComplete" to true and populate "extractedData".
+When a professional describes their trade (e.g. "I'm a plumber"), immediately match it to the best category ID(s) from the list above.
+
+CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have at minimum: services/categories, location, and a bio of at least 30 words.
+
+If the professional gives you enough info in one message to build a complete profile, set "isComplete" to true immediately — do not ask unnecessary follow-up questions.
 
 Return ONLY valid JSON in this format:
 {
   "reply": "Your next conversational response to the user",
   "isComplete": boolean,
   "extractedData": {
-    "categoryIds": ["array of category IDs"],
-    "bio": "Extracted bio",
-    "location": "string",
-    "yearsExperience": number,
-    "serviceRadius": 25
+    "categoryIds": ["exact category IDs from the list above, or empty array if unknown"],
+    "categoryLabels": ["human-readable category names, or empty array if unknown"],
+    "bio": "A professional bio built from what they've told you (at least 30 words when complete, or whatever you have so far)",
+    "location": "their base location (or empty string if unknown)",
+    "serviceAreas": ["areas they cover, or empty array if unknown"],
+    "yearsExperience": null,
+    "serviceRadius": 25,
+    "businessName": null,
+    "credentials": null
   }
 }`;
 
@@ -579,10 +589,23 @@ Return ONLY valid JSON in this format:
     return await askJSON<OnboardingChatResult>(finalPrompt);
   } catch (e) {
     console.error("Onboarding chat error", e);
+    // Even when AI fails, try to build partial extractedData from the last user message
+    const lastUserMsg = messages.filter(m => m.role === "user").pop()?.content || "";
+    const fallbackData: Record<string, unknown> = {};
+    if (mode === "CUSTOMER") {
+      if (lastUserMsg.length > 10) {
+        fallbackData.description = lastUserMsg;
+        fallbackData.title = lastUserMsg.split(/[.!?]/)[0]?.trim().slice(0, 72) || "";
+      }
+    } else {
+      if (lastUserMsg.length > 10) {
+        fallbackData.bio = lastUserMsg;
+      }
+    }
     return {
-      reply: "I'm sorry, I'm having trouble processing that right now. Could you try rephrasing?",
+      reply: "I had a little trouble processing that, but I've captured what you said. Could you tell me a bit more to fill in the gaps?",
       isComplete: false,
-      extractedData: null
+      extractedData: Object.keys(fallbackData).length > 0 ? fallbackData : null,
     };
   }
 }
