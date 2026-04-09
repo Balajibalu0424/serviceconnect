@@ -257,11 +257,13 @@ describe("RoleAwareOnboarding", () => {
 
     renderOnboarding();
 
-    expect(await screen.findByPlaceholderText("Tell the assistant about the job...")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Tell the assistant about the job..."), {
+    expect(await screen.findByPlaceholderText("Describe the job... (Enter to send)")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Describe the job... (Enter to send)"), {
       target: { value: "My kitchen tap is leaking badly in Dublin 8." },
     });
-    fireEvent.click(screen.getByText("Send"));
+    // Send button uses an icon (Send from lucide-react) with no text
+    const sendBtn = screen.getByRole("button", { name: "" });
+    fireEvent.click(sendBtn);
 
     expect(await screen.findByDisplayValue("Fix leaking kitchen tap")).toBeInTheDocument();
     expect(screen.getByText("Continue to personal details")).toBeInTheDocument();
@@ -282,7 +284,7 @@ describe("RoleAwareOnboarding", () => {
     renderOnboarding();
 
     expect((await screen.findAllByText("Electrical")).length).toBeGreaterThan(0);
-    expect(screen.getByText("Live onboarding snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Confirm everything before verification")).toBeInTheDocument();
   });
 
   it("creates the account from the password step and redirects to the correct dashboard", async () => {
@@ -320,7 +322,10 @@ describe("RoleAwareOnboarding", () => {
     renderOnboarding();
 
     expect(await screen.findByText("Set your password")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("At least 8 characters, with a letter and a number"), {
+    fireEvent.change(screen.getByPlaceholderText("At least 8 characters…"), {
+      target: { value: "Strongpass1" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Repeat your password"), {
       target: { value: "Strongpass1" },
     });
     fireEvent.click(screen.getByText("Create account and continue"));

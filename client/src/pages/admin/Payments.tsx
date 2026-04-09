@@ -1,28 +1,62 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, CreditCard, TrendingUp, AlertCircle } from "lucide-react";
-import { format } from "date-fns";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  CreditCard, Download, TrendingUp, AlertCircle, Clock, CheckCircle,
+  Search, ChevronLeft, ChevronRight, Inbox, DollarSign, XCircle, Wallet,
+} from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
+import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 
-const STATUS_VARIANT: Record<string, string> = {
-  COMPLETED: "default", PENDING: "secondary", FAILED: "destructive", REFUNDED: "outline"
+interface Payment {
+  id: number;
+  userId: number;
+  amount: string;
+  currency: string;
+  status: "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+  paymentMethod: string;
+  description: string;
+  stripePaymentId: string;
+  createdAt: string;
+  userName: string;
+  userEmail: string;
+}
+
+const PAGE_SIZE = 25;
+
+const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: React.ElementType }> = {
+  COMPLETED: { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-100 dark:bg-emerald-500/20", icon: CheckCircle },
+  PENDING:   { color: "text-amber-700 dark:text-amber-400",   bg: "bg-amber-100 dark:bg-amber-500/20",   icon: Clock },
+  FAILED:    { color: "text-red-700 dark:text-red-400",       bg: "bg-red-100 dark:bg-red-500/20",       icon: XCircle },
+  REFUNDED:  { color: "text-blue-700 dark:text-blue-400",     bg: "bg-blue-100 dark:bg-blue-500/20",     icon: DollarSign },
 };
 
-function exportCSV(payments: any[]) {
-  const headers = ["ID", "User", "Email", "Amount (€)", "Method", "Description", "Status", "Date"];
-  const rows = payments.map(p => [
+const METHOD_COLORS: Record<string, string> = {
+  stripe:  "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300",
+  credits: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
+  manual:  "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300",
+};
+
+function exportCSV(payments: Payment[]) {
+  const headers = ["ID", "User", "Email", "Amount", "Currency", "Method", "Description", "Status", "Stripe ID", "Date"];
+  const rows = payments.map((p) => [
     p.id, p.userName || "", p.userEmail || "",
-    parseFloat(p.amount).toFixed(2),
-    p.paymentMethod, p.description || "",
-    p.status, format(new Date(p.createdAt), "yyyy-MM-dd HH:mm"),
+    parseFloat(p.amount).toFixed(2), p.currency || "EUR",
+    p.paymentMethod, p.description || "", p.status,
+    p.stripePaymentId || "",
+    format(new Date(p.createdAt), "yyyy-MM-dd HH:mm"),
   ]);
-  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const csv = [headers, ...rows]
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -32,17 +66,23 @@ function exportCSV(payments: any[]) {
   URL.revokeObjectURL(url);
 }
 
+function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("rounded-xl bg-muted/60 animate-pulse", className)} />;
+}
+
 export default function AdminPayments() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (typeFilter !== "all") params.set("type", typeFilter);
 
-  const { data: payments = [], isLoading } = useQuery<any[]>({
+  const { data: payments = [], isLoading } = useQuery<Payment[]>({
     queryKey: [`/api/admin/payments?${params}`],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/admin/payments?${params}`);
@@ -51,30 +91,87 @@ export default function AdminPayments() {
     },
   });
 
-  const completed = (payments as any[]).filter(p => p.status === "COMPLETED");
-  const total = completed.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-  const failed = (payments as any[]).filter(p => p.status === "FAILED").length;
-  const pending = (payments as any[]).filter(p => p.status === "PENDING").length;
+  // Client-side search filter
+  const filtered = useMemo(() => {
+    if (!search.trim()) return payments;
+    const q = search.toLowerCase();
+    return payments.filter(
+      (p) =>
+        (p.userName || "").toLowerCase().includes(q) ||
+        (p.userEmail || "").toLowerCase().includes(q),
+    );
+  }, [payments, search]);
 
-  // Breakdown by description type
-  const byType: Record<string, number> = {};
-  completed.forEach(p => {
-    const key = p.paymentMethod || "other";
-    byType[key] = (byType[key] || 0) + parseFloat(p.amount || 0);
-  });
+  // Reset page when filters change
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  // KPI computations
+  const completed = useMemo(() => payments.filter((p) => p.status === "COMPLETED"), [payments]);
+  const totalRevenue = useMemo(() => completed.reduce((s, p) => s + parseFloat(p.amount || "0"), 0), [completed]);
+  const pendingCount = useMemo(() => payments.filter((p) => p.status === "PENDING").length, [payments]);
+  const failedCount = useMemo(() => payments.filter((p) => p.status === "FAILED").length, [payments]);
+  const avgTransaction = payments.length > 0
+    ? payments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0) / payments.length
+    : 0;
+
+  // Revenue breakdown by method
+  const byMethod = useMemo(() => {
+    const map: Record<string, number> = {};
+    completed.forEach((p) => {
+      const key = p.paymentMethod || "other";
+      map[key] = (map[key] || 0) + parseFloat(p.amount || "0");
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }, [completed]);
+  const maxMethodRevenue = byMethod.length > 0 ? byMethod[0][1] : 1;
+
+  const glass = "bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm";
+  const hasFilters = from || to || typeFilter !== "all" || search;
+
+  function clearFilters() {
+    setFrom("");
+    setTo("");
+    setTypeFilter("all");
+    setSearch("");
+    setPage(1);
+  }
+
+  const kpis = [
+    { label: "Total Revenue", value: `\u20AC${totalRevenue.toFixed(2)}`, icon: DollarSign, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+    { label: "Completed", value: completed.length, icon: CheckCircle, color: "text-green-500", bg: "bg-green-500/10" },
+    { label: "Pending", value: pendingCount, icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+    { label: "Failed", value: failedCount, icon: AlertCircle, color: "text-red-500", bg: "bg-red-500/10" },
+    { label: "Avg Transaction", value: `\u20AC${avgTransaction.toFixed(2)}`, icon: TrendingUp, color: "text-violet-500", bg: "bg-violet-500/10" },
+  ];
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-5">
+      <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-xl font-bold">Payments</h1>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Wallet className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                Payment Operations
+              </h1>
+              <div className="flex items-center gap-2 mt-0.5">
+                <Badge variant="secondary" className="text-xs font-medium">
+                  {filtered.length} payment{filtered.length !== 1 ? "s" : ""}
+                </Badge>
+              </div>
+            </div>
+          </div>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => exportCSV(payments as any[])}
-            disabled={(payments as any[]).length === 0}
-            data-testid="button-export-csv"
+            className="rounded-xl"
+            onClick={() => exportCSV(filtered)}
+            disabled={filtered.length === 0}
           >
             <Download className="w-4 h-4 mr-1.5" />
             Export CSV
@@ -82,132 +179,216 @@ export default function AdminPayments() {
         </div>
 
         {/* KPI Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-2xl font-bold text-emerald-600">€{total.toFixed(2)}</p>
-                  <p className="text-xs text-muted-foreground">Total revenue</p>
-                </div>
-                <CreditCard className="w-6 h-6 text-emerald-500 opacity-60" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div>
-                <p className="text-2xl font-bold">{completed.length}</p>
-                <p className="text-xs text-muted-foreground">Completed</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div>
-                <p className="text-2xl font-bold text-yellow-600">{pending}</p>
-                <p className="text-xs text-muted-foreground">Pending</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-2xl font-bold text-destructive">{failed}</p>
-                  <p className="text-xs text-muted-foreground">Failed</p>
-                </div>
-                {failed > 0 && <AlertCircle className="w-5 h-5 text-destructive opacity-60" />}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        {isLoading ? (
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 rounded-2xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            {kpis.map((k) => (
+              <Card key={k.label} className={cn(glass, "hover:shadow-md transition-all")}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{k.label}</p>
+                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", k.bg)}>
+                      <k.icon className={cn("w-4 h-4", k.color)} />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-bold">{k.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
 
-        {/* Breakdown by type */}
-        {Object.keys(byType).length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+        {/* Revenue breakdown by payment method */}
+        {byMethod.length > 0 && (
+          <Card className={cn(glass, "overflow-hidden")}>
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <CardTitle className="text-sm font-heading font-semibold text-foreground/80 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" /> Revenue by Payment Method
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex gap-4 flex-wrap">
-                {Object.entries(byType).map(([method, amount]) => (
-                  <div key={method} className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">{method}</Badge>
-                    <span className="text-sm font-semibold">€{amount.toFixed(2)}</span>
+            <CardContent className="pt-5 space-y-3">
+              {byMethod.map(([method, amount]) => {
+                const pct = totalRevenue > 0 ? (amount / totalRevenue) * 100 : 0;
+                return (
+                  <div key={method} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium capitalize">{method}</span>
+                      <span className="text-muted-foreground">{"\u20AC"}{amount.toFixed(2)} ({pct.toFixed(1)}%)</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-muted/40 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-primary/80 to-primary transition-all duration-500"
+                        style={{ width: `${(amount / maxMethodRevenue) * 100}%` }}
+                      />
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </CardContent>
           </Card>
         )}
 
         {/* Filters */}
-        <div className="flex gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground whitespace-nowrap">From</label>
-            <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36 text-sm" data-testid="input-from" />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground whitespace-nowrap">To</label>
-            <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-36 text-sm" data-testid="input-to" />
-          </div>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-36" data-testid="select-type">
-              <SelectValue placeholder="Method" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All methods</SelectItem>
-              <SelectItem value="stripe">Stripe</SelectItem>
-              <SelectItem value="credits">Credits</SelectItem>
-              <SelectItem value="manual">Manual</SelectItem>
-            </SelectContent>
-          </Select>
-          {(from || to || typeFilter !== "all") && (
-            <Button variant="ghost" size="sm" onClick={() => { setFrom(""); setTo(""); setTypeFilter("all"); }}>
-              Clear
-            </Button>
-          )}
-        </div>
+        <Card className={cn(glass, "overflow-hidden")}>
+          <CardContent className="p-4">
+            <div className="flex gap-3 flex-wrap items-end">
+              <div className="flex-1 min-w-[200px] max-w-xs relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Search user name or email..."
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  className="pl-9 rounded-xl text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground whitespace-nowrap">From</label>
+                <Input
+                  type="date"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                  className="w-36 text-sm rounded-xl"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground whitespace-nowrap">To</label>
+                <Input
+                  type="date"
+                  value={to}
+                  onChange={(e) => setTo(e.target.value)}
+                  className="w-36 text-sm rounded-xl"
+                />
+              </div>
+              <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(1); }}>
+                <SelectTrigger className="w-40 rounded-xl">
+                  <SelectValue placeholder="Method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All methods</SelectItem>
+                  <SelectItem value="stripe">Stripe</SelectItem>
+                  <SelectItem value="credits">Credits</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+              {hasFilters && (
+                <Button variant="ghost" size="sm" className="rounded-xl" onClick={clearFilters}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Payment list */}
         <div className="space-y-2">
           {isLoading ? (
-            [1, 2, 3, 4, 5].map(i => <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />)
-          ) : (payments as any[]).length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <CreditCard className="w-8 h-8 mx-auto mb-2 opacity-20" />
-              <p>No payments found</p>
+            Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-[72px] rounded-2xl" />
+            ))
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <Inbox className="w-10 h-10 mb-3 opacity-20" />
+              <p className="font-medium">No payments found</p>
+              <p className="text-sm mt-1">Try adjusting your filters</p>
             </div>
           ) : (
-            (payments as any[]).map((p: any) => (
-              <Card key={p.id} data-testid={`payment-${p.id}`}>
-                <CardContent className="pt-3 pb-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-sm">€{parseFloat(p.amount).toFixed(2)}</p>
-                        <Badge variant={STATUS_VARIANT[p.status] as any} className="text-xs">{p.status}</Badge>
-                        {p.paymentMethod && (
-                          <Badge variant="outline" className="text-xs">{p.paymentMethod}</Badge>
-                        )}
+            paginated.map((p) => {
+              const cfg = STATUS_CONFIG[p.status] || STATUS_CONFIG.PENDING;
+              const StatusIcon = cfg.icon;
+              return (
+                <Card key={p.id} className={cn(glass, "hover:shadow-md transition-all")}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-4">
+                      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0", cfg.bg)}>
+                        <StatusIcon className={cn("w-4 h-4", cfg.color)} />
                       </div>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {p.userName || p.userEmail || p.userId}
-                        {p.description ? ` · ${p.description}` : ""}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-bold text-sm">{"\u20AC"}{parseFloat(p.amount).toFixed(2)}</p>
+                          <Badge className={cn("text-xs border-0 font-medium", cfg.bg, cfg.color)}>
+                            {p.status}
+                          </Badge>
+                          {p.paymentMethod && (
+                            <Badge className={cn("text-xs border-0 font-medium", METHOD_COLORS[p.paymentMethod] || "bg-muted text-muted-foreground")}>
+                              {p.paymentMethod}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">
+                          {p.userName || p.userEmail || `User #${p.userId}`}
+                          {p.description ? ` \u00B7 ${p.description}` : ""}
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground flex-shrink-0 text-right hidden sm:block">
+                        {format(new Date(p.createdAt), "d MMM yyyy, HH:mm")}
+                        <br />
+                        <span className="text-[11px] opacity-70">
+                          {formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })}
+                        </span>
                       </p>
                     </div>
-                    <p className="text-xs text-muted-foreground flex-shrink-0">
-                      {format(new Date(p.createdAt), "d MMM yyyy, HH:mm")}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </div>
+
+        {/* Pagination */}
+        {filtered.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-xs text-muted-foreground">
+              Showing {(safePage - 1) * PAGE_SIZE + 1}--{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 rounded-xl"
+                disabled={safePage <= 1}
+                onClick={() => setPage(safePage - 1)}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePage) <= 1)
+                .reduce<(number | string)[]>((acc, n, idx, arr) => {
+                  if (idx > 0 && n - (arr[idx - 1] as number) > 1) acc.push("...");
+                  acc.push(n);
+                  return acc;
+                }, [])
+                .map((item, idx) =>
+                  typeof item === "string" ? (
+                    <span key={`dots-${idx}`} className="px-1 text-xs text-muted-foreground">...</span>
+                  ) : (
+                    <Button
+                      key={item}
+                      variant={item === safePage ? "default" : "outline"}
+                      size="icon"
+                      className="h-8 w-8 rounded-xl text-xs"
+                      onClick={() => setPage(item)}
+                    >
+                      {item}
+                    </Button>
+                  ),
+                )}
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 rounded-xl"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage(safePage + 1)}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

@@ -2548,11 +2548,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/admin/jobs", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    const { status } = req.query as any;
+    const { status, search } = req.query as any;
     const { limit, offset } = safePagination(req.query as any);
     let conditions: any[] = [];
     if (status) conditions.push(eq(jobs.status, status));
-    const result = await db.select().from(jobs)
+    if (search) conditions.push(or(ilike(jobs.title, `%${search}%`), ilike(jobs.locationText, `%${search}%`))!);
+    const result = await db.select({
+      id: jobs.id, title: jobs.title, description: jobs.description,
+      customerId: jobs.customerId, categoryId: jobs.categoryId,
+      budgetMin: jobs.budgetMin, budgetMax: jobs.budgetMax,
+      locationText: jobs.locationText, urgency: jobs.urgency, status: jobs.status,
+      creditCost: jobs.creditCost, isBoosted: jobs.isBoosted, boostCount: jobs.boostCount,
+      aiQualityScore: jobs.aiQualityScore, aiIsFakeFlag: jobs.aiIsFakeFlag,
+      aiIsUrgent: jobs.aiIsUrgent, createdAt: jobs.createdAt, updatedAt: jobs.updatedAt,
+      customerName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${jobs.customerId})`,
+    }).from(jobs)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(jobs.createdAt)).limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(jobs).where(conditions.length > 0 ? and(...conditions) : undefined);
@@ -3060,22 +3070,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── Admin: correct customer/user name ───────────────────────────────────
   app.patch("/api/admin/users/:id/name", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
     try {
-      const { firstName, lastName } = req.body;
+      const { firstName, lastName, reason } = req.body;
       if (!firstName && !lastName) return res.status(400).json({ error: "Provide firstName or lastName to update" });
+
+      // Fetch current user BEFORE update to capture previous values for audit
+      const [existing] = await db.select().from(users).where(eq(users.id, req.params.id as string));
+      if (!existing) return res.status(404).json({ error: "User not found" });
 
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
       if (firstName) updateData.firstName = firstName;
       if (lastName) updateData.lastName = lastName;
 
       const [updated] = await db.update(users).set(updateData).where(eq(users.id, req.params.id as string)).returning();
-      if (!updated) return res.status(404).json({ error: "User not found" });
 
       await db.insert(adminAuditLogs).values({
         adminId: req.user!.userId,
         action: "UPDATE_USER_NAME",
         resourceType: "USER",
         resourceId: req.params.id as string,
-        changes: { firstName, lastName },
+        changes: {
+          previous: { firstName: existing.firstName, lastName: existing.lastName },
+          new: { firstName: updated.firstName, lastName: updated.lastName },
+          reason: reason || undefined,
+        },
         ipAddress: req.ip,
       });
 
@@ -3190,6 +3207,427 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         totalRevenue: totalRevenue.total || "0"
       });
     } catch (err: any) { return res.status(500).json({ error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: QUOTES MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/quotes", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, search } = req.query as any;
+      const { limit, offset } = safePagination(req.query as any);
+      let conditions: any[] = [];
+      if (status) conditions.push(eq(quotes.status, status));
+
+      const result = await db.select({
+        id: quotes.id, jobId: quotes.jobId, professionalId: quotes.professionalId,
+        customerId: quotes.customerId, amount: quotes.amount, message: quotes.message,
+        estimatedDuration: quotes.estimatedDuration, status: quotes.status,
+        validUntil: quotes.validUntil, createdAt: quotes.createdAt, updatedAt: quotes.updatedAt,
+        jobTitle: sql<string>`(select title from jobs where id = ${quotes.jobId})`,
+        proName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${quotes.professionalId})`,
+        customerName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${quotes.customerId})`,
+      }).from(quotes)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(quotes.createdAt)).limit(limit).offset(offset);
+
+      const [{ c }] = await db.select({ c: count() }).from(quotes)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      // Funnel stats
+      const [totalQuotes] = await db.select({ c: count() }).from(quotes);
+      const [pendingQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "PENDING"));
+      const [acceptedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "ACCEPTED"));
+      const [rejectedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "REJECTED"));
+      const [avgAmount] = await db.select({ a: avg(quotes.amount) }).from(quotes);
+
+      return res.json({
+        quotes: result, total: c,
+        funnel: {
+          total: totalQuotes.c, pending: pendingQuotes.c,
+          accepted: acceptedQuotes.c, rejected: rejectedQuotes.c,
+          avgAmount: avgAmount.a || "0",
+          conversionRate: totalQuotes.c > 0 ? ((acceptedQuotes.c / totalQuotes.c) * 100).toFixed(1) : "0"
+        }
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/quotes/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { status } = req.body;
+      const quoteId = routeParam(req.params.id);
+      const [updated] = await db.update(quotes).set({ status, updatedAt: new Date() })
+        .where(eq(quotes.id, quoteId)).returning();
+      if (!updated) return res.status(404).json({ error: "Quote not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId, action: "UPDATE_QUOTE_STATUS", resourceType: "QUOTE",
+        resourceId: quoteId, changes: { status }, ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: BOOKINGS MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/bookings", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, search } = req.query as any;
+      const { limit, offset } = safePagination(req.query as any);
+      let conditions: any[] = [];
+      if (status) conditions.push(eq(bookings.status, status));
+
+      const result = await db.select({
+        id: bookings.id, quoteId: bookings.quoteId, jobId: bookings.jobId,
+        customerId: bookings.customerId, professionalId: bookings.professionalId,
+        serviceDate: bookings.serviceDate, serviceTime: bookings.serviceTime,
+        durationHours: bookings.durationHours, totalAmount: bookings.totalAmount,
+        status: bookings.status, cancellationReason: bookings.cancellationReason,
+        completedAt: bookings.completedAt, createdAt: bookings.createdAt, updatedAt: bookings.updatedAt,
+        jobTitle: sql<string>`(select title from jobs where id = ${bookings.jobId})`,
+        proName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${bookings.professionalId})`,
+        customerName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${bookings.customerId})`,
+      }).from(bookings)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(bookings.createdAt)).limit(limit).offset(offset);
+
+      const [{ c }] = await db.select({ c: count() }).from(bookings)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      // Funnel stats
+      const [totalBookings] = await db.select({ c: count() }).from(bookings);
+      const [confirmed] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "CONFIRMED"));
+      const [inProgress] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "IN_PROGRESS"));
+      const [completed] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "COMPLETED"));
+      const [cancelled] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "CANCELLED"));
+      const [disputed] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "DISPUTED"));
+      const [totalValue] = await db.select({ s: sum(bookings.totalAmount) }).from(bookings).where(eq(bookings.status, "COMPLETED"));
+
+      return res.json({
+        bookings: result, total: c,
+        funnel: {
+          total: totalBookings.c, confirmed: confirmed.c, inProgress: inProgress.c,
+          completed: completed.c, cancelled: cancelled.c, disputed: disputed.c,
+          completionRate: totalBookings.c > 0 ? ((completed.c / totalBookings.c) * 100).toFixed(1) : "0",
+          totalCompletedValue: totalValue.s || "0"
+        }
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/bookings/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, cancellationReason } = req.body;
+      const bookingId = routeParam(req.params.id);
+      const updateData: any = { status, updatedAt: new Date() };
+      if (cancellationReason) updateData.cancellationReason = cancellationReason;
+      if (status === "COMPLETED") updateData.completedAt = new Date();
+      const [updated] = await db.update(bookings).set(updateData).where(eq(bookings.id, bookingId)).returning();
+      if (!updated) return res.status(404).json({ error: "Booking not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId, action: "UPDATE_BOOKING_STATUS", resourceType: "BOOKING",
+        resourceId: bookingId, changes: { status, cancellationReason }, ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: REVIEWS MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/reviews", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { visible } = req.query as any;
+      const { limit, offset } = safePagination(req.query as any);
+      let conditions: any[] = [];
+      if (visible === "true") conditions.push(eq(reviews.isVisible, true));
+      if (visible === "false") conditions.push(eq(reviews.isVisible, false));
+
+      const result = await db.select({
+        id: reviews.id, bookingId: reviews.bookingId, reviewerId: reviews.reviewerId,
+        revieweeId: reviews.revieweeId, rating: reviews.rating, title: reviews.title,
+        comment: reviews.comment, response: reviews.response, proReply: reviews.proReply,
+        isVisible: reviews.isVisible, createdAt: reviews.createdAt,
+        reviewerName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${reviews.reviewerId})`,
+        revieweeName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${reviews.revieweeId})`,
+      }).from(reviews)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(reviews.createdAt)).limit(limit).offset(offset);
+
+      const [{ c }] = await db.select({ c: count() }).from(reviews)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      const [avgRating] = await db.select({ a: avg(reviews.rating) }).from(reviews).where(eq(reviews.isVisible, true));
+      const [totalReviews] = await db.select({ c: count() }).from(reviews);
+
+      // Rating distribution
+      const distribution = await db.select({ rating: reviews.rating, c: count() })
+        .from(reviews).where(eq(reviews.isVisible, true)).groupBy(reviews.rating);
+
+      return res.json({
+        reviews: result, total: c,
+        stats: {
+          avgRating: avgRating.a ? parseFloat(String(avgRating.a)).toFixed(1) : "0",
+          totalReviews: totalReviews.c,
+          distribution: distribution.reduce((acc: any, d: any) => { acc[d.rating] = d.c; return acc; }, {})
+        }
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/reviews/:id/visibility", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { isVisible, reason } = req.body;
+      const reviewId = routeParam(req.params.id);
+      const [updated] = await db.update(reviews).set({ isVisible })
+        .where(eq(reviews.id, reviewId)).returning();
+      if (!updated) return res.status(404).json({ error: "Review not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId, action: isVisible ? "SHOW_REVIEW" : "HIDE_REVIEW",
+        resourceType: "REVIEW", resourceId: reviewId, changes: { isVisible, reason }, ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: USER DETAIL (activity, jobs, quotes, bookings, reviews)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/users/:id/detail", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = routeParam(req.params.id);
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Professional profile if applicable
+      let profile = null;
+      if (user.role === "PROFESSIONAL") {
+        const [p] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, userId));
+        profile = p || null;
+      }
+
+      // Jobs (as customer)
+      const userJobs = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, createdAt: jobs.createdAt })
+        .from(jobs).where(eq(jobs.customerId, userId)).orderBy(desc(jobs.createdAt)).limit(20);
+
+      // Quotes (as pro or customer)
+      const userQuotes = await db.select({
+        id: quotes.id, jobId: quotes.jobId, amount: quotes.amount, status: quotes.status, createdAt: quotes.createdAt,
+        jobTitle: sql<string>`(select title from jobs where id = ${quotes.jobId})`,
+      }).from(quotes)
+        .where(or(eq(quotes.professionalId, userId), eq(quotes.customerId, userId))!)
+        .orderBy(desc(quotes.createdAt)).limit(20);
+
+      // Bookings
+      const userBookings = await db.select({
+        id: bookings.id, jobId: bookings.jobId, totalAmount: bookings.totalAmount, status: bookings.status,
+        serviceDate: bookings.serviceDate, createdAt: bookings.createdAt,
+        jobTitle: sql<string>`(select title from jobs where id = ${bookings.jobId})`,
+      }).from(bookings)
+        .where(or(eq(bookings.professionalId, userId), eq(bookings.customerId, userId))!)
+        .orderBy(desc(bookings.createdAt)).limit(20);
+
+      // Reviews (given and received)
+      const reviewsGiven = await db.select({
+        id: reviews.id, rating: reviews.rating, comment: reviews.comment, createdAt: reviews.createdAt,
+        revieweeName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${reviews.revieweeId})`,
+      }).from(reviews).where(eq(reviews.reviewerId, userId)).orderBy(desc(reviews.createdAt)).limit(10);
+
+      const reviewsReceived = await db.select({
+        id: reviews.id, rating: reviews.rating, comment: reviews.comment, createdAt: reviews.createdAt,
+        reviewerName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${reviews.reviewerId})`,
+      }).from(reviews).where(eq(reviews.revieweeId, userId)).orderBy(desc(reviews.createdAt)).limit(10);
+
+      // Credit transactions
+      const creditTx = await db.select().from(creditTransactions)
+        .where(eq(creditTransactions.userId, userId))
+        .orderBy(desc(creditTransactions.createdAt)).limit(20);
+
+      // Audit trail for this user
+      const auditTrail = await db.select().from(adminAuditLogs)
+        .where(eq(adminAuditLogs.resourceId, userId))
+        .orderBy(desc(adminAuditLogs.createdAt)).limit(20);
+
+      return res.json({
+        user: { ...user, passwordHash: undefined },
+        profile,
+        jobs: userJobs,
+        quotes: userQuotes,
+        bookings: userBookings,
+        reviewsGiven,
+        reviewsReceived,
+        creditTransactions: creditTx,
+        auditTrail,
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: JOB DETAIL (unlocks, quotes, bookings, timeline)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/jobs/:id/detail", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const jobId = routeParam(req.params.id);
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+
+      const [customer] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email })
+        .from(users).where(eq(users.id, job.customerId));
+
+      const [category] = await db.select({ name: serviceCategories.name, slug: serviceCategories.slug })
+        .from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
+
+      const unlocks = await db.select({
+        id: jobUnlocks.id, professionalId: jobUnlocks.professionalId, tier: jobUnlocks.tier,
+        creditsSpent: jobUnlocks.creditsSpent, unlockedAt: jobUnlocks.unlockedAt,
+        proName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${jobUnlocks.professionalId})`,
+      }).from(jobUnlocks).where(eq(jobUnlocks.jobId, jobId)).orderBy(desc(jobUnlocks.unlockedAt));
+
+      const jobQuotes = await db.select({
+        id: quotes.id, professionalId: quotes.professionalId, amount: quotes.amount,
+        status: quotes.status, createdAt: quotes.createdAt,
+        proName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${quotes.professionalId})`,
+      }).from(quotes).where(eq(quotes.jobId, jobId)).orderBy(desc(quotes.createdAt));
+
+      const jobBookings = await db.select({
+        id: bookings.id, professionalId: bookings.professionalId, totalAmount: bookings.totalAmount,
+        status: bookings.status, serviceDate: bookings.serviceDate, completedAt: bookings.completedAt,
+        proName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${bookings.professionalId})`,
+      }).from(bookings).where(eq(bookings.jobId, jobId)).orderBy(desc(bookings.createdAt));
+
+      const boosts = await db.select().from(jobBoosts).where(eq(jobBoosts.jobId, jobId));
+      const aftercare = await db.select().from(jobAftercares).where(eq(jobAftercares.jobId, jobId));
+
+      return res.json({
+        job, customer, category,
+        unlocks, quotes: jobQuotes, bookings: jobBookings,
+        boosts, aftercare,
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: CATEGORIES MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/categories", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const cats = await db.select().from(serviceCategories).orderBy(asc(serviceCategories.sortOrder));
+      // Count jobs per category
+      const withCounts = await Promise.all(cats.map(async (cat) => {
+        const [{ c }] = await db.select({ c: count() }).from(jobs).where(eq(jobs.categoryId, cat.id));
+        return { ...cat, jobCount: c };
+      }));
+      return res.json(withCounts);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/categories/:id", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { name, description, isActive, sortOrder, baseCreditCost, icon } = req.body;
+      const catId = routeParam(req.params.id);
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (isActive !== undefined) updateData.isActive = isActive;
+      if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+      if (baseCreditCost !== undefined) updateData.baseCreditCost = baseCreditCost;
+      if (icon !== undefined) updateData.icon = icon;
+      const [updated] = await db.update(serviceCategories).set(updateData)
+        .where(eq(serviceCategories.id, catId)).returning();
+      if (!updated) return res.status(404).json({ error: "Category not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId, action: "UPDATE_CATEGORY", resourceType: "CATEGORY",
+        resourceId: catId, changes: updateData, ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: ENHANCED DASHBOARD
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/dashboard/enhanced", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const now = new Date();
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      // Core counts
+      const [totalUsers] = await db.select({ c: count() }).from(users).where(isNull(users.deletedAt));
+      const [totalJobs] = await db.select({ c: count() }).from(jobs);
+      const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"))!);
+      const [totalBookings] = await db.select({ c: count() }).from(bookings);
+      const [completedBookings] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "COMPLETED"));
+      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      const [totalQuotes] = await db.select({ c: count() }).from(quotes);
+      const [acceptedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "ACCEPTED"));
+      const [totalUnlocks] = await db.select({ c: count() }).from(jobUnlocks);
+      const [totalReviews] = await db.select({ c: count() }).from(reviews).where(eq(reviews.isVisible, true));
+      const [avgRating] = await db.select({ a: avg(reviews.rating) }).from(reviews).where(eq(reviews.isVisible, true));
+      const [openTickets] = await db.select({ c: count() }).from(supportTickets).where(or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))!);
+      const [disputedBookings] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "DISPUTED"));
+      const [flaggedMessages] = await db.select({ c: count() }).from(messages).where(and(eq(messages.isFiltered, true), isNull(messages.deletedAt)));
+      const [pendingVerifications] = await db.select({ c: count() }).from(professionalProfiles).where(eq(professionalProfiles.verificationStatus, "PENDING"));
+
+      // 7-day trends
+      const [recentUsers] = await db.select({ c: count() }).from(users).where(gte(users.createdAt, sevenDaysAgo));
+      const [recentJobs] = await db.select({ c: count() }).from(jobs).where(gte(jobs.createdAt, sevenDaysAgo));
+      const [recentBookings] = await db.select({ c: count() }).from(bookings).where(gte(bookings.createdAt, sevenDaysAgo));
+
+      // Users by role
+      const usersByRole = await db.select({ role: users.role, c: count() }).from(users).where(isNull(users.deletedAt)).groupBy(users.role);
+      // Jobs by status
+      const jobsByStatus = await db.select({ status: jobs.status, c: count() }).from(jobs).groupBy(jobs.status);
+      // Bookings by status
+      const bookingsByStatus = await db.select({ status: bookings.status, c: count() }).from(bookings).groupBy(bookings.status);
+
+      // Marketplace health: conversion funnel
+      const quoteConversion = totalQuotes.c > 0 ? ((acceptedQuotes.c / totalQuotes.c) * 100).toFixed(1) : "0";
+      const bookingCompletion = totalBookings.c > 0 ? ((completedBookings.c / totalBookings.c) * 100).toFixed(1) : "0";
+
+      return res.json({
+        kpis: {
+          totalUsers: totalUsers.c, totalJobs: totalJobs.c, activeJobs: activeJobs.c,
+          totalBookings: totalBookings.c, completedBookings: completedBookings.c,
+          totalRevenue: totalRevenue.s || "0",
+          totalQuotes: totalQuotes.c, acceptedQuotes: acceptedQuotes.c,
+          totalUnlocks: totalUnlocks.c, totalReviews: totalReviews.c,
+          avgRating: avgRating.a ? parseFloat(String(avgRating.a)).toFixed(1) : "0",
+          openTickets: openTickets.c, disputedBookings: disputedBookings.c,
+          flaggedMessages: flaggedMessages.c, pendingVerifications: pendingVerifications.c,
+        },
+        trends: { recentUsers: recentUsers.c, recentJobs: recentJobs.c, recentBookings: recentBookings.c },
+        health: { quoteConversion, bookingCompletion },
+        breakdowns: { usersByRole, jobsByStatus, bookingsByStatus },
+      });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN: ADMIN JOB STATUS UPDATE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.patch("/api/admin/jobs/:id/status", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, reason } = req.body;
+      const jobId = routeParam(req.params.id);
+      const [updated] = await db.update(jobs).set({ status, updatedAt: new Date() })
+        .where(eq(jobs.id, jobId)).returning();
+      if (!updated) return res.status(404).json({ error: "Job not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user!.userId, action: "UPDATE_JOB_STATUS", resourceType: "JOB",
+        resourceId: jobId, changes: { status, reason }, ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

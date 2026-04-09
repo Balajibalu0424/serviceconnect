@@ -47,6 +47,9 @@ import ProVerificationPending from "@/pages/pro/VerificationPending";
 import AdminDashboard from "@/pages/admin/Dashboard";
 import AdminUsers from "@/pages/admin/Users";
 import AdminJobs from "@/pages/admin/Jobs";
+import AdminQuotes from "@/pages/admin/Quotes";
+import AdminBookings from "@/pages/admin/Bookings";
+import AdminReviews from "@/pages/admin/Reviews";
 import AdminChatMonitor from "@/pages/admin/ChatMonitor";
 import AdminPayments from "@/pages/admin/Payments";
 import AdminSupport from "@/pages/admin/Support";
@@ -158,6 +161,15 @@ function AppRoutes() {
       </Route>
       <Route path="/admin/jobs">
         <ProtectedRoute roles={["ADMIN"]}><AdminJobs /></ProtectedRoute>
+      </Route>
+      <Route path="/admin/quotes">
+        <ProtectedRoute roles={["ADMIN"]}><AdminQuotes /></ProtectedRoute>
+      </Route>
+      <Route path="/admin/bookings">
+        <ProtectedRoute roles={["ADMIN"]}><AdminBookings /></ProtectedRoute>
+      </Route>
+      <Route path="/admin/reviews">
+        <ProtectedRoute roles={["ADMIN"]}><AdminReviews /></ProtectedRoute>
       </Route>
       <Route path="/admin/chat">
         <ProtectedRoute roles={["ADMIN"]}><AdminChatMonitor /></ProtectedRoute>

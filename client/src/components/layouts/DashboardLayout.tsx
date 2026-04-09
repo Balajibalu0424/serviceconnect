@@ -7,7 +7,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   LayoutDashboard, Briefcase, MessageSquare, Bell, Settings,
   LogOut, Menu, X, CreditCard, Zap, Users, Star, ChevronRight,
-  ListChecks, Home, Dices, ShieldCheck, HelpCircle
+  ListChecks, Home, Dices, ShieldCheck, HelpCircle,
+  FileText, CalendarCheck, BarChart3, FolderTree
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -47,12 +48,15 @@ function AdminNav(): NavItem[] {
     { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
     { label: "Users", href: "/admin/users", icon: Users },
     { label: "Jobs", href: "/admin/jobs", icon: Briefcase },
+    { label: "Quotes", href: "/admin/quotes", icon: FileText },
+    { label: "Bookings", href: "/admin/bookings", icon: CalendarCheck },
+    { label: "Reviews", href: "/admin/reviews", icon: Star },
     { label: "Chat Monitor", href: "/admin/chat", icon: MessageSquare },
     { label: "Payments", href: "/admin/payments", icon: CreditCard },
     { label: "Support", href: "/admin/support", icon: ShieldCheck },
+    { label: "Analytics", href: "/admin/metrics", icon: BarChart3 },
     { label: "Audit Logs", href: "/admin/audit", icon: ListChecks },
     { label: "Feature Flags", href: "/admin/flags", icon: Zap },
-    { label: "Metrics", href: "/admin/metrics", icon: Star },
   ];
 }
 
