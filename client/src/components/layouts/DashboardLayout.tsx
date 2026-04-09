@@ -74,7 +74,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [socket]);
 
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
+  const { data: chatUnread } = useQuery<any>({ queryKey: ["/api/chat/unread-count"], refetchInterval: 15000 });
   const unreadCount = notifData?.unreadCount || 0;
+  const unreadMessages = chatUnread?.count || 0;
 
   const navItems = user?.role === "ADMIN" ? AdminNav()
     : user?.role === "PROFESSIONAL" ? ProNav()
@@ -112,7 +114,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <item.icon className={cn("w-5 h-5 flex-shrink-0 transition-transform", isActive ? "scale-110" : "")} />
               <span className="flex-1">{item.label}</span>
               {item.label === "Notifications" && unreadCount > 0 && (
-                <Badge variant="destructive" className="text-xs h-5 min-w-5">{unreadCount}</Badge>
+                <Badge variant="destructive" className="text-xs h-5 min-w-5 flex items-center justify-center rounded-full px-1.5">{unreadCount}</Badge>
+              )}
+              {item.label === "Messages" && unreadMessages > 0 && (
+                <Badge variant="destructive" className="text-xs h-5 min-w-5 flex items-center justify-center rounded-full px-1.5">{unreadMessages}</Badge>
               )}
             </Link>
           );

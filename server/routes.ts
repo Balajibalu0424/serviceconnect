@@ -90,6 +90,26 @@ function routeParam(value: string | string[] | undefined): string {
   return value ?? "";
 }
 
+// ─── Helper: safe pagination ────────────────────────────────────────────────
+function safePagination(query: { page?: string; limit?: string }, defaults = { page: 1, limit: 20, maxLimit: 100 }) {
+  const page = Math.max(1, parseInt(query.page || String(defaults.page)) || defaults.page);
+  const limit = Math.min(defaults.maxLimit, Math.max(1, parseInt(query.limit || String(defaults.limit)) || defaults.limit));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
+// ─── Helper: validate budget range ──────────────────────────────────────────
+function validateBudget(budgetMin: any, budgetMax: any): { min: number | null; max: number | null; error?: string } {
+  const min = budgetMin != null && budgetMin !== "" ? Number(budgetMin) : null;
+  const max = budgetMax != null && budgetMax !== "" ? Number(budgetMax) : null;
+  if (min != null && (isNaN(min) || min < 0)) return { min: null, max: null, error: "Budget minimum must be a positive number" };
+  if (max != null && (isNaN(max) || max < 0)) return { min: null, max: null, error: "Budget maximum must be a positive number" };
+  if (min != null && max != null && min > max) return { min: null, max: null, error: "Budget minimum cannot exceed maximum" };
+  if (min != null && min > 1_000_000) return { min: null, max: null, error: "Budget minimum seems unreasonably high" };
+  if (max != null && max > 1_000_000) return { min: null, max: null, error: "Budget maximum seems unreasonably high" };
+  return { min, max };
+}
+
 // ─── Helper: credit engine (atomic) ──────────────────────────────────────────
 async function deductCredits(userId: string, amount: number, type: any, description: string, referenceType?: string, referenceId?: string) {
   return db.transaction(async (tx) => {
@@ -415,6 +435,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Please select a service category." });
       }
 
+      // ── Budget validation ────────────────────────────────────────────────
+      const budgetResult = validateBudget(budgetMin, budgetMax);
+      if (budgetResult.error) {
+        return res.status(400).json({ error: budgetResult.error });
+      }
+
       // ── Content moderation ────────────────────────────────────────────────
       const descMod = moderateText(description, { fieldName: "job description" });
       if (descMod.blocked) {
@@ -519,9 +545,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/jobs", requireAuth, async (req: AuthRequest, res: Response) => {
-    const { status, categoryId, page = "1", limit = "20" } = req.query as any;
+    const { status, categoryId } = req.query as any;
     const userId = req.user!.userId;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { limit, offset } = safePagination(req.query as any);
 
     let conditions: any[] = [eq(jobs.customerId, userId)];
     if (status) conditions.push(eq(jobs.status, status));
@@ -530,14 +556,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const result = await db.select().from(jobs)
       .where(and(...conditions))
       .orderBy(desc(jobs.createdAt))
-      .limit(parseInt(limit))
+      .limit(limit)
       .offset(offset);
     return res.json(result);
   });
 
   app.get("/api/jobs/feed", requireAuth, requireRole("PROFESSIONAL", "ADMIN"), async (req: AuthRequest, res: Response) => {
-    const { categoryId, location, page = "1", limit = "20" } = req.query as any;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { categoryId, location } = req.query as any;
+    const { limit, offset } = safePagination(req.query as any);
 
     let conditions: any[] = [
       inArray(jobs.status, ["LIVE", "BOOSTED", "IN_DISCUSSION"])
@@ -554,7 +580,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       .leftJoin(users, eq(jobs.customerId, users.id))
       .where(and(...conditions))
       .orderBy(desc(jobs.isBoosted), desc(jobs.createdAt))
-      .limit(parseInt(limit))
+      .limit(limit)
       .offset(offset);
 
     // Attach matchbook count and whether pro has matchbooked
@@ -1455,8 +1481,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const userId = req.user!.userId;
       const convId = req.params.id as string;
-      const { page = "1", limit = "50" } = req.query as any;
-      const offset = (parseInt(page) - 1) * parseInt(limit);
+      const { limit, offset } = safePagination(req.query as any, { page: 1, limit: 50, maxLimit: 200 });
 
       const [participant] = await db.select().from(conversationParticipants)
         .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
@@ -1465,7 +1490,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const rawMsgs = await db.select().from(messages)
         .where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt)))
         .orderBy(asc(messages.createdAt))
-        .limit(parseInt(limit)).offset(offset);
+        .limit(limit).offset(offset);
 
       // Enrich messages with sender names
       const senderCache = new Map<string, { firstName: string; lastName: string; role: string }>();
@@ -1795,12 +1820,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // NOTIFICATIONS
   // ═══════════════════════════════════════════════════════════════════════════
   app.get("/api/notifications", requireAuth, async (req: AuthRequest, res: Response) => {
-    const { page = "1", limit = "20" } = req.query as any;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { limit, offset } = safePagination(req.query as any, { page: 1, limit: 50, maxLimit: 100 });
     const notifs = await db.select().from(notifications)
       .where(eq(notifications.userId, req.user!.userId))
       .orderBy(desc(notifications.createdAt))
-      .limit(parseInt(limit)).offset(offset);
+      .limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(notifications)
       .where(and(eq(notifications.userId, req.user!.userId), eq(notifications.isRead, false)));
     return res.json({ notifications: notifs, unreadCount: c });
@@ -2444,14 +2468,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/admin/users", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    const { role, status, search, page = "1", limit = "20" } = req.query as any;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { role, status, search } = req.query as any;
+    const { limit, offset } = safePagination(req.query as any);
     let conditions: any[] = [isNull(users.deletedAt)];
     if (role) conditions.push(eq(users.role, role));
     if (status) conditions.push(eq(users.status, status));
     if (search) conditions.push(or(ilike(users.email, `%${search}%`), ilike(users.firstName, `%${search}%`), ilike(users.lastName, `%${search}%`))!);
 
-    const result = await db.select().from(users).where(and(...conditions)).orderBy(desc(users.createdAt)).limit(parseInt(limit)).offset(offset);
+    const result = await db.select().from(users).where(and(...conditions)).orderBy(desc(users.createdAt)).limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(users).where(and(...conditions));
 
     // Attach verification info for professionals
@@ -2487,13 +2511,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/admin/jobs", requireAuth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-    const { status, page = "1", limit = "20" } = req.query as any;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { status } = req.query as any;
+    const { limit, offset } = safePagination(req.query as any);
     let conditions: any[] = [];
     if (status) conditions.push(eq(jobs.status, status));
     const result = await db.select().from(jobs)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(jobs.createdAt)).limit(parseInt(limit)).offset(offset);
+      .orderBy(desc(jobs.createdAt)).limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(jobs).where(conditions.length > 0 ? and(...conditions) : undefined);
     return res.json({ jobs: result, total: c });
   });
