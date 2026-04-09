@@ -14,6 +14,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const { login } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -21,6 +22,7 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
     try {
       await login(email, password);
       const token = getAccessToken();
@@ -31,7 +33,9 @@ export default function Login() {
         else setLocation("/dashboard");
       }
     } catch (e: any) {
-      toast({ title: "Login failed", description: e.message, variant: "destructive" });
+      const msg = e.message || "Invalid email or password";
+      setError(msg);
+      toast({ title: "Login failed", description: msg, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -112,6 +116,14 @@ export default function Login() {
           <Card className="border-border/50 shadow-xl shadow-blue-500/5">
             <CardContent className="pt-6">
               <form onSubmit={handleSubmit} className="space-y-5">
+                {error && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium" role="alert">
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <circle cx="12" cy="12" r="10" /><path d="M12 8v4m0 4h.01" />
+                    </svg>
+                    {error}
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-sm font-medium">Email address</Label>
                   <Input

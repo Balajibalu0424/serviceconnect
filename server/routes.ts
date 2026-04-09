@@ -1462,16 +1462,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
 
-      const msgs = await db.select().from(messages)
+      const rawMsgs = await db.select().from(messages)
         .where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt)))
         .orderBy(asc(messages.createdAt))
         .limit(parseInt(limit)).offset(offset);
+
+      // Enrich messages with sender names
+      const senderCache = new Map<string, { firstName: string; lastName: string; role: string }>();
+      const enrichedMsgs = await Promise.all(rawMsgs.map(async (msg) => {
+        if (!senderCache.has(msg.senderId)) {
+          const [sender] = await db.select({
+            firstName: users.firstName, lastName: users.lastName, role: users.role
+          }).from(users).where(eq(users.id, msg.senderId));
+          if (sender) senderCache.set(msg.senderId, sender);
+        }
+        const sender = senderCache.get(msg.senderId);
+        return {
+          ...msg,
+          senderName: sender ? `${sender.firstName} ${sender.lastName}`.trim() : "System",
+          senderRole: sender?.role || "SYSTEM",
+        };
+      }));
 
       // Mark as read
       await db.update(conversationParticipants).set({ lastReadAt: new Date() })
         .where(and(eq(conversationParticipants.conversationId, req.params.id as string), eq(conversationParticipants.userId, userId)));
 
-      return res.json(msgs);
+      return res.json(enrichedMsgs);
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }

@@ -136,18 +136,29 @@ export default function Chat() {
                 >
                   <Avatar className="w-10 h-10 flex-shrink-0">
                     <AvatarFallback className="text-sm bg-primary/10 text-primary">
-                      {conv.jobTitle?.[0] || "J"}
+                      {(() => {
+                        const other = conv.participants?.find((p: any) => p.id !== user?.id);
+                        return other ? (other.firstName?.[0] || "?") : (conv.jobTitle?.[0] || "J");
+                      })()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">
-                      <p className="font-medium text-sm truncate">{conv.jobTitle || "Conversation"}</p>
+                      <p className="font-medium text-sm truncate">
+                        {(() => {
+                          const other = conv.participants?.find((p: any) => p.id !== user?.id);
+                          return other ? `${other.firstName} ${other.lastName}`.trim() : (conv.jobTitle || "Conversation");
+                        })()}
+                      </p>
                       {conv.lastMessageAt && (
                         <span className="text-xs text-muted-foreground flex-shrink-0">
                           {formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: false })}
                         </span>
                       )}
                     </div>
+                    {conv.job?.title && (
+                      <p className="text-[10px] text-primary/70 truncate">{conv.job.title}</p>
+                    )}
                     <p className="text-xs text-muted-foreground truncate mt-0.5">
                       {conv.lastMessage || "Start the conversation…"}
                     </p>
@@ -185,12 +196,20 @@ export default function Chat() {
                 </button>
                 <Avatar className="w-9 h-9">
                   <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                    {activeConv?.jobTitle?.[0] || "J"}
+                    {(() => {
+                      const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+                      return other ? (other.firstName?.[0] || "?") : (activeConv?.jobTitle?.[0] || "J");
+                    })()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
-                  <p className="font-semibold text-sm">{activeConv?.jobTitle || "Conversation"}</p>
-                  <p className="text-xs text-muted-foreground">Active now</p>
+                  <p className="font-semibold text-sm">
+                    {(() => {
+                      const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+                      return other ? `${other.firstName} ${other.lastName}`.trim() : "Conversation";
+                    })()}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{activeConv?.jobTitle || "Active now"}</p>
                 </div>
                 {/* Request Call button — creates DB call request only.
                      WebRTC offer will be triggered by server after callee accepts. */}
@@ -226,6 +245,16 @@ export default function Chat() {
                 ) : (
                   (messages as any[]).map((msg: any) => {
                     const isMe = msg.senderId === user?.id;
+                    const isSystem = msg.type === "SYSTEM";
+                    if (isSystem) {
+                      return (
+                        <div key={msg.id} className="flex justify-center">
+                          <div className="max-w-[85%] rounded-xl px-4 py-2 text-xs text-muted-foreground bg-muted/50 text-center italic">
+                            {msg.content}
+                          </div>
+                        </div>
+                      );
+                    }
                     return (
                       <div key={msg.id} className={cn("flex", isMe ? "justify-end" : "justify-start")}>
                         <div className={cn(
@@ -234,6 +263,9 @@ export default function Chat() {
                             ? "bg-primary text-primary-foreground rounded-br-sm"
                             : "bg-muted text-foreground rounded-bl-sm"
                         )}>
+                          {!isMe && msg.senderName && (
+                            <p className="text-xs font-semibold mb-1 opacity-80">{msg.senderName}</p>
+                          )}
                           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                           <p className={cn("text-xs mt-1 opacity-70", isMe ? "text-right" : "text-left")}>
                             {formatDistanceToNow(new Date(msg.createdAt), { addSuffix: true })}
