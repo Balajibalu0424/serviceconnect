@@ -3,18 +3,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/contexts/AuthContext";
+import { useLocation } from "wouter";
 import { formatDistanceToNow, isToday, isYesterday, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
-  Bell, CheckCheck, BellOff, Briefcase, MessageSquare, CreditCard,
+  Bell, CheckCheck, Briefcase, MessageSquare, CreditCard,
   Star, AlertTriangle, ShieldCheck, Zap, Gift, Phone, FileText,
-  UserCheck, ThumbsUp, Calendar, Filter, Loader2, Inbox
+  UserCheck, ThumbsUp, Calendar, Filter, Loader2, Inbox, ExternalLink
 } from "lucide-react";
 
 const NOTIFICATION_ICONS: Record<string, { icon: any; color: string; bg: string }> = {
   JOB_QUOTE: { icon: FileText, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+  NEW_QUOTE: { icon: FileText, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
   JOB_UPDATE: { icon: Briefcase, color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-500/10" },
   JOB_MATCHED: { icon: ShieldCheck, color: "text-green-600 dark:text-green-400", bg: "bg-green-500/10" },
   JOB_COMPLETED: { icon: ThumbsUp, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
@@ -25,13 +27,79 @@ const NOTIFICATION_ICONS: Record<string, { icon: any; color: string; bg: string 
   REVIEW: { icon: Star, color: "text-yellow-600 dark:text-yellow-400", bg: "bg-yellow-500/10" },
   SPIN_REWARD: { icon: Gift, color: "text-pink-600 dark:text-pink-400", bg: "bg-pink-500/10" },
   CALL_REQUEST: { icon: Phone, color: "text-green-600 dark:text-green-400", bg: "bg-green-500/10" },
+  CALL_ACCEPTED: { icon: Phone, color: "text-green-600 dark:text-green-400", bg: "bg-green-500/10" },
+  CALL_DECLINED: { icon: Phone, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
   VERIFICATION: { icon: UserCheck, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+  VERIFICATION_SUBMITTED: { icon: UserCheck, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+  VERIFICATION_APPROVED: { icon: UserCheck, color: "text-green-600 dark:text-green-400", bg: "bg-green-500/10" },
+  VERIFICATION_REJECTED: { icon: UserCheck, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
   AFTERCARE: { icon: Calendar, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/10" },
   WARNING: { icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  JOB_FLAGGED: { icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  MESSAGE_FLAGGED: { icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  URGENT_JOB: { icon: Zap, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  QUOTE_ACCEPTED: { icon: ThumbsUp, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
+  JOB_UNLOCK: { icon: ShieldCheck, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+  TICKET_REPLY: { icon: MessageSquare, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+  TICKET_STATUS: { icon: FileText, color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-500/10" },
 };
 
 function getNotifStyle(type: string) {
   return NOTIFICATION_ICONS[type] || { icon: Bell, color: "text-primary", bg: "bg-primary/10" };
+}
+
+// Deep-link resolution: determine where a notification should navigate to
+function getNotificationLink(n: any, userRole: string): string | null {
+  const data = n.data || {};
+  const isProRole = userRole === "PROFESSIONAL";
+  const chatBase = isProRole ? "/pro/chat" : "/chat";
+
+  switch (n.type) {
+    case "NEW_QUOTE":
+    case "JOB_QUOTE":
+      return data.jobId ? `/jobs/${data.jobId}` : null;
+    case "QUOTE_ACCEPTED":
+      return isProRole ? "/pro/leads" : (data.jobId ? `/jobs/${data.jobId}` : null);
+    case "JOB_UPDATE":
+    case "JOB_MATCHED":
+    case "JOB_COMPLETED":
+    case "JOB_BOOSTED":
+    case "AFTERCARE":
+    case "JOB_FLAGGED":
+      return data.jobId ? (isProRole ? "/pro/feed" : `/jobs/${data.jobId}`) : null;
+    case "URGENT_JOB":
+      return isProRole ? "/pro/feed" : null;
+    case "JOB_UNLOCK":
+      return data.jobId ? (isProRole ? "/pro/feed" : `/jobs/${data.jobId}`) : null;
+    case "NEW_MESSAGE":
+    case "MESSAGE_FLAGGED":
+      return data.conversationId ? `${chatBase}?conversationId=${data.conversationId}` : chatBase;
+    case "CALL_REQUEST":
+    case "CALL_ACCEPTED":
+    case "CALL_DECLINED":
+      return chatBase;
+    case "PAYMENT":
+    case "CREDIT":
+      return isProRole ? "/pro/credits" : "/bookings";
+    case "REVIEW":
+      return isProRole ? "/pro/profile" : "/bookings";
+    case "SPIN_REWARD":
+      return "/pro/spin";
+    case "VERIFICATION":
+    case "VERIFICATION_SUBMITTED":
+    case "VERIFICATION_APPROVED":
+    case "VERIFICATION_REJECTED":
+      return isProRole ? "/pro/verification-pending" : null;
+    case "TICKET_REPLY":
+    case "TICKET_STATUS":
+      return "/support";
+    default:
+      // Try to infer from data
+      if (data.jobId) return isProRole ? "/pro/feed" : `/jobs/${data.jobId}`;
+      if (data.conversationId) return `${chatBase}?conversationId=${data.conversationId}`;
+      if (data.ticketId) return "/support";
+      return null;
+  }
 }
 
 function groupByDate(notifications: any[]) {
@@ -65,6 +133,8 @@ const FILTER_OPTIONS = [
 
 export default function Notifications() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
   const [filter, setFilter] = useState("all");
   const { data, isLoading } = useQuery<any>({ queryKey: ["/api/notifications"] });
   const allNotifications: any[] = data?.notifications || [];
@@ -72,6 +142,10 @@ export default function Notifications() {
   const filtered = allNotifications.filter((n: any) => {
     if (filter === "all") return true;
     if (filter === "unread") return !n.isRead;
+    // Match both exact type and similar types (e.g. JOB_QUOTE and NEW_QUOTE)
+    if (filter === "JOB_QUOTE") return ["JOB_QUOTE", "NEW_QUOTE", "QUOTE_ACCEPTED"].includes(n.type);
+    if (filter === "NEW_MESSAGE") return ["NEW_MESSAGE", "MESSAGE_FLAGGED"].includes(n.type);
+    if (filter === "JOB_UPDATE") return ["JOB_UPDATE", "JOB_MATCHED", "JOB_COMPLETED", "JOB_BOOSTED", "AFTERCARE", "JOB_UNLOCK", "URGENT_JOB"].includes(n.type);
     return n.type === filter;
   });
 
@@ -93,6 +167,17 @@ export default function Notifications() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/notifications"] }),
   });
+
+  const handleNotificationClick = (n: any) => {
+    // Mark as read
+    if (!n.isRead) markRead.mutate(n.id);
+
+    // Navigate to the source entity
+    const link = getNotificationLink(n, user?.role || "CUSTOMER");
+    if (link) {
+      navigate(link);
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -214,17 +299,19 @@ export default function Notifications() {
                   {group.items.map((n: any) => {
                     const style = getNotifStyle(n.type);
                     const Icon = style.icon;
+                    const link = getNotificationLink(n, user?.role || "CUSTOMER");
                     return (
                       <div
                         key={n.id}
                         data-testid={`notif-${n.id}`}
                         className={cn(
-                          "group bg-white/60 dark:bg-black/40 backdrop-blur-xl border rounded-2xl p-4 md:p-5 transition-all duration-200 hover:shadow-md cursor-default",
+                          "group bg-white/60 dark:bg-black/40 backdrop-blur-xl border rounded-2xl p-4 md:p-5 transition-all duration-200 hover:shadow-md",
+                          link ? "cursor-pointer" : "cursor-default",
                           !n.isRead
                             ? "border-primary/20 dark:border-primary/10 shadow-sm shadow-primary/5"
                             : "border-white/40 dark:border-white/10"
                         )}
-                        onClick={() => !n.isRead && markRead.mutate(n.id)}
+                        onClick={() => handleNotificationClick(n)}
                       >
                         <div className="flex items-start gap-4">
                           {/* Icon */}
@@ -247,6 +334,9 @@ export default function Notifications() {
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 {!n.isRead && (
                                   <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+                                )}
+                                {link && (
+                                  <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 )}
                               </div>
                             </div>

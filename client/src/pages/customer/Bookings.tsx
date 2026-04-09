@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ListChecks, CheckCircle2, XCircle } from "lucide-react";
+import { ListChecks, CheckCircle2, XCircle, MessageCircle, User, MapPin } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation, Link } from "wouter";
 
 const STATUS_COLORS: Record<string, string> = {
   CONFIRMED: "default",
@@ -24,6 +25,7 @@ export default function Bookings() {
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const qc = useQueryClient();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
 
   const [cancelDialog, setCancelDialog] = useState<{ open: boolean; bookingId: string | null }>({ open: false, bookingId: null });
   const [cancelReason, setCancelReason] = useState("");
@@ -54,6 +56,17 @@ export default function Bookings() {
       toast({ title: "Booking cancelled" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
+  });
+
+  const startChat = useMutation({
+    mutationFn: async (proId: string) => {
+      const res = await apiRequest("POST", "/api/conversations", { participantId: proId });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      navigate(`/chat?conversationId=${data.id}`);
+    },
+    onError: (e: Error) => toast({ title: "Could not start conversation", description: e.message, variant: "destructive" }),
   });
 
   const handleCancelConfirm = () => {
@@ -87,9 +100,23 @@ export default function Bookings() {
                 <CardContent className="p-5 md:p-6">
                   <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <p className="font-heading font-bold text-lg group-hover:text-primary transition-colors">Booking #{b.id.slice(-8)}</p>
+                      <p className="font-heading font-bold text-lg group-hover:text-primary transition-colors">
+                        {b.job?.title || `Booking #${b.id.slice(-8)}`}
+                      </p>
+                      {b.professional && (
+                        <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                          <User className="w-3.5 h-3.5" />
+                          <span>{b.professional.firstName} {b.professional.lastName}</span>
+                        </div>
+                      )}
+                      {b.job?.locationText && (
+                        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                          <MapPin className="w-3 h-3" />
+                          <span>{b.job.locationText}</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-x-4 gap-y-2 mt-2 flex-wrap text-sm text-muted-foreground">
-                        <span className="font-medium text-foreground/80 bg-muted/40 px-2 py-0.5 rounded-md">€{b.totalAmount}</span>
+                        <span className="font-medium text-foreground/80 bg-muted/40 px-2 py-0.5 rounded-md">{"\u20AC"}{b.totalAmount}</span>
                         <span>{formatDistanceToNow(new Date(b.createdAt), { addSuffix: true })}</span>
                         {b.scheduledDate && (
                           <span className="text-primary/80 font-medium">
@@ -100,32 +127,43 @@ export default function Bookings() {
                     </div>
                     <div className="flex flex-col items-end gap-3 shrink-0 w-full md:w-auto">
                       <Badge variant={STATUS_COLORS[b.status] as any} className="text-xs px-2.5 py-1 uppercase tracking-wider bg-white/50 shadow-sm">{b.status}</Badge>
-                      {actionableStatuses.includes(b.status) && (
-                        <div className="flex items-center gap-2 mt-2 md:mt-0 w-full md:w-auto">
+                      <div className="flex items-center gap-2 w-full md:w-auto">
+                        {b.professionalId && (
                           <Button
                             size="sm"
                             variant="outline"
-                            className="gap-2 text-green-600 border-green-200 bg-green-50/50 hover:bg-green-100 hover:text-green-700 hover:border-green-300 transition-colors rounded-xl h-9 px-4 flex-1 md:flex-auto"
-                            onClick={() => completeMutation.mutate(b.id)}
-                            disabled={completeMutation.isPending}
-                            data-testid={`button-complete-${b.id}`}
+                            className="gap-1.5 rounded-xl h-9 px-3 text-xs flex-1 md:flex-auto"
+                            onClick={() => startChat.mutate(b.professionalId)}
+                            disabled={startChat.isPending}
                           >
-                            <CheckCircle2 className="w-4 h-4" />
-                            Complete
+                            <MessageCircle className="w-3.5 h-3.5" /> Chat
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-2 text-destructive border-destructive/20 bg-destructive/5 hover:bg-destructive/10 hover:border-destructive/30 transition-colors rounded-xl h-9 px-4 flex-1 md:flex-auto"
-                            onClick={() => { setCancelDialog({ open: true, bookingId: b.id }); setCancelReason(""); }}
-                            disabled={cancelMutation.isPending}
-                            data-testid={`button-cancel-${b.id}`}
-                          >
-                            <XCircle className="w-4 h-4" />
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
+                        )}
+                        {actionableStatuses.includes(b.status) && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5 text-green-600 border-green-200 bg-green-50/50 hover:bg-green-100 rounded-xl h-9 px-3 text-xs flex-1 md:flex-auto"
+                              onClick={() => completeMutation.mutate(b.id)}
+                              disabled={completeMutation.isPending}
+                              data-testid={`button-complete-${b.id}`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Complete
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5 text-destructive border-destructive/20 bg-destructive/5 hover:bg-destructive/10 rounded-xl h-9 px-3 text-xs flex-1 md:flex-auto"
+                              onClick={() => { setCancelDialog({ open: true, bookingId: b.id }); setCancelReason(""); }}
+                              disabled={cancelMutation.isPending}
+                              data-testid={`button-cancel-${b.id}`}
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Cancel
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -135,7 +173,6 @@ export default function Bookings() {
         )}
       </div>
 
-      {/* Cancel confirmation dialog */}
       <Dialog open={cancelDialog.open} onOpenChange={(open) => { if (!open) setCancelDialog({ open: false, bookingId: null }); }}>
         <DialogContent>
           <DialogHeader>
@@ -153,15 +190,8 @@ export default function Bookings() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelDialog({ open: false, bookingId: null })}>
-              Keep Booking
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleCancelConfirm}
-              disabled={cancelMutation.isPending}
-              data-testid="button-confirm-cancel"
-            >
+            <Button variant="outline" onClick={() => setCancelDialog({ open: false, bookingId: null })}>Keep Booking</Button>
+            <Button variant="destructive" onClick={handleCancelConfirm} disabled={cancelMutation.isPending} data-testid="button-confirm-cancel">
               {cancelMutation.isPending ? "Cancelling..." : "Yes, Cancel"}
             </Button>
           </DialogFooter>

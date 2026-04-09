@@ -39,7 +39,7 @@ export default function ProBookings() {
       return res.json();
     },
     onSuccess: (data) => {
-      setLocation(`/messages?conversationId=${data.id}`);
+      setLocation(`/pro/chat?conversationId=${data.id}`);
     },
     onError: (error: Error) => {
       toast({ title: "Could not start conversation", description: error.message, variant: "destructive" });

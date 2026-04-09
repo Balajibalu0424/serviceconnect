@@ -14,6 +14,7 @@ import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { Link } from "wouter";
 
 const STATUS_CONFIG: Record<string, { variant: string; label: string; color: string }> = {
   DRAFT: { variant: "secondary", label: "Draft", color: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" },
@@ -175,10 +176,11 @@ export default function AdminJobs() {
             {jobs.map((job: any) => {
               const statusConf = STATUS_CONFIG[job.status] || { variant: "secondary", label: job.status, color: "" };
               return (
-                <div
+                <Link
                   key={job.id}
+                  href={`/admin/jobs/${job.id}`}
                   data-testid={`admin-job-${job.id}`}
-                  className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 md:p-5 hover:shadow-md transition-all duration-200 group"
+                  className="block bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 md:p-5 hover:shadow-md transition-all duration-200 group cursor-pointer"
                 >
                   <div className="flex flex-col md:flex-row md:items-center gap-4">
                     {/* Left: Info */}
@@ -225,12 +227,12 @@ export default function AdminJobs() {
                     </div>
 
                     {/* Right: Actions */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.preventDefault()}>
                       {job.status === "DRAFT" && (
                         <Button
                           size="sm"
                           className="gap-1.5 rounded-xl bg-green-600 hover:bg-green-700 text-white shadow-sm"
-                          onClick={() => publishJob.mutate(job.id)}
+                          onClick={(e) => { e.preventDefault(); publishJob.mutate(job.id); }}
                           disabled={publishJob.isPending}
                           data-testid={`button-publish-${job.id}`}
                         >
@@ -243,7 +245,7 @@ export default function AdminJobs() {
                           size="sm"
                           variant="ghost"
                           className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-xl"
-                          onClick={() => closeJob.mutate(job.id)}
+                          onClick={(e) => { e.preventDefault(); closeJob.mutate(job.id); }}
                           disabled={closeJob.isPending}
                           data-testid={`button-close-${job.id}`}
                         >
@@ -252,7 +254,7 @@ export default function AdminJobs() {
                       )}
                     </div>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>

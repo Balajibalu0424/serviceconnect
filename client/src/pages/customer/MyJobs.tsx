@@ -4,7 +4,7 @@ import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Briefcase, PlusCircle, MapPin, Clock, Zap, AlertCircle } from "lucide-react";
+import { Briefcase, PlusCircle, MapPin, Clock, Zap, AlertCircle, Hash } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -84,6 +84,7 @@ export default function MyJobs() {
                           <div className="flex items-center gap-2 mb-2">
                             <h3 className="font-heading font-bold text-lg truncate">{job.title}</h3>
                             <Badge variant="secondary" className="shrink-0 text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900">Draft</Badge>
+                            {job.referenceCode && <span className="text-xs font-mono text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />{job.referenceCode}</span>}
                           </div>
                           <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{job.description}</p>
                           <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
@@ -127,6 +128,7 @@ export default function MyJobs() {
                               <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 text-xs bg-white/50 dark:bg-black/50 backdrop-blur shadow-sm">
                                 {STATUS_LABELS[job.status] || job.status}
                               </Badge>
+                              {job.referenceCode && <span className="text-xs font-mono text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />{job.referenceCode}</span>}
                             </div>
                             <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{job.description}</p>
                             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-xs text-muted-foreground bg-white/40 dark:bg-white/5 backdrop-blur-sm p-3 rounded-xl border border-white/20 dark:border-white/5 w-fit">

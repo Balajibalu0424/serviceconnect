@@ -12,23 +12,34 @@ import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Send, Loader2, ArrowLeft, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useSearch } from "wouter";
 
 
 export default function Chat() {
   const { user } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const urlConvId = searchParams.get("conversationId");
+
+  const [activeConvId, setActiveConvId] = useState<string | null>(urlConvId);
   const [message, setMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Sync from URL param on mount or param change
+  useEffect(() => {
+    if (urlConvId && urlConvId !== activeConvId) {
+      setActiveConvId(urlConvId);
+    }
+  }, [urlConvId]);
 
   const { data: conversations = [], isLoading: loadingConvs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations"],
     refetchInterval: 5000,
   });
 
-  const { data: messages = [], isLoading: loadingMsgs } = useQuery<any[]>({
+  const { data: msgList = [], isLoading: loadingMsgs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations", activeConvId, "messages"],
     queryFn: async () => {
       if (!activeConvId) return [];
@@ -69,7 +80,7 @@ export default function Chat() {
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
-    onSuccess: () => toast({ title: "📞 Call requested", description: "The other party will be notified. They can accept or decline." }),
+    onSuccess: () => toast({ title: "Call requested", description: "The other party will be notified. They can accept or decline." }),
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
@@ -86,7 +97,7 @@ export default function Chat() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [msgList]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -211,8 +222,6 @@ export default function Chat() {
                   </p>
                   <p className="text-xs text-muted-foreground">{activeConv?.jobTitle || "Active now"}</p>
                 </div>
-                {/* Request Call button — creates DB call request only.
-                     WebRTC offer will be triggered by server after callee accepts. */}
                 <Button
                   variant="default"
                   size="sm"
@@ -238,12 +247,12 @@ export default function Chat() {
                   <div className="flex items-center justify-center h-full">
                     <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                   </div>
-                ) : (messages as any[]).length === 0 ? (
+                ) : (msgList as any[]).length === 0 ? (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                     No messages yet — say hello!
                   </div>
                 ) : (
-                  (messages as any[]).map((msg: any) => {
+                  (msgList as any[]).map((msg: any) => {
                     const isMe = msg.senderId === user?.id;
                     const isSystem = msg.type === "SYSTEM";
                     if (isSystem) {

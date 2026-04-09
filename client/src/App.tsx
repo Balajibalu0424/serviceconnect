@@ -56,6 +56,7 @@ import AdminSupport from "@/pages/admin/Support";
 import AdminAuditLogs from "@/pages/admin/AuditLogs";
 import AdminFeatureFlags from "@/pages/admin/FeatureFlags";
 import AdminMetrics from "@/pages/admin/Metrics";
+import AdminJobDetail from "@/pages/admin/JobDetail";
 
 function ProtectedRoute({ children, roles, requireVerified = false }: { children: React.ReactNode; roles?: string[]; requireVerified?: boolean }) {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -161,6 +162,9 @@ function AppRoutes() {
       </Route>
       <Route path="/admin/jobs">
         <ProtectedRoute roles={["ADMIN"]}><AdminJobs /></ProtectedRoute>
+      </Route>
+      <Route path="/admin/jobs/:id">
+        <ProtectedRoute roles={["ADMIN"]}><AdminJobDetail /></ProtectedRoute>
       </Route>
       <Route path="/admin/quotes">
         <ProtectedRoute roles={["ADMIN"]}><AdminQuotes /></ProtectedRoute>

@@ -498,14 +498,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Urgency: auto-upgrade urgency field if keywords found
       const finalUrgency = urgencyResult.isUrgent ? "URGENT" : (urgency || "NORMAL");
 
+      // Generate human-friendly reference code: SC-XXXX (6 alphanum chars)
+      const refCode = "SC-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+
       const [job] = await db.insert(jobs).values({
         customerId: userId, categoryId, title, description,
+        referenceCode: refCode,
         budgetMin: budgetMin ? String(budgetMin) : null,
         budgetMax: budgetMax ? String(budgetMax) : null,
         urgency: finalUrgency as any,
         status: "LIVE",
         creditCost, originalCreditCost: creditCost,
         locationText: locationText || null,
+        locationTown: req.body.locationTown || null,
+        locationEircode: req.body.locationEircode || null,
         preferredDate: preferredDate ? new Date(preferredDate) : null,
         // AI columns
         aiQualityScore: qualityResult.score,
@@ -684,9 +690,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id as string));
     if (!job) return res.status(404).json({ error: "Job not found" });
     if (job.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
-    const { title, description, budgetMin, budgetMax, urgency, locationText } = req.body;
+
+    // Safe edit rules: only DRAFT/LIVE/BOOSTED jobs can be edited
+    const editableStatuses = ["DRAFT", "LIVE", "BOOSTED", "IN_DISCUSSION"];
+    if (!editableStatuses.includes(job.status)) {
+      return res.status(400).json({ error: `Cannot edit a job with status '${job.status}'. Only draft, live, or in-discussion jobs can be modified.` });
+    }
+
+    const { title, description, budgetMin, budgetMax, urgency, locationText, locationTown, locationEircode } = req.body;
+    const updates: any = { updatedAt: new Date() };
+    if (title !== undefined) updates.title = title;
+    if (description !== undefined) updates.description = description;
+    if (budgetMin !== undefined) updates.budgetMin = budgetMin ? String(budgetMin) : null;
+    if (budgetMax !== undefined) updates.budgetMax = budgetMax ? String(budgetMax) : null;
+    if (urgency !== undefined) updates.urgency = urgency;
+    if (locationText !== undefined) updates.locationText = locationText;
+    if (locationTown !== undefined) updates.locationTown = locationTown;
+    if (locationEircode !== undefined) updates.locationEircode = locationEircode;
+
     const [updated] = await db.update(jobs)
-      .set({ title, description, budgetMin, budgetMax, urgency, locationText, updatedAt: new Date() })
+      .set(updates)
       .where(eq(jobs.id, req.params.id as string)).returning();
     return res.json(updated);
   });
@@ -1121,7 +1144,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Enrich with job + category + conversation
       const enriched = await Promise.all(rawQuotes.map(async (q) => {
-        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId })
+        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId, referenceCode: jobs.referenceCode })
           .from(jobs).where(eq(jobs.id, q.jobId));
         const [cat] = job?.categoryId
           ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId))
@@ -1131,6 +1154,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           .limit(1);
         return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null };
       }));
+
+      // For professionals: separate active quotes from archived (closed/completed jobs)
+      if (userRow.role === "PROFESSIONAL") {
+        const activeStatuses = ["LIVE", "IN_DISCUSSION", "MATCHED", "BOOSTED"];
+        const active = enriched.filter(q => q.job && activeStatuses.includes(q.job.status));
+        const archived = enriched.filter(q => !q.job || !activeStatuses.includes(q.job.status));
+        return res.json({ quotes: active, archived });
+      }
 
       return res.json(enriched);
     } catch (e: any) {
@@ -3744,6 +3775,50 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       return res.json({ reply: result.reply });
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
+  });
+
+  // AI: Create job draft from floating widget conversation
+  app.post("/api/ai/create-draft", requireAuth, requireRole("CUSTOMER"), async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { title, description, categorySlug, locationText, locationTown, locationEircode, urgency, budgetMin, budgetMax } = req.body;
+      if (!title || !description) return res.status(400).json({ error: "title and description required" });
+
+      // Find category by slug or use first match
+      let categoryId: string | null = null;
+      if (categorySlug) {
+        const [cat] = await db.select().from(serviceCategories).where(eq(serviceCategories.slug, categorySlug));
+        categoryId = cat?.id || null;
+      }
+      if (!categoryId) {
+        // AI auto-detect category
+        const allCats = await db.select().from(serviceCategories);
+        const catResult = detectCategory(title, description, allCats);
+        const matchedCat = allCats.find(c => c.slug === catResult.categorySlug);
+        categoryId = matchedCat?.id || allCats[0]?.id || null;
+      }
+      if (!categoryId) return res.status(400).json({ error: "No categories available" });
+
+      const [cat] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, categoryId));
+      const creditCost = cat?.baseCreditCost || 2;
+
+      const refCode = "SC-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      const [job] = await db.insert(jobs).values({
+        customerId: userId, categoryId, title, description,
+        referenceCode: refCode,
+        budgetMin: budgetMin ? String(budgetMin) : null,
+        budgetMax: budgetMax ? String(budgetMax) : null,
+        urgency: urgency || "NORMAL",
+        status: "DRAFT",
+        creditCost, originalCreditCost: creditCost,
+        locationText: locationText || null,
+        locationTown: locationTown || null,
+        locationEircode: locationEircode || null,
+      }).returning();
+
+      return res.status(201).json(job);
     } catch (e: any) { return res.status(500).json({ error: e.message }); }
   });
 
