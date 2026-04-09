@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { detectObfuscatedPhone } from "./contactDetection";
 
 // ─── SEVERITY TIERS ───────────────────────────────────────────────────────────
 // MILD: replaced with asterisks, user warned
@@ -256,60 +257,19 @@ const CONTACT_PATTERNS = [
   { regex: /\b[A-Za-z]\d{2}\s?[A-Za-z0-9]{4}\b/gi, flag: "EIRCODE" },
 ];
 
-// Spelled-out number detection
-const NUMBER_WORDS: Record<string, string> = {
-  "zero": "0", "oh": "0", "o": "0",
-  "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-  "six": "6", "seven": "7", "eight": "8", "nine": "9",
-  "wan": "1", "tree": "3", "fiver": "5", "sixer": "6", // Irish slang
-};
+// ─── OBFUSCATED NUMBER DETECTION (delegated to contactDetection.ts) ──────────
+// The old detectSpelledOutNumbers() only handled exact word matches.
+// The new system handles misspellings, merged words, phonetic variants,
+// and confidence-based scoring. See contactDetection.ts for full pipeline.
 
-function detectSpelledOutNumbers(text: string): { hasNumber: boolean; flag: string } {
-  const lower = text.toLowerCase();
-
-  // Pattern: sequences of number words that could form a phone number
-  // e.g., "oh eight seven one two three four five six seven"
-  const words = lower.split(/[\s,\-\.]+/);
-  let digitSequence = "";
-  let startedSequence = false;
-
-  for (const word of words) {
-    if (NUMBER_WORDS[word] !== undefined || /^\d$/.test(word)) {
-      digitSequence += NUMBER_WORDS[word] || word;
-      startedSequence = true;
-    } else if (startedSequence) {
-      // Break in sequence
-      if (digitSequence.length >= 7) {
-        return { hasNumber: true, flag: "SPOKEN_PHONE" };
-      }
-      digitSequence = "";
-      startedSequence = false;
-    }
-  }
-
-  // Check final sequence
-  if (digitSequence.length >= 7) {
-    return { hasNumber: true, flag: "SPOKEN_PHONE" };
-  }
-
-  // Pattern: mixed format "087-one-two-three-four-five-six-seven"
-  const mixedPattern = /\b\d{2,4}[\s\-]*((?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|wan|tree)[\s\-]*){4,})/gi;
-  if (mixedPattern.test(lower)) {
-    return { hasNumber: true, flag: "MIXED_PHONE" };
-  }
-
-  return { hasNumber: false, flag: "" };
-}
-
-export function maskContactInfo(text: string): { masked: string; flags: string[]; hitCount: number } {
+export function maskContactInfo(text: string): { masked: string; flags: string[]; hitCount: number; obfuscationResult?: any } {
   if (!text) return { masked: text, flags: [], hitCount: 0 };
   let masked = text;
   const flags: string[] = [];
   let hitCount = 0;
 
-  // Standard regex-based contact detection
+  // 1. Standard regex-based contact detection (emails, URLs, raw digits, social handles)
   for (const { regex, flag } of CONTACT_PATTERNS) {
-    // Reset regex lastIndex
     regex.lastIndex = 0;
     const matches = masked.match(regex);
     if (matches && matches.length > 0) {
@@ -320,17 +280,17 @@ export function maskContactInfo(text: string): { masked: string; flags: string[]
     }
   }
 
-  // Spelled-out / mixed number detection
-  const spokenResult = detectSpelledOutNumbers(masked);
-  if (spokenResult.hasNumber) {
-    flags.push(spokenResult.flag);
+  // 2. Robust obfuscated phone detection (handles misspellings, merged words, phonetic tricks)
+  const obfuscationResult = detectObfuscatedPhone(text);
+  if (obfuscationResult.blocked) {
+    flags.push(...obfuscationResult.reasons);
     hitCount += 1;
-    // Replace the spoken number portion with placeholder
-    // Since we can't easily substring-replace spoken numbers, add a warning suffix
-    masked = masked + "\n\n⚠️ [Potential phone number detected and hidden — please use in-app messaging]";
+    // Replace the entire message content since the obfuscated number
+    // is spread across the text and can't be cleanly substring-replaced
+    masked = CONTACT_REPLACEMENT;
   }
 
-  return { masked, flags, hitCount };
+  return { masked, flags, hitCount, obfuscationResult };
 }
 
 // ─── COMBINED PROCESSING ──────────────────────────────────────────────────────

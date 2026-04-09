@@ -442,12 +442,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       // ── Content moderation ────────────────────────────────────────────────
-      const descMod = moderateText(description, { fieldName: "job description" });
+      const descMod = moderateText(description, { fieldName: "job description", surface: "job_description", route: "POST /api/jobs", userId });
       if (descMod.blocked) {
+        if (descMod.logEntry) console.warn("[MODERATION BLOCK]", JSON.stringify(descMod.logEntry));
         return res.status(422).json({ error: descMod.userMessage });
       }
-      const titleMod = moderateText(title, { fieldName: "job title" });
+      const titleMod = moderateText(title, { fieldName: "job title", surface: "job_title", route: "POST /api/jobs", userId });
       if (titleMod.blocked) {
+        if (titleMod.logEntry) console.warn("[MODERATION BLOCK]", JSON.stringify(titleMod.logEntry));
         return res.status(422).json({ error: titleMod.userMessage });
       }
 
@@ -1060,8 +1062,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Moderate quote message — phone never allowed in quote text
       if (message) {
-        const quoteMod = moderateText(message, { fieldName: "quote message" });
+        const quoteMod = moderateText(message, { fieldName: "quote message", surface: "quote", route: "POST /api/quotes", userId: proId });
         if (quoteMod.blocked) {
+          if (quoteMod.logEntry) console.warn("[MODERATION BLOCK]", JSON.stringify(quoteMod.logEntry));
           return res.status(422).json({ error: quoteMod.userMessage });
         }
       }
@@ -1548,8 +1551,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       // Run unified moderation — blocks if phone detected and not allowed
-      const chatMod = moderateText(content, { allowPhone, fieldName: "message" });
+      const chatMod = moderateText(content, {
+        allowPhone,
+        fieldName: "message",
+        route: "POST /api/chat/conversations/:id/messages",
+        surface: "chat",
+        userId,
+        userRole: req.user!.role,
+        referenceId: convId,
+      });
       if (chatMod.blocked) {
+        // Structured logging for admin visibility
+        if (chatMod.logEntry) {
+          console.warn("[MODERATION BLOCK]", JSON.stringify(chatMod.logEntry));
+          // Also create an admin audit log
+          try {
+            await db.insert(adminAuditLogs).values({
+              adminId: "system",
+              action: "MODERATION_BLOCK",
+              resourceType: "message",
+              resourceId: convId,
+              details: {
+                ...chatMod.logEntry,
+                originalText: chatMod.logEntry.originalText.substring(0, 500), // cap for storage
+              },
+              ipAddress: (req as any).ip || "unknown",
+            });
+          } catch (_logErr) {
+            // logging failure is non-blocking
+          }
+        }
         return res.status(422).json({ error: chatMod.userMessage });
       }
 
