@@ -250,23 +250,34 @@ export default function ProJobFeed() {
   const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("my");
   const [unlockJob, setUnlockJob] = useState<any | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   // Track which jobs should show inline quote form after unlock
   const [quoteJobId, setQuoteJobId] = useState<string | null>(null);
 
-  const { data: pageData = [], isLoading, isFetching } = useQuery<any[]>({
+  const { data: rawFeedData, isLoading, isFetching } = useQuery<any>({
     queryKey: ["/api/jobs/feed", categoryFilter, page],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
-      if (categoryFilter !== "all") params.set("categoryId", categoryFilter);
+      if (categoryFilter === "browse_all") {
+        // Explicit "browse all categories" mode — tell backend to skip category filtering
+        params.set("scope", "all");
+      } else if (categoryFilter !== "my") {
+        // Specific single category selected
+        params.set("categoryId", categoryFilter);
+      }
+      // When categoryFilter === "my" (default), no categoryId/scope sent → backend auto-filters to pro's categories
       const res = await apiRequest("GET", `/api/jobs/feed?${params}`);
       if (!res.ok) throw new Error("Failed to load jobs");
       return res.json();
     },
   });
+
+  // Handle both array response (normal) and object response (noCategories flag)
+  const noCategories = rawFeedData && !Array.isArray(rawFeedData) && rawFeedData.noCategories;
+  const pageData: any[] = Array.isArray(rawFeedData) ? rawFeedData : rawFeedData?.jobs ?? [];
 
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/categories"] });
 
@@ -334,10 +345,11 @@ export default function ProJobFeed() {
           </div>
           <Select value={categoryFilter} onValueChange={handleCategoryChange}>
             <SelectTrigger className="w-full md:w-56 h-11 bg-white/60 dark:bg-black/40 backdrop-blur-md border-white/40 dark:border-white/10 rounded-xl">
-              <SelectValue placeholder="All categories" />
+              <SelectValue placeholder="My trades" />
             </SelectTrigger>
             <SelectContent className="rounded-xl border-white/20 backdrop-blur-xl bg-white/90 dark:bg-black/90">
-              <SelectItem value="all">All categories</SelectItem>
+              <SelectItem value="my">My trades</SelectItem>
+              <SelectItem value="browse_all">Browse all categories</SelectItem>
               {(categories as any[]).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -356,6 +368,18 @@ export default function ProJobFeed() {
 
         {isLoading && page === 1 ? (
           <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 rounded-2xl bg-white/40 dark:bg-white/5 animate-pulse" />)}</div>
+        ) : noCategories ? (
+          <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
+            <div className="w-16 h-16 rounded-full bg-amber-100/80 dark:bg-amber-900/30 flex items-center justify-center mx-auto mb-4">
+              <Briefcase className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+            </div>
+            <p className="font-heading font-medium text-lg text-foreground">Set up your trade categories</p>
+            <p className="text-sm mt-1 max-w-sm mx-auto">Complete your professional profile with your service categories to see relevant jobs in your feed.</p>
+            <div className="flex gap-3 justify-center mt-4">
+              <Button variant="default" onClick={() => setLocation("/pro/profile")}>Complete Profile</Button>
+              <Button variant="outline" onClick={() => handleCategoryChange("browse_all")}>Browse all jobs</Button>
+            </div>
+          </div>
         ) : filteredJobs.length === 0 ? (
           <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
             <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">

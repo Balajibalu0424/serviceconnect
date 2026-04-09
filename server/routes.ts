@@ -564,13 +564,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/jobs/feed", requireAuth, requireRole("PROFESSIONAL", "ADMIN"), async (req: AuthRequest, res: Response) => {
-    const { categoryId, location } = req.query as any;
+    const { categoryId, location, scope } = req.query as any;
     const { limit, offset } = safePagination(req.query as any);
 
     let conditions: any[] = [
       inArray(jobs.status, ["LIVE", "BOOSTED", "IN_DISCUSSION"])
     ];
-    if (categoryId) conditions.push(eq(jobs.categoryId, categoryId));
+
+    // ─── Category filtering ───────────────────────────────────────────────
+    // If a specific categoryId is passed, filter to that single category.
+    // If scope=all is explicitly passed, show all categories (browse mode).
+    // Otherwise, auto-filter to the professional's registered service categories.
+    if (categoryId) {
+      conditions.push(eq(jobs.categoryId, categoryId));
+    } else if (scope !== "all") {
+      // Fetch the requesting professional's service categories
+      const [profile] = await db.select({ serviceCategories: professionalProfiles.serviceCategories })
+        .from(professionalProfiles)
+        .where(eq(professionalProfiles.userId, req.user!.userId));
+
+      const proCats: string[] = profile?.serviceCategories ?? [];
+
+      if (proCats.length > 0) {
+        // Only show jobs matching the pro's registered categories
+        conditions.push(inArray(jobs.categoryId, proCats));
+      } else {
+        // Defensive: pro has no categories — return empty result with a hint
+        return res.json({ jobs: [], noCategories: true });
+      }
+    }
 
     const liveJobs = await db.select({
       job: jobs,
