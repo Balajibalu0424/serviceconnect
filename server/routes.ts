@@ -1564,16 +1564,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured logging for admin visibility
         if (chatMod.logEntry) {
           console.warn("[MODERATION BLOCK]", JSON.stringify(chatMod.logEntry));
-          // Also create an admin audit log
+          // Also create an admin audit log — use the acting user's ID as adminId
+          // since "system" is not a valid user reference
           try {
             await db.insert(adminAuditLogs).values({
-              adminId: "system",
+              adminId: userId,
               action: "MODERATION_BLOCK",
               resourceType: "message",
               resourceId: convId,
-              details: {
-                ...chatMod.logEntry,
-                originalText: chatMod.logEntry.originalText.substring(0, 500), // cap for storage
+              changes: {
+                blocked: true,
+                reason: chatMod.reason,
+                flags: chatMod.flags,
+                confidence: chatMod.logEntry.confidence,
+                reconstructedDigits: chatMod.logEntry.reconstructedDigits,
+                normalizedText: chatMod.logEntry.normalizedText.substring(0, 500),
+                originalText: chatMod.logEntry.originalText.substring(0, 500),
               },
               ipAddress: (req as any).ip || "unknown",
             });
