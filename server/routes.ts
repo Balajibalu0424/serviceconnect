@@ -1235,15 +1235,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     
     const rawBookings = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
     
-    // Enrich bookings with nested Job and User data
+    // Enrich bookings with nested Job, User, and Conversation data
     const enrichedBookings = await Promise.all(rawBookings.map(async (b) => {
       const [job] = await db.select().from(jobs).where(eq(jobs.id, b.jobId));
       const [customer] = await db.select().from(users).where(eq(users.id, b.customerId));
       const [professional] = await db.select().from(users).where(eq(users.id, b.professionalId));
-      return { 
-        ...b, 
-        job, 
-        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl } : null,
+      // Find the conversation linked to this job so chat buttons can deep-link
+      const [conv] = await db.select({ id: conversations.id }).from(conversations)
+        .where(eq(conversations.jobId, b.jobId)).limit(1);
+      return {
+        ...b,
+        job,
+        conversationId: conv?.id || null,
+        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl, phone: customer.phone } : null,
         professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: null } : null
       };
     }));
@@ -2896,6 +2900,63 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       .where(eq(conversationParticipants.userId, userId))
       .orderBy(desc(conversations.lastMessageAt));
     return res.json(rows.map((r: any) => r.conversations));
+  });
+
+  // POST /api/conversations — find or create a DIRECT conversation
+  // Used by booking chat buttons: finds conversation by jobId (preferred) or by participant pair
+  app.post("/api/conversations", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { participantId, jobId } = req.body;
+      if (!participantId) return res.status(400).json({ error: "participantId required" });
+
+      // 1. If jobId provided, find the conversation for this job (most accurate)
+      if (jobId) {
+        const myJobConvs = await db
+          .select({ conv: conversations })
+          .from(conversations)
+          .innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id))
+          .where(and(eq(conversations.jobId, jobId), eq(conversationParticipants.userId, userId)));
+        if (myJobConvs.length > 0) {
+          return res.json({ id: myJobConvs[0].conv.id, ...myJobConvs[0].conv });
+        }
+      }
+
+      // 2. Find any existing DIRECT conversation between these two users
+      const myConvIds = await db
+        .select({ convId: conversationParticipants.conversationId })
+        .from(conversationParticipants)
+        .where(eq(conversationParticipants.userId, userId));
+
+      if (myConvIds.length > 0) {
+        const convIdList = myConvIds.map(r => r.convId);
+        const sharedConvs = await db
+          .select({ convId: conversationParticipants.conversationId })
+          .from(conversationParticipants)
+          .where(and(
+            eq(conversationParticipants.userId, participantId),
+            inArray(conversationParticipants.conversationId, convIdList)
+          ));
+        if (sharedConvs.length > 0) {
+          // Return first shared conversation
+          const [existingConv] = await db.select().from(conversations).where(eq(conversations.id, sharedConvs[0].convId));
+          if (existingConv) return res.json(existingConv);
+        }
+      }
+
+      // 3. Create a new DIRECT conversation
+      const [newConv] = await db.insert(conversations).values({
+        type: "DIRECT", status: "ACTIVE", createdBy: userId,
+        jobId: jobId || null, lastMessageAt: new Date(),
+      }).returning();
+      await db.insert(conversationParticipants).values([
+        { conversationId: newConv.id, userId, role: "MEMBER" },
+        { conversationId: newConv.id, userId: participantId, role: "MEMBER" },
+      ]);
+      return res.json(newConv);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

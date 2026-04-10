@@ -1,4 +1,4 @@
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { MapPin, Clock, DollarSign, Zap, CheckCircle2, XCircle, Star, AlertTriangle, MessageCircle, Pencil, Hash, Sparkles } from "lucide-react";
+import { MapPin, Clock, DollarSign, Zap, CheckCircle2, XCircle, Star, AlertTriangle, MessageCircle, Pencil, Hash, Sparkles, ArrowRight, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ export default function JobDetail() {
   const [, params] = useRoute("/jobs/:id");
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const qc = useQueryClient();
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [aftercareResponse, setAftercareResponse] = useState<"SORTED" | "NOT_SORTED" | null>(null);
@@ -54,7 +55,11 @@ export default function JobDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/quotes"] });
       qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
-      toast({ title: "Quote accepted!", description: "A booking has been created." });
+      qc.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({
+        title: "Quote accepted!",
+        description: "A booking has been confirmed. You can view it in My Bookings.",
+      });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -223,6 +228,7 @@ export default function JobDetail() {
   const canClose = ["LIVE", "IN_DISCUSSION", "MATCHED", "BOOSTED"].includes(job.status) && job.customerId === user?.id;
   const canEdit = EDITABLE_STATUSES.includes(job.status) && job.customerId === user?.id;
   const isCompleted = job.status === "COMPLETED";
+  const isMatched = job.status === "MATCHED";
 
   return (
     <DashboardLayout>
@@ -255,6 +261,33 @@ export default function JobDetail() {
             </span>
           </div>
         </div>
+
+        {/* Matched / booking confirmed banner */}
+        {isMatched && acceptedQuote && (
+          <Card className="border-green-400/60 bg-green-50/60 dark:bg-green-950/20">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-semibold text-sm text-green-800 dark:text-green-300">Booking confirmed!</p>
+                  <p className="text-xs text-green-700/80 dark:text-green-400/80 mt-0.5">
+                    You accepted a quote of <strong>€{acceptedQuote.amount}</strong>. A booking has been created.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 shadow-sm" onClick={() => navigate("/bookings")}>
+                      <ArrowRight className="w-3.5 h-3.5" /> View Booking
+                    </Button>
+                    {acceptedQuote.conversationId && (
+                      <Button size="sm" variant="outline" className="gap-1.5 border-green-300 text-green-700 hover:bg-green-50" onClick={() => navigate(`/chat?conversationId=${acceptedQuote.conversationId}`)}>
+                        <MessageSquare className="w-3.5 h-3.5" /> Chat
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Aftercare banner */}
         {isAftercare && !boostOffer && !showDeclineBoostConfirm && (
@@ -431,13 +464,29 @@ export default function JobDetail() {
                           <Button size="sm" className="gap-2 rounded-xl h-10 px-5 flex-1 md:flex-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all w-full"
                             onClick={() => acceptQuote.mutate(q.id)} disabled={acceptQuote.isPending}
                             data-testid={`button-accept-quote-${q.id}`}>
-                            <CheckCircle2 className="w-4 h-4" /> Accept Quote
+                            <CheckCircle2 className="w-4 h-4" />
+                            {acceptQuote.isPending ? "Accepting…" : "Accept Quote"}
                           </Button>
                           <Button size="sm" variant="outline" className="gap-2 rounded-xl h-10 flex-1 md:flex-auto hover:bg-destructive/5 hover:text-destructive hover:border-destructive/30 transition-colors w-full"
                             onClick={() => rejectQuote.mutate(q.id)} disabled={rejectQuote.isPending}
                             data-testid={`button-reject-quote-${q.id}`}>
                             <XCircle className="w-4 h-4" /> Decline
                           </Button>
+                        </div>
+                      )}
+                      {q.status === "ACCEPTED" && (
+                        <div className="flex flex-row md:flex-col gap-2 shrink-0 w-full md:w-auto mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 border-green-200 dark:border-green-900">
+                          <Button size="sm" variant="outline" className="gap-2 rounded-xl h-10 flex-1 md:flex-auto border-green-300 bg-green-50 hover:bg-green-100 text-green-700 w-full"
+                            onClick={() => navigate("/bookings")}
+                            data-testid="button-view-booking">
+                            <ArrowRight className="w-4 h-4" /> View Booking
+                          </Button>
+                          {q.conversationId && (
+                            <Button size="sm" variant="outline" className="gap-2 rounded-xl h-10 flex-1 md:flex-auto w-full"
+                              onClick={() => navigate(`/chat?conversationId=${q.conversationId}`)}>
+                              <MessageSquare className="w-4 h-4" /> Open Chat
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>

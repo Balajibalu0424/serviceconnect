@@ -147,9 +147,10 @@ export default function AiAssistantWidget() {
       const aiReply = data.reply || "I can help you post a job. What service do you need?";
       setMessages([...newMessages, { role: "assistant", content: aiReply }]);
 
-      // After 2+ user messages, show the "Ready to create" option
+      // After 1+ user messages with sufficient detail, show "Ready to create" option
       const userCount = newMessages.filter(m => m.role === "user").length;
-      if (userCount >= 2) {
+      const combinedLen = newMessages.filter(m => m.role === "user").map(m => m.content).join(" ").length;
+      if (userCount >= 1 && combinedLen >= 30) {
         const draft = extractJobDraft(newMessages);
         if (draft && draft.description.length > 20) {
           setDraftData(draft);

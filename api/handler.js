@@ -39132,6 +39132,10 @@ __export(schema_exports, {
   messageTypeEnum: () => messageTypeEnum,
   messages: () => messages,
   notifications: () => notifications,
+  onboardingRoleEnum: () => onboardingRoleEnum,
+  onboardingSessions: () => onboardingSessions,
+  onboardingStatusEnum: () => onboardingStatusEnum,
+  onboardingStepEnum: () => onboardingStepEnum,
   participantRoleEnum: () => participantRoleEnum,
   paymentStatusEnum: () => paymentStatusEnum,
   payments: () => payments,
@@ -39155,7 +39159,10 @@ __export(schema_exports, {
   userSessions: () => userSessions,
   userStatusEnum: () => userStatusEnum,
   users: () => users,
-  verificationLevelEnum: () => verificationLevelEnum
+  verificationChallenges: () => verificationChallenges,
+  verificationChannelEnum: () => verificationChannelEnum,
+  verificationLevelEnum: () => verificationLevelEnum,
+  verificationPurposeEnum: () => verificationPurposeEnum
 });
 
 // node_modules/zod/v3/external.js
@@ -43485,10 +43492,27 @@ var paymentStatusEnum = pgEnum("payment_status", ["PENDING", "COMPLETED", "FAILE
 var spinPrizeEnum = pgEnum("spin_prize", ["CREDITS", "BOOST", "BADGE", "DISCOUNT", "NONE"]);
 var ticketPriorityEnum = pgEnum("ticket_priority", ["LOW", "MEDIUM", "HIGH", "URGENT"]);
 var ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "WAITING", "RESOLVED", "CLOSED"]);
+var onboardingRoleEnum = pgEnum("onboarding_role", ["CUSTOMER", "PROFESSIONAL"]);
+var onboardingStepEnum = pgEnum("onboarding_step", [
+  "ROLE_SELECTION",
+  "JOB_INTAKE",
+  "JOB_REVIEW",
+  "PROFILE_INTAKE",
+  "PROFILE_REVIEW",
+  "PERSONAL_DETAILS",
+  "PERSONAL_REVIEW",
+  "PHONE_OTP",
+  "EMAIL_OTP",
+  "PASSWORD",
+  "COMPLETE"
+]);
+var onboardingStatusEnum = pgEnum("onboarding_status", ["ACTIVE", "COMPLETED", "ABANDONED", "EXPIRED"]);
+var verificationChannelEnum = pgEnum("verification_channel", ["EMAIL", "PHONE"]);
+var verificationPurposeEnum = pgEnum("verification_purpose", ["ONBOARDING", "PHONE_UPDATE"]);
 var users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
-  phone: text("phone").notNull(),
+  phone: text("phone"),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("CUSTOMER"),
   status: userStatusEnum("status").notNull().default("ACTIVE"),
@@ -43525,11 +43549,52 @@ var phoneVerificationTokens = pgTable("phone_verification_tokens", {
   used: boolean("used").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`)
 }, (t) => [index("phone_tokens_user_idx").on(t.userId)]);
+var onboardingSessions = pgTable("onboarding_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  role: onboardingRoleEnum("role").notNull(),
+  currentStep: onboardingStepEnum("current_step").notNull().default("ROLE_SELECTION"),
+  status: onboardingStatusEnum("status").notNull().default("ACTIVE"),
+  payload: json("payload").$type().notNull().default({}),
+  transcript: json("transcript").$type().notNull().default([]),
+  verificationState: json("verification_state").$type().notNull().default({}),
+  expiresAt: timestamp("expires_at").notNull(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`)
+}, (t) => [
+  index("onboarding_status_idx").on(t.status),
+  index("onboarding_expires_idx").on(t.expiresAt),
+  index("onboarding_role_idx").on(t.role)
+]);
+var verificationChallenges = pgTable("verification_challenges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").references(() => onboardingSessions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
+  channel: verificationChannelEnum("channel").notNull(),
+  purpose: verificationPurposeEnum("purpose").notNull().default("ONBOARDING"),
+  target: text("target").notNull(),
+  hashedCode: text("hashed_code").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  sentCount: integer("sent_count").notNull().default(1),
+  expiresAt: timestamp("expires_at").notNull(),
+  verifiedAt: timestamp("verified_at"),
+  invalidatedAt: timestamp("invalidated_at"),
+  lastSentAt: timestamp("last_sent_at").notNull().default(sql`now()`),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`)
+}, (t) => [
+  index("verification_session_idx").on(t.sessionId),
+  index("verification_user_idx").on(t.userId),
+  index("verification_target_idx").on(t.target),
+  index("verification_channel_idx").on(t.channel)
+]);
 var verificationLevelEnum = pgEnum("verification_level", ["NONE", "SELF_DECLARED", "DOCUMENT_VERIFIED"]);
 var professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   businessName: text("business_name"),
+  credentials: text("credentials"),
   licenseNumber: text("license_number"),
   insuranceVerified: boolean("insurance_verified").notNull().default(false),
   yearsExperience: integer("years_experience"),
@@ -43577,7 +43642,10 @@ var jobs = pgTable("jobs", {
   description: text("description").notNull(),
   budgetMin: decimal("budget_min", { precision: 10, scale: 2 }),
   budgetMax: decimal("budget_max", { precision: 10, scale: 2 }),
+  referenceCode: varchar("reference_code", { length: 10 }),
   locationText: text("location_text"),
+  locationTown: text("location_town"),
+  locationEircode: varchar("location_eircode", { length: 10 }),
   lat: decimal("lat", { precision: 10, scale: 7 }),
   lng: decimal("lng", { precision: 10, scale: 7 }),
   urgency: urgencyEnum("urgency").notNull().default("NORMAL"),
@@ -43998,6 +44066,410 @@ function requireRole(...roles) {
   };
 }
 
+// server/contactDetection.ts
+var ALIAS_DEFS = [
+  ["0", [
+    "zero",
+    "oh",
+    "o",
+    "nought",
+    "nil",
+    "zip",
+    "zilch",
+    "zer0",
+    "z3ro",
+    "zro",
+    "zer",
+    "zere",
+    "zeroo"
+  ]],
+  ["1", [
+    "one",
+    "won",
+    "wan",
+    "wun",
+    "oen",
+    "1ne",
+    "ine",
+    "wone",
+    "onee"
+  ]],
+  ["2", [
+    "two",
+    "too",
+    "to",
+    "tu",
+    "tew",
+    "tw0",
+    "2wo",
+    "tow",
+    "twoo",
+    "tue"
+  ]],
+  ["3", [
+    "three",
+    "tree",
+    "tre",
+    "thr33",
+    "thre",
+    "th3ee",
+    "free",
+    "thee",
+    "thri",
+    "tri",
+    "trea",
+    "3ee"
+  ]],
+  ["4", [
+    "four",
+    "for",
+    "fore",
+    "foor",
+    "fo",
+    "4our",
+    "foor",
+    "foe",
+    "foer",
+    "forr",
+    "fuor",
+    "foir"
+  ]],
+  ["5", [
+    "five",
+    "fiv",
+    "fiv3",
+    "fve",
+    "5ive",
+    "fyve",
+    "fife",
+    "fiver"
+  ]],
+  ["6", [
+    "six",
+    "sicks",
+    "s1x",
+    "siz",
+    "6ix",
+    "syx",
+    "sicks",
+    "sik",
+    "sixx",
+    "sx"
+  ]],
+  ["7", [
+    "seven",
+    "sevin",
+    "siven",
+    "sevn",
+    "sven",
+    "s3ven",
+    "7even",
+    "sevn",
+    "sevan",
+    "sevun",
+    "svn",
+    "sev"
+  ]],
+  ["8", [
+    "eight",
+    "ate",
+    "eit",
+    "ait",
+    "aight",
+    "eigh",
+    "8ight",
+    "eit",
+    "acht",
+    "ayght",
+    "eght",
+    "egt"
+  ]],
+  ["9", [
+    "nine",
+    "nein",
+    "nien",
+    "nyne",
+    "9ine",
+    "nin3",
+    "nein",
+    "nyne",
+    "nain",
+    "nien"
+  ]]
+];
+var ALIAS_TO_DIGIT = /* @__PURE__ */ new Map();
+var ALL_ALIASES_BY_LENGTH = [];
+for (const [digit, aliases] of ALIAS_DEFS) {
+  ALIAS_TO_DIGIT.set(digit, digit);
+  for (const alias of aliases) {
+    ALIAS_TO_DIGIT.set(alias.toLowerCase(), digit);
+    ALL_ALIASES_BY_LENGTH.push(alias.toLowerCase());
+  }
+}
+ALL_ALIASES_BY_LENGTH.sort((a, b) => b.length - a.length);
+var MULTIPLIERS = {
+  double: 2,
+  dbl: 2,
+  duble: 2,
+  dubble: 2,
+  triple: 3,
+  treble: 3,
+  tripl: 3
+};
+var FILLER_WORDS = /* @__PURE__ */ new Set([
+  "and",
+  "then",
+  "by",
+  "comma",
+  "dash",
+  "dot",
+  "point",
+  "space",
+  "is",
+  "the",
+  "its",
+  "a",
+  "of",
+  "or"
+]);
+var CONTACT_INTENT_PATTERNS = [
+  /\b(?:call|ring|text|phone|whatsapp|message|contact|reach|hit)\s+(?:me|us)\b/i,
+  /\b(?:my|me)\s+(?:number|phone|mobile|cell|digits?)\s+(?:is|:|are)\b/i,
+  /\b(?:give|send|dm|msg)\s+(?:me|us|you)\s+(?:a\s+)?(?:call|ring|text|message)\b/i,
+  /\b(?:add|follow|find|dm)\s+(?:me|us)\s+(?:on|at|@)\b/i,
+  /\b(?:my|the)\s+(?:insta(?:gram)?|snap(?:chat)?|whatsapp|wa|tiktok|twitter|facebook|fb|telegram|signal|viber)\s+(?:is|:)\b/i,
+  /\b(?:reach|find|contact|get|hit)\s+(?:me|us)\s+(?:at|on|via|through|outside)\b/i,
+  /\b(?:off\s*(?:the\s+)?(?:app|platform|site))\b/i,
+  /\b(?:here'?s?\s+(?:my|me)\s+(?:number|phone|details?))\b/i
+];
+function normalizeText(text2) {
+  let t = text2;
+  t = t.toLowerCase();
+  t = t.replace(/[\u200B-\u200F\u2028-\u202F\uFEFF\u00AD]/g, "");
+  const unicodeDigitMap = {
+    "\u0660": "0",
+    "\u06F0": "0",
+    // Arabic-Indic
+    "\u0661": "1",
+    "\u06F1": "1",
+    "\u0662": "2",
+    "\u06F2": "2",
+    "\u0663": "3",
+    "\u06F3": "3",
+    "\u0664": "4",
+    "\u06F4": "4",
+    "\u0665": "5",
+    "\u06F5": "5",
+    "\u0666": "6",
+    "\u06F6": "6",
+    "\u0667": "7",
+    "\u06F7": "7",
+    "\u0668": "8",
+    "\u06F8": "8",
+    "\u0669": "9",
+    "\u06F9": "9"
+  };
+  for (const [uni, dig] of Object.entries(unicodeDigitMap)) {
+    t = t.split(uni).join(dig);
+  }
+  t = t.replace(/(\D)3(\D)/g, "$1e$2");
+  t = t.replace(/^3(\D)/g, "e$1");
+  t = t.replace(/(\D)3$/g, "$1e");
+  t = t.replace(/(\D)1(\D)/g, "$1i$2");
+  t = t.replace(/(\D)0(\D)/g, "$1o$2");
+  t = t.replace(/[\-\/\\|]+/g, " ");
+  t = t.replace(/\+(\d)/g, "$1");
+  t = t.replace(/\s+/g, " ").trim();
+  return t;
+}
+function tokenize(text2) {
+  return text2.split(/[\s,;:!?()[\]{}"']+/).map((t) => t.replace(/^[._]+|[._]+$/g, "")).filter((t) => t.length > 0);
+}
+function decomposeToken(token) {
+  if (/^\d$/.test(token)) return [token];
+  if (ALIAS_TO_DIGIT.has(token)) return [ALIAS_TO_DIGIT.get(token)];
+  if (/^\d+$/.test(token)) return token.split("");
+  if (MULTIPLIERS[token] !== void 0) return [`*${token}`];
+  if (FILLER_WORDS.has(token)) return ["_SKIP_"];
+  const digits = [];
+  let remaining = token;
+  let lastWasMatch = false;
+  while (remaining.length > 0) {
+    let matched = false;
+    for (const alias of ALL_ALIASES_BY_LENGTH) {
+      if (remaining.startsWith(alias)) {
+        digits.push(ALIAS_TO_DIGIT.get(alias));
+        remaining = remaining.slice(alias.length);
+        matched = true;
+        lastWasMatch = true;
+        break;
+      }
+    }
+    if (!matched) {
+      if (/^\d/.test(remaining)) {
+        digits.push(remaining[0]);
+        remaining = remaining.slice(1);
+        lastWasMatch = true;
+      } else {
+        if (digits.length === 0) {
+          return [token];
+        }
+        remaining = remaining.slice(1);
+        lastWasMatch = false;
+      }
+    }
+  }
+  return digits.length >= 2 ? digits : [token];
+}
+function reconstructSequences(tokens) {
+  const sequences = [];
+  let currentDigits = "";
+  let currentTokenCount = 0;
+  let currentGapCount = 0;
+  let currentStart = -1;
+  let matchedTokens = [];
+  let consecutiveGaps = 0;
+  const MAX_CONSECUTIVE_GAPS = 2;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const decomposed = decomposeToken(token);
+    const digitParts = decomposed.filter((d) => /^\d$/.test(d));
+    const isMultiplier = decomposed.some((d) => d.startsWith("*"));
+    const isSkip = decomposed.includes("_SKIP_");
+    if (digitParts.length > 0) {
+      if (currentStart === -1) currentStart = i;
+      if (isMultiplier && currentDigits.length > 0) {
+        const mult = MULTIPLIERS[decomposed.find((d) => d.startsWith("*")).slice(1)] || 2;
+        const lastDigit = currentDigits[currentDigits.length - 1];
+        currentDigits += lastDigit.repeat(mult - 1);
+      }
+      currentDigits += digitParts.join("");
+      currentTokenCount += 1;
+      matchedTokens.push(token);
+      consecutiveGaps = 0;
+    } else if (isMultiplier && currentDigits.length > 0) {
+      matchedTokens.push(token);
+      consecutiveGaps = 0;
+    } else if ((isSkip || FILLER_WORDS.has(token)) && currentDigits.length > 0) {
+      consecutiveGaps += 1;
+      if (consecutiveGaps <= MAX_CONSECUTIVE_GAPS) {
+        currentGapCount += 1;
+        continue;
+      }
+      if (currentDigits.length >= 5) {
+        sequences.push({
+          digits: currentDigits,
+          tokenCount: currentTokenCount,
+          gapCount: currentGapCount,
+          startIndex: currentStart,
+          matchedTokens: [...matchedTokens]
+        });
+      }
+      currentDigits = "";
+      currentTokenCount = 0;
+      currentGapCount = 0;
+      currentStart = -1;
+      matchedTokens = [];
+      consecutiveGaps = 0;
+    } else {
+      if (currentDigits.length >= 5) {
+        sequences.push({
+          digits: currentDigits,
+          tokenCount: currentTokenCount,
+          gapCount: currentGapCount,
+          startIndex: currentStart,
+          matchedTokens: [...matchedTokens]
+        });
+      }
+      currentDigits = "";
+      currentTokenCount = 0;
+      currentGapCount = 0;
+      currentStart = -1;
+      matchedTokens = [];
+      consecutiveGaps = 0;
+    }
+  }
+  if (currentDigits.length >= 5) {
+    sequences.push({
+      digits: currentDigits,
+      tokenCount: currentTokenCount,
+      gapCount: currentGapCount,
+      startIndex: currentStart,
+      matchedTokens: [...matchedTokens]
+    });
+  }
+  return sequences;
+}
+function scoreSequence(seq, hasContactIntent) {
+  let score = 0;
+  if (seq.digits.length >= 10) score += 0.5;
+  else if (seq.digits.length >= 7) score += 0.35;
+  else if (seq.digits.length >= 5) score += 0.15;
+  if (/^08[3-9]/.test(seq.digits)) score += 0.25;
+  if (/^07\d/.test(seq.digits)) score += 0.2;
+  if (/^0[12]\d/.test(seq.digits)) score += 0.15;
+  if (/^353/.test(seq.digits)) score += 0.25;
+  if (/^44/.test(seq.digits)) score += 0.2;
+  if (/^1\d{3}/.test(seq.digits)) score += 0.1;
+  if (seq.gapCount > 0 && seq.digits.length >= 7) score += 0.05;
+  if (hasContactIntent) score += 0.25;
+  if (seq.tokenCount >= 7) score += 0.1;
+  if (seq.digits.length === 10 || seq.digits.length === 11) score += 0.1;
+  return Math.min(1, score);
+}
+function detectContactIntent(text2) {
+  return CONTACT_INTENT_PATTERNS.some((re) => {
+    re.lastIndex = 0;
+    return re.test(text2);
+  });
+}
+var BLOCK_THRESHOLD = 0.4;
+function detectObfuscatedPhone(text2) {
+  if (!text2 || text2.trim().length === 0) {
+    return { blocked: false, confidence: 0, reconstructedDigits: "", matchedTokens: [], reasons: [], normalizedText: "" };
+  }
+  const normalized = normalizeText(text2);
+  const tokens = tokenize(normalized);
+  const hasContactIntent = detectContactIntent(normalized);
+  const reasons = [];
+  const sequences = reconstructSequences(tokens);
+  if (sequences.length === 0 && !hasContactIntent) {
+    return { blocked: false, confidence: 0, reconstructedDigits: "", matchedTokens: [], reasons: [], normalizedText: normalized };
+  }
+  let bestScore = 0;
+  let bestSeq = null;
+  for (const seq of sequences) {
+    const score = scoreSequence(seq, hasContactIntent);
+    if (score > bestScore) {
+      bestScore = score;
+      bestSeq = seq;
+    }
+  }
+  if (bestSeq) {
+    if (bestSeq.digits.length >= 10) reasons.push("PHONE_LENGTH_MATCH");
+    else if (bestSeq.digits.length >= 7) reasons.push("PARTIAL_PHONE_MATCH");
+    else reasons.push("SHORT_DIGIT_SEQUENCE");
+    if (/^08[3-9]/.test(bestSeq.digits)) reasons.push("IRISH_MOBILE_PREFIX");
+    if (/^07\d/.test(bestSeq.digits)) reasons.push("UK_MOBILE_PREFIX");
+    if (/^353/.test(bestSeq.digits)) reasons.push("IRISH_INTL_PREFIX");
+    if (bestSeq.gapCount > 0) reasons.push("GAP_OBFUSCATION");
+    if (bestSeq.tokenCount > bestSeq.digits.length * 0.5) reasons.push("WORD_BASED_OBFUSCATION");
+  }
+  if (hasContactIntent) reasons.push("CONTACT_INTENT");
+  if (hasContactIntent && bestSeq && bestSeq.digits.length >= 5) {
+    bestScore = Math.max(bestScore, 0.45);
+  }
+  const blocked = bestScore >= BLOCK_THRESHOLD;
+  return {
+    blocked,
+    confidence: bestScore,
+    reconstructedDigits: bestSeq?.digits || "",
+    matchedTokens: bestSeq?.matchedTokens || [],
+    reasons,
+    normalizedText: normalized
+  };
+}
+
 // server/profanityFilter.ts
 var PROFANITY_LIST = [
   // MILD — common profanity
@@ -44220,51 +44692,6 @@ var CONTACT_PATTERNS = [
   // Eircode (Irish postal codes — can be used as contact vectors)
   { regex: /\b[A-Za-z]\d{2}\s?[A-Za-z0-9]{4}\b/gi, flag: "EIRCODE" }
 ];
-var NUMBER_WORDS = {
-  "zero": "0",
-  "oh": "0",
-  "o": "0",
-  "one": "1",
-  "two": "2",
-  "three": "3",
-  "four": "4",
-  "five": "5",
-  "six": "6",
-  "seven": "7",
-  "eight": "8",
-  "nine": "9",
-  "wan": "1",
-  "tree": "3",
-  "fiver": "5",
-  "sixer": "6"
-  // Irish slang
-};
-function detectSpelledOutNumbers(text2) {
-  const lower = text2.toLowerCase();
-  const words = lower.split(/[\s,\-\.]+/);
-  let digitSequence = "";
-  let startedSequence = false;
-  for (const word of words) {
-    if (NUMBER_WORDS[word] !== void 0 || /^\d$/.test(word)) {
-      digitSequence += NUMBER_WORDS[word] || word;
-      startedSequence = true;
-    } else if (startedSequence) {
-      if (digitSequence.length >= 7) {
-        return { hasNumber: true, flag: "SPOKEN_PHONE" };
-      }
-      digitSequence = "";
-      startedSequence = false;
-    }
-  }
-  if (digitSequence.length >= 7) {
-    return { hasNumber: true, flag: "SPOKEN_PHONE" };
-  }
-  const mixedPattern = /\b\d{2,4}[\s\-]*((?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|wan|tree)[\s\-]*){4,})/gi;
-  if (mixedPattern.test(lower)) {
-    return { hasNumber: true, flag: "MIXED_PHONE" };
-  }
-  return { hasNumber: false, flag: "" };
-}
 function maskContactInfo(text2) {
   if (!text2) return { masked: text2, flags: [], hitCount: 0 };
   let masked = text2;
@@ -44280,13 +44707,13 @@ function maskContactInfo(text2) {
       masked = masked.replace(regex, CONTACT_REPLACEMENT);
     }
   }
-  const spokenResult = detectSpelledOutNumbers(masked);
-  if (spokenResult.hasNumber) {
-    flags.push(spokenResult.flag);
+  const obfuscationResult = detectObfuscatedPhone(text2);
+  if (obfuscationResult.blocked) {
+    flags.push(...obfuscationResult.reasons);
     hitCount += 1;
-    masked = masked + "\n\n\u26A0\uFE0F [Potential phone number detected and hidden \u2014 please use in-app messaging]";
+    masked = CONTACT_REPLACEMENT;
   }
-  return { masked, flags, hitCount };
+  return { masked, flags, hitCount, obfuscationResult };
 }
 function processMessageContent(content, shouldMaskContacts) {
   const original = content;
@@ -44327,82 +44754,90 @@ function processMessageContent(content, shouldMaskContacts) {
 }
 
 // server/moderationService.ts
-var EXTENDED_PHONE_PATTERNS = [
-  // Spaced single digits: "0 8 7 1 2 3 4 5 6" (7+ single digits separated by spaces/dashes)
-  /\b(\d[\s\-]){6,}\d\b/g,
-  // Written number words in sequence (6+ consecutive)
-  /\b(zero|one|two|three|four|five|six|seven|eight|nine|oh|nought)(\s+(zero|one|two|three|four|five|six|seven|eight|nine|oh|nought)){5,}\b/gi,
-  // "oh eight seven" style Irish mobile opener
-  /\b(oh|zero|0)\s*(eight|ate|8)\s*(seven|7)\b/gi,
-  // Separator bypass with dots or slashes: "087.123.4567" or "087/123/4567"
-  /\b0\d{2}[\.\/\\]\d{3}[\.\/\\]\d{4}\b/g,
-  // Partial obfuscation with asterisks: "087 123 ****" still reveals structure
-  /\b0\d{2}\s+\d{3}\s+[\d\*]{4}\b/g,
-  // Parenthetical format: (087) 123 4567
-  /\(\s*0\d{2}\s*\)\s*\d{3}[\s\-]\d{4}/g,
-  // Digit-word-digit pattern: "oh 87 one two three four five six"
-  /\b(?:oh|zero|0)\s*(?:eight|8)\s*(?:\d|zero|one|two|three|four|five|six|seven|eight|nine)\s+(?:(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)[\s,]+){4,}/gi,
-  // Numbers disguised with dots/commas/underscores between every digit
-  /\b\d[._,]\d[._,]\d[._,]\d[._,]\d[._,]\d[._,]\d/g,
-  // "Call me on" / "text me" / "ring me" with any digit sequence
-  /(?:call|text|ring|phone|whatsapp|message|contact)\s+(?:me|us)\s+(?:on|at)?\s*\d/gi,
-  // "My number is" pattern
-  /(?:my\s+(?:number|phone|mobile|cell)\s+(?:is|:))\s*[\d\s\-\.\(\)]{7,}/gi
-];
-var CONTACT_INTENT_PATTERNS = [
-  // "reach me at" / "find me on" / "contact me via"
+var CONTACT_INTENT_PATTERNS2 = [
   /(?:reach|find|contact|get|hit)\s+(?:me|us)\s+(?:at|on|via|through|@)/gi,
-  // "my insta is" / "my snap is" / "my whatsapp is"
   /(?:my\s+(?:insta(?:gram)?|snap(?:chat)?|whatsapp|wa|tiktok|twitter|facebook|fb|telegram|signal|viber|number|email|phone|mobile)\s+(?:is|:))/gi,
-  // Direct "add me" patterns
-  /(?:add|follow|dm|message)\s+(?:me|us)\s+(?:on|@)/gi
+  /(?:add|follow|dm|message)\s+(?:me|us)\s+(?:on|@)/gi,
+  /(?:call|text|ring|phone|whatsapp|message|contact)\s+(?:me|us)\s+(?:on|at)?\s*\d/gi,
+  /(?:my\s+(?:number|phone|mobile|cell)\s+(?:is|:))\s*[\d\s\-\.\(\)]{7,}/gi,
+  /(?:off\s*(?:the\s+)?(?:app|platform|site))\b/gi,
+  /(?:here'?s?\s+(?:my|me)\s+(?:number|phone|details?))\b/gi
 ];
-function hasExtendedPhonePattern(text2) {
-  return EXTENDED_PHONE_PATTERNS.some((re) => {
-    re.lastIndex = 0;
-    return re.test(text2);
-  });
-}
 function hasContactIntentPattern(text2) {
-  return CONTACT_INTENT_PATTERNS.some((re) => {
+  return CONTACT_INTENT_PATTERNS2.some((re) => {
     re.lastIndex = 0;
     return re.test(text2);
   });
 }
+var CONTACT_BLOCK_MESSAGE = "Sharing direct contact details is not allowed at this stage of the conversation. Please continue using in-app messaging.";
 function moderateText(text2, options = {}) {
-  const { allowPhone = false, fieldName = "content" } = options;
+  const { allowPhone = false, fieldName = "content", route, surface, userId, userRole, referenceId } = options;
   if (!text2 || text2.trim().length === 0) {
     return { blocked: false, cleanedText: text2 || "", flags: [] };
   }
   const processed = processMessageContent(text2, !allowPhone);
+  const obfuscatedResult = !allowPhone ? detectObfuscatedPhone(text2) : null;
+  const hasIntent = !allowPhone ? hasContactIntentPattern(text2) : false;
+  const buildLogEntry = (matchedPatterns, blocked) => ({
+    originalText: text2,
+    normalizedText: obfuscatedResult?.normalizedText || text2.toLowerCase(),
+    matchedPatterns,
+    reconstructedDigits: obfuscatedResult?.reconstructedDigits || "",
+    confidence: obfuscatedResult?.confidence || 0,
+    blocked,
+    route: route || "unknown",
+    surface: surface || fieldName,
+    userId,
+    userRole,
+    referenceId
+  });
   if (!allowPhone && processed.filterFlags.some(
-    (f) => f.includes("PHONE") || f.includes("EMAIL") || f.includes("URL") || f.includes("SOCIAL") || f.includes("SPOKEN") || f.includes("MIXED") || f.includes("POSTAL")
+    (f) => f.includes("PHONE") || f.includes("EMAIL") || f.includes("URL") || f.includes("SOCIAL") || f.includes("SPOKEN") || f.includes("MIXED") || f.includes("POSTAL") || f.includes("MESSAGING")
   )) {
+    const allFlags = [...processed.filterFlags, ...obfuscatedResult?.reasons || []];
     return {
       blocked: true,
       reason: "contact_info_detected",
-      userMessage: `Your ${fieldName} appears to contain contact information (phone number, email, or social handle). For your safety, please keep all communication within ServiceConnect.`,
+      userMessage: CONTACT_BLOCK_MESSAGE,
       cleanedText: processed.content,
-      flags: processed.filterFlags,
-      severity: processed.severity ?? void 0
+      flags: allFlags,
+      severity: processed.severity ?? void 0,
+      logEntry: buildLogEntry(allFlags, true)
     };
   }
-  if (!allowPhone && hasExtendedPhonePattern(text2)) {
+  if (obfuscatedResult && obfuscatedResult.blocked) {
+    const allFlags = [...processed.filterFlags, ...obfuscatedResult.reasons];
     return {
       blocked: true,
-      reason: "phone_pattern_detected",
-      userMessage: `Your ${fieldName} appears to contain a phone number. For your protection, contact details must stay within ServiceConnect's secure messaging system.`,
-      cleanedText: text2,
-      flags: ["EXTENDED_PHONE"]
+      reason: "obfuscated_phone_detected",
+      userMessage: CONTACT_BLOCK_MESSAGE,
+      cleanedText: processed.content,
+      flags: allFlags,
+      severity: processed.severity ?? void 0,
+      logEntry: buildLogEntry(allFlags, true)
     };
   }
-  if (!allowPhone && hasContactIntentPattern(text2)) {
+  if (hasIntent && obfuscatedResult && obfuscatedResult.reconstructedDigits.length >= 5) {
+    const allFlags = [...processed.filterFlags, ...obfuscatedResult.reasons, "CONTACT_INTENT"];
+    return {
+      blocked: true,
+      reason: "contact_intent_with_digits",
+      userMessage: CONTACT_BLOCK_MESSAGE,
+      cleanedText: processed.content,
+      flags: allFlags,
+      severity: processed.severity ?? void 0,
+      logEntry: buildLogEntry(allFlags, true)
+    };
+  }
+  if (hasIntent) {
+    const allFlags = [...processed.filterFlags, "CONTACT_INTENT"];
     return {
       blocked: true,
       reason: "contact_intent_detected",
       userMessage: `Your ${fieldName} appears to invite off-platform contact. For your safety, all communication should stay within ServiceConnect.`,
       cleanedText: text2,
-      flags: ["CONTACT_INTENT"]
+      flags: allFlags,
+      logEntry: buildLogEntry(allFlags, true)
     };
   }
   if (processed.severity === "CRITICAL") {
@@ -44518,6 +44953,7 @@ async function runAftercareCheck(createNotification2) {
     await db.transaction(async (tx) => {
       await tx.update(jobAftercares).set({ autoClosedAt: /* @__PURE__ */ new Date(), closedAt: /* @__PURE__ */ new Date() }).where(eq(jobAftercares.id, aftercare.id));
       await tx.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, job.id));
+      await tx.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, job.id));
     });
     await createNotification2(
       job.customerId,
@@ -46410,7 +46846,7 @@ You need to collect the following information conversationally:
 2. Location
 3. Urgency (Low, Normal, High, Urgent)
 4. Budget (optional, but good to ask)
-5. The most appropriate category ID from this list:
+5. The most appropriate category from this list (return the exact ID value):
 ${catList}
 ${!isLoggedIn ? `6. First Name
 7. Last Name
@@ -46419,48 +46855,58 @@ ${!isLoggedIn ? `6. First Name
 (Since the user is not logged in, ask for their name and contact info so we can set up their account.)` : ""}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional. You do NOT have to ask about budget or phone number if they provide everything else, but you must ask for Name and Email if they are not logged in.
-If you have collected enough information to post the job, you MUST set "isComplete" to true and populate "extractedData".
+
+CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have enough info to post the job (at minimum: description, location, and category).
 
 Return ONLY valid JSON in this format:
 {
   "reply": "Your next conversational response to the user",
   "isComplete": boolean,
   "extractedData": {
-    "title": "Short title",
-    "description": "Detailed description",
-    "categoryId": "number or uuid",
-    "locationText": "string",
-    "urgency": "LOW|NORMAL|HIGH|URGENT",
+    "title": "Short title derived from description (or empty string if unknown)",
+    "description": "Detailed description (or empty string if unknown)",
+    "categoryId": "the exact ID from the list above (or empty string if unknown)",
+    "categoryLabel": "the category name (or empty string if unknown)",
+    "locationText": "location string (or empty string if unknown)",
+    "urgency": "LOW|NORMAL|HIGH|URGENT (default NORMAL if unknown)",
     "budgetMin": null,
     "budgetMax": null${!isLoggedIn ? `,
-    "firstName": "string",
-    "lastName": "string",
-    "email": "string",
-    "phone": "string"` : ""}
+    "firstName": "string or empty",
+    "lastName": "string or empty",
+    "email": "string or empty",
+    "phone": "string or empty"` : ""}
   }
 }`;
   const proPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a PROFESSIONAL sign up to the platform.
 You need to collect the following information conversationally:
-1. What services they offer (to map to category IDs)
-2. Their location and service radius
+1. What services they offer (map to category IDs from the list below \u2014 return the exact ID values)
+2. Their base location and service areas they cover
 3. Years of experience
-4. A short bio/description of their business
-Here are the available categories:
+4. A short bio/description of their business (at least 30 words \u2014 describe what they do, their experience, and what makes them good)
+Here are the available service categories (use the exact ID values in categoryIds):
 ${catList}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
-If you have collected enough information (services, location, experience, bio), you MUST set "isComplete" to true and populate "extractedData".
+When a professional describes their trade (e.g. "I'm a plumber"), immediately match it to the best category ID(s) from the list above.
+
+CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have at minimum: services/categories, location, and a bio of at least 30 words.
+
+If the professional gives you enough info in one message to build a complete profile, set "isComplete" to true immediately \u2014 do not ask unnecessary follow-up questions.
 
 Return ONLY valid JSON in this format:
 {
   "reply": "Your next conversational response to the user",
   "isComplete": boolean,
   "extractedData": {
-    "categoryIds": ["array of category IDs"],
-    "bio": "Extracted bio",
-    "location": "string",
-    "yearsExperience": number,
-    "serviceRadius": 25
+    "categoryIds": ["exact category IDs from the list above, or empty array if unknown"],
+    "categoryLabels": ["human-readable category names, or empty array if unknown"],
+    "bio": "A professional bio built from what they've told you (at least 30 words when complete, or whatever you have so far)",
+    "location": "their base location (or empty string if unknown)",
+    "serviceAreas": ["areas they cover, or empty array if unknown"],
+    "yearsExperience": null,
+    "serviceRadius": 25,
+    "businessName": null,
+    "credentials": null
   }
 }`;
   const systemPrompt = mode === "CUSTOMER" ? customerPrompt : proPrompt;
@@ -46475,10 +46921,22 @@ Analyse the conversation and respond with the JSON object:`;
     return await askJSON(finalPrompt);
   } catch (e) {
     console.error("Onboarding chat error", e);
+    const lastUserMsg = messages2.filter((m) => m.role === "user").pop()?.content || "";
+    const fallbackData = {};
+    if (mode === "CUSTOMER") {
+      if (lastUserMsg.length > 10) {
+        fallbackData.description = lastUserMsg;
+        fallbackData.title = lastUserMsg.split(/[.!?]/)[0]?.trim().slice(0, 72) || "";
+      }
+    } else {
+      if (lastUserMsg.length > 10) {
+        fallbackData.bio = lastUserMsg;
+      }
+    }
     return {
-      reply: "I'm sorry, I'm having trouble processing that right now. Could you try rephrasing?",
+      reply: "I had a little trouble processing that, but I've captured what you said. Could you tell me a bit more to fill in the gaps?",
       isComplete: false,
-      extractedData: null
+      extractedData: Object.keys(fallbackData).length > 0 ? fallbackData : null
     };
   }
 }
@@ -51929,9 +52387,938 @@ function createStripe(platformFunctions, requestSender = defaultRequestSenderFac
 var Stripe = createStripe(new NodePlatformFunctions());
 var stripe_esm_node_default = Stripe;
 
+// shared/onboarding.ts
+var onboardingRoleSchema = external_exports.enum(["CUSTOMER", "PROFESSIONAL"]);
+var onboardingStepSchema = external_exports.enum([
+  "ROLE_SELECTION",
+  "JOB_INTAKE",
+  "JOB_REVIEW",
+  "PROFILE_INTAKE",
+  "PROFILE_REVIEW",
+  "PERSONAL_DETAILS",
+  "PERSONAL_REVIEW",
+  "PHONE_OTP",
+  "EMAIL_OTP",
+  "PASSWORD",
+  "COMPLETE"
+]);
+var onboardingStatusSchema = external_exports.enum(["ACTIVE", "COMPLETED", "ABANDONED", "EXPIRED"]);
+var verificationChannelSchema = external_exports.enum(["EMAIL", "PHONE"]);
+var onboardingPasswordSchema = external_exports.string().min(8, "Password must be at least 8 characters").max(128, "Password is too long").refine((value) => /[A-Za-z]/.test(value) && /\d/.test(value), {
+  message: "Password must contain at least one letter and one number"
+});
+var verificationStateSchema = external_exports.object({
+  emailVerified: external_exports.boolean().default(false),
+  phoneVerified: external_exports.boolean().default(false),
+  emailLastSentAt: external_exports.string().nullable().default(null),
+  phoneLastSentAt: external_exports.string().nullable().default(null)
+});
+var personalDetailsSchema = external_exports.object({
+  firstName: external_exports.string().trim().min(1, "First name is required").default(""),
+  lastName: external_exports.string().trim().min(1, "Last name is required").default(""),
+  email: external_exports.string().trim().email("Valid email required").default(""),
+  phone: external_exports.string().trim().min(7, "Valid phone required").default("")
+});
+var customerJobDraftSchema = external_exports.object({
+  title: external_exports.string().trim().default(""),
+  description: external_exports.string().trim().default(""),
+  categoryId: external_exports.string().trim().default(""),
+  categoryLabel: external_exports.string().trim().default(""),
+  urgency: external_exports.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).nullable().transform((v) => v ?? "NORMAL").default("NORMAL"),
+  locationText: external_exports.string().trim().default(""),
+  budgetMin: external_exports.string().trim().nullable().default(null),
+  budgetMax: external_exports.string().trim().nullable().default(null),
+  preferredDate: external_exports.string().trim().nullable().default(null),
+  completionIssues: external_exports.array(external_exports.string()).default([]),
+  aiQualityScore: external_exports.number().int().min(0).max(100).nullable().default(null),
+  aiQualityPrompt: external_exports.string().nullable().default(null)
+});
+var professionalProfileDraftSchema = external_exports.object({
+  categoryIds: external_exports.array(external_exports.string().trim()).default([]),
+  categoryLabels: external_exports.array(external_exports.string().trim()).default([]),
+  location: external_exports.string().trim().default(""),
+  serviceAreas: external_exports.array(external_exports.string().trim()).default([]),
+  serviceRadius: external_exports.number().int().min(1).max(500).nullable().default(25),
+  yearsExperience: external_exports.number().int().min(0).max(80).nullable().default(null),
+  bio: external_exports.string().trim().default(""),
+  businessName: external_exports.string().trim().nullable().default(null),
+  credentials: external_exports.string().trim().nullable().default(null)
+});
+var onboardingTranscriptEntrySchema = external_exports.object({
+  role: external_exports.enum(["assistant", "user", "system"]),
+  content: external_exports.string(),
+  createdAt: external_exports.string()
+});
+var onboardingPayloadSchema = external_exports.object({
+  role: onboardingRoleSchema,
+  customerJob: customerJobDraftSchema.nullable().default(null),
+  professionalProfile: professionalProfileDraftSchema.nullable().default(null),
+  personalDetails: personalDetailsSchema.partial().default({}),
+  password: external_exports.string().default("")
+});
+var onboardingSessionStateSchema = external_exports.object({
+  id: external_exports.string(),
+  role: onboardingRoleSchema,
+  currentStep: onboardingStepSchema,
+  status: onboardingStatusSchema,
+  payload: onboardingPayloadSchema,
+  transcript: external_exports.array(onboardingTranscriptEntrySchema),
+  verificationState: verificationStateSchema,
+  expiresAt: external_exports.string(),
+  completedAt: external_exports.string().nullable().default(null)
+});
+var onboardingChatRequestSchema = external_exports.object({
+  message: external_exports.string().trim().min(1)
+});
+var onboardingPatchSchema = external_exports.object({
+  action: external_exports.enum(["CONFIRM_INTAKE_REVIEW", "CONFIRM_PERSONAL_REVIEW"]).optional(),
+  role: onboardingRoleSchema.optional(),
+  customerJob: customerJobDraftSchema.partial().optional(),
+  professionalProfile: professionalProfileDraftSchema.partial().optional(),
+  personalDetails: personalDetailsSchema.partial().optional()
+});
+var onboardingOtpSendSchema = external_exports.object({
+  channel: verificationChannelSchema
+});
+var onboardingOtpVerifySchema = external_exports.object({
+  channel: verificationChannelSchema,
+  code: external_exports.string().trim().min(1)
+});
+var onboardingCompleteSchema = external_exports.object({
+  password: onboardingPasswordSchema
+});
+var onboardingCompletionResultSchema = external_exports.object({
+  accessToken: external_exports.string(),
+  refreshToken: external_exports.string(),
+  user: external_exports.record(external_exports.string(), external_exports.any()),
+  redirectTo: external_exports.string(),
+  createdJobId: external_exports.string().nullable().optional(),
+  createdProfileId: external_exports.string().nullable().optional(),
+  jobStatus: external_exports.string().nullable().optional(),
+  nextPrompt: external_exports.string().nullable().optional()
+});
+function buildEmptyOnboardingPayload(role) {
+  return {
+    role,
+    customerJob: role === "CUSTOMER" ? customerJobDraftSchema.parse({}) : null,
+    professionalProfile: role === "PROFESSIONAL" ? professionalProfileDraftSchema.parse({}) : null,
+    personalDetails: {},
+    password: ""
+  };
+}
+function buildEmptyVerificationState() {
+  return verificationStateSchema.parse({});
+}
+
+// shared/verification.ts
+var DEMO_OTP_CODE = "123456";
+var VERIFICATION_CODE_TTL_MINUTES = 10;
+var VERIFICATION_MAX_ATTEMPTS = 5;
+var VERIFICATION_SESSION_TTL_HOURS = 24;
+
+// server/verificationService.ts
+function buildScopeCondition(scope) {
+  if ("sessionId" in scope && scope.sessionId) {
+    return eq(verificationChallenges.sessionId, scope.sessionId);
+  }
+  if ("userId" in scope && scope.userId) {
+    return eq(verificationChallenges.userId, scope.userId);
+  }
+  throw new Error("Verification scope is missing a target identifier");
+}
+function buildActiveCondition(scope, channel) {
+  return and(
+    buildScopeCondition(scope),
+    eq(verificationChallenges.channel, channel),
+    isNull(verificationChallenges.verifiedAt),
+    isNull(verificationChallenges.invalidatedAt)
+  );
+}
+async function invalidateVerificationChallenges(scope, channel) {
+  const condition = channel ? buildActiveCondition(scope, channel) : and(
+    buildScopeCondition(scope),
+    isNull(verificationChallenges.verifiedAt),
+    isNull(verificationChallenges.invalidatedAt)
+  );
+  await db.update(verificationChallenges).set({ invalidatedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(condition);
+}
+async function issueVerificationChallenge(input) {
+  const expiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MINUTES * 60 * 1e3);
+  const hashedCode = await hashPassword(DEMO_OTP_CODE);
+  await invalidateVerificationChallenges(input, input.channel);
+  await db.insert(verificationChallenges).values({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    channel: input.channel,
+    purpose: input.purpose ?? (input.sessionId ? "ONBOARDING" : "PHONE_UPDATE"),
+    target: input.target,
+    hashedCode,
+    attempts: 0,
+    maxAttempts: VERIFICATION_MAX_ATTEMPTS,
+    sentCount: 1,
+    expiresAt,
+    lastSentAt: /* @__PURE__ */ new Date()
+  });
+  console.log(`[Verification] ${input.channel} demo OTP issued for ${input.target}: ${DEMO_OTP_CODE}`);
+  return {
+    success: true,
+    expiresAt: expiresAt.toISOString(),
+    demoCode: DEMO_OTP_CODE,
+    message: `Verification code sent to your ${input.channel.toLowerCase()}.`
+  };
+}
+async function verifyVerificationChallenge(input) {
+  const [challenge] = await db.select().from(verificationChallenges).where(
+    and(
+      buildActiveCondition(input, input.channel),
+      gt(verificationChallenges.expiresAt, /* @__PURE__ */ new Date())
+    )
+  ).orderBy(desc(verificationChallenges.createdAt)).limit(1);
+  if (!challenge) {
+    return false;
+  }
+  const isValid2 = input.code === DEMO_OTP_CODE || await comparePassword(input.code, challenge.hashedCode);
+  if (!isValid2) {
+    const nextAttempts = challenge.attempts + 1;
+    await db.update(verificationChallenges).set({
+      attempts: nextAttempts,
+      invalidatedAt: nextAttempts >= challenge.maxAttempts ? /* @__PURE__ */ new Date() : null,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(verificationChallenges.id, challenge.id));
+    return false;
+  }
+  await db.update(verificationChallenges).set({ verifiedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq(verificationChallenges.id, challenge.id));
+  return true;
+}
+
+// server/onboardingService.ts
+var SESSION_EXTENSION_MS = VERIFICATION_SESSION_TTL_HOURS * 60 * 60 * 1e3;
+function buildGreeting(role) {
+  if (role === "CUSTOMER") {
+    return "Tell me what needs sorting, where it is, and anything important about the job. I\u2019ll turn it into a clean brief for local professionals.";
+  }
+  return "Tell me what kind of work you do, where you cover, and what makes you good at it. I\u2019ll shape that into a strong ServiceConnect profile.";
+}
+function buildIntakeSummaryMessage(role) {
+  if (role === "CUSTOMER") {
+    return "That looks complete. Review the job summary below, make any edits you want, and then we\u2019ll collect your contact details.";
+  }
+  return "That gives us enough to build your professional profile. Review the summary below, tweak anything you want, and then we\u2019ll finish your contact details.";
+}
+function normalizeEmail(email) {
+  return email.trim().toLowerCase();
+}
+function normalizePhone(phone) {
+  return phone.trim().replace(/\s+/g, " ");
+}
+function trimNullable(value) {
+  if (value == null) return null;
+  const next = String(value).trim();
+  return next.length > 0 ? next : null;
+}
+function deriveTitle(description) {
+  const cleaned = description.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const sentence = cleaned.split(/[.!?]/)[0]?.trim() || cleaned;
+  return sentence.slice(0, 72);
+}
+function getStartingStep(role) {
+  return role === "CUSTOMER" ? "JOB_INTAKE" : "PROFILE_INTAKE";
+}
+function parseStoredSession(record) {
+  return onboardingSessionStateSchema.parse({
+    id: record.id,
+    role: record.role,
+    currentStep: record.currentStep,
+    status: record.status,
+    payload: {
+      ...buildEmptyOnboardingPayload(record.role),
+      ...record.payload,
+      role: record.role
+    },
+    transcript: Array.isArray(record.transcript) ? record.transcript : [],
+    verificationState: {
+      ...buildEmptyVerificationState(),
+      ...record.verificationState || {}
+    },
+    expiresAt: record.expiresAt.toISOString(),
+    completedAt: record.completedAt?.toISOString() ?? null
+  });
+}
+function appendTranscript(session, role, content) {
+  return {
+    ...session,
+    transcript: [
+      ...session.transcript,
+      {
+        role,
+        content,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    ]
+  };
+}
+async function persistSession(session) {
+  const expiresAt = new Date(Date.now() + SESSION_EXTENSION_MS);
+  const [updated] = await db.update(onboardingSessions).set({
+    currentStep: session.currentStep,
+    status: session.status,
+    payload: session.payload,
+    transcript: session.transcript,
+    verificationState: session.verificationState,
+    expiresAt,
+    completedAt: session.completedAt ? new Date(session.completedAt) : null,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq(onboardingSessions.id, session.id)).returning();
+  if (!updated) {
+    throw new Error("Onboarding session not found");
+  }
+  return parseStoredSession(updated);
+}
+async function createOnboardingSession(role, previousSessionId) {
+  if (previousSessionId) {
+    await db.update(onboardingSessions).set({ status: "ABANDONED", updatedAt: /* @__PURE__ */ new Date() }).where(
+      and(
+        eq(onboardingSessions.id, previousSessionId),
+        eq(onboardingSessions.status, "ACTIVE")
+      )
+    );
+  }
+  const [session] = await db.insert(onboardingSessions).values({
+    role,
+    currentStep: getStartingStep(role),
+    status: "ACTIVE",
+    payload: buildEmptyOnboardingPayload(role),
+    transcript: [
+      {
+        role: "assistant",
+        content: buildGreeting(role),
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    ],
+    verificationState: buildEmptyVerificationState(),
+    expiresAt: new Date(Date.now() + SESSION_EXTENSION_MS)
+  }).returning();
+  return parseStoredSession(session);
+}
+async function getOnboardingSession(sessionId) {
+  const [session] = await db.select().from(onboardingSessions).where(eq(onboardingSessions.id, sessionId)).limit(1);
+  if (!session) {
+    throw new Error("Onboarding session not found");
+  }
+  if (session.status === "ACTIVE" && session.expiresAt.getTime() < Date.now()) {
+    const [expired] = await db.update(onboardingSessions).set({ status: "EXPIRED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(onboardingSessions.id, sessionId)).returning();
+    if (!expired) {
+      throw new Error("Onboarding session not found");
+    }
+    return parseStoredSession(expired);
+  }
+  return parseStoredSession(session);
+}
+async function listActiveCategories() {
+  return db.select({
+    id: serviceCategories.id,
+    name: serviceCategories.name,
+    slug: serviceCategories.slug,
+    baseCreditCost: serviceCategories.baseCreditCost
+  }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
+}
+function validateCustomerJobDraft(input, categories) {
+  const draft = customerJobDraftSchema.parse({
+    ...input,
+    title: trimNullable(input?.title) ?? deriveTitle(String(input?.description ?? "")),
+    description: String(input?.description ?? "").trim(),
+    locationText: String(input?.locationText ?? "").trim(),
+    categoryId: String(input?.categoryId ?? "").trim(),
+    categoryLabel: String(input?.categoryLabel ?? "").trim(),
+    urgency: typeof input?.urgency === "string" ? input.urgency : "NORMAL",
+    budgetMin: trimNullable(input?.budgetMin),
+    budgetMax: trimNullable(input?.budgetMax),
+    preferredDate: trimNullable(input?.preferredDate)
+  });
+  if (draft.title) {
+    const titleModeration = moderateText(draft.title, { fieldName: "job title" });
+    if (titleModeration.blocked) {
+      return { draft, isReady: false, missingFields: ["title"], blockingMessage: titleModeration.userMessage };
+    }
+  }
+  if (draft.description) {
+    const descriptionModeration = moderateText(draft.description, { fieldName: "job description" });
+    if (descriptionModeration.blocked) {
+      return { draft, isReady: false, missingFields: ["description"], blockingMessage: descriptionModeration.userMessage };
+    }
+  }
+  if (draft.categoryId) {
+    const resolved = resolveCategoryId(draft.categoryId, categories);
+    if (resolved) {
+      draft.categoryId = resolved.id;
+      draft.categoryLabel = resolved.name;
+    } else {
+      draft.categoryId = "";
+      draft.categoryLabel = "";
+    }
+  }
+  if (!draft.categoryId && (draft.title || draft.description)) {
+    const detected = detectCategory(draft.title, draft.description, categories);
+    if (detected.categorySlug) {
+      const match = categories.find((category) => category.slug === detected.categorySlug);
+      if (match) {
+        draft.categoryId = match.id;
+        draft.categoryLabel = match.name;
+      }
+    }
+  }
+  if (!draft.urgency || draft.urgency === "NORMAL") {
+    const urgency = detectUrgency(draft.title, draft.description);
+    if (urgency.isUrgent) {
+      draft.urgency = "URGENT";
+    }
+  }
+  const missingFields = [];
+  if (!draft.title) missingFields.push("title");
+  if (!draft.description) missingFields.push("description");
+  if (!draft.locationText) missingFields.push("location");
+  if (!draft.categoryId) missingFields.push("category");
+  if (missingFields.length === 0) {
+    const quality = scoreJobQuality(
+      draft.title,
+      draft.description,
+      draft.locationText,
+      draft.categoryLabel || "service"
+    );
+    draft.aiQualityScore = quality.score;
+    draft.aiQualityPrompt = quality.prompt;
+    draft.completionIssues = quality.issues;
+    if (!quality.passed) {
+      missingFields.push("quality");
+    }
+  } else {
+    draft.aiQualityScore = null;
+    draft.aiQualityPrompt = null;
+    draft.completionIssues = [];
+  }
+  return {
+    draft,
+    isReady: missingFields.length === 0,
+    missingFields
+  };
+}
+function resolveCategoryId(value, categories) {
+  const byId = categories.find((c) => c.id === value);
+  if (byId) return byId;
+  const bySlug = categories.find((c) => c.slug.toLowerCase() === value.toLowerCase());
+  if (bySlug) return bySlug;
+  const byName = categories.find((c) => c.name.toLowerCase() === value.toLowerCase());
+  if (byName) return byName;
+  const byPartial = categories.find(
+    (c) => c.name.toLowerCase().includes(value.toLowerCase()) || value.toLowerCase().includes(c.name.toLowerCase())
+  );
+  if (byPartial) return byPartial;
+  return void 0;
+}
+function validateProfessionalProfileDraft(input, categories) {
+  const rawInputIds = input?.categoryIds?.filter(Boolean) ?? [];
+  const resolvedCategories = rawInputIds.map((val) => resolveCategoryId(val, categories)).filter((c) => c !== void 0);
+  const uniqueResolved = [...new Map(resolvedCategories.map((c) => [c.id, c])).values()];
+  const rawCategoryIds = uniqueResolved.map((c) => c.id);
+  const categoryLabels = uniqueResolved.map((c) => c.name);
+  const location = String(input?.location ?? "").trim();
+  const bio = String(input?.bio ?? "").trim();
+  const serviceAreas = (input?.serviceAreas ?? []).map((area) => String(area).trim()).filter(Boolean);
+  const serviceRadius = input?.serviceRadius != null ? Number(input.serviceRadius) || 25 : 25;
+  const yearsExperience = input?.yearsExperience != null ? Number(input.yearsExperience) || null : null;
+  const draft = professionalProfileDraftSchema.parse({
+    ...input,
+    categoryIds: rawCategoryIds,
+    categoryLabels,
+    location,
+    serviceAreas: serviceAreas.length > 0 ? serviceAreas : location ? [location] : [],
+    serviceRadius,
+    yearsExperience,
+    bio,
+    businessName: trimNullable(input?.businessName),
+    credentials: trimNullable(input?.credentials)
+  });
+  if (draft.bio) {
+    const moderation = moderateText(draft.bio, { fieldName: "profile bio" });
+    if (moderation.blocked) {
+      return { draft, isReady: false, missingFields: ["bio"], blockingMessage: moderation.userMessage };
+    }
+  }
+  const missingFields = [];
+  if (draft.categoryIds.length === 0) missingFields.push("categories");
+  if (!draft.location) missingFields.push("location");
+  if (!draft.bio || draft.bio.length < 24) missingFields.push("bio");
+  return {
+    draft,
+    isReady: missingFields.length === 0,
+    missingFields
+  };
+}
+function validatePersonalDetails(input) {
+  const details = {
+    firstName: input?.firstName?.trim() ?? "",
+    lastName: input?.lastName?.trim() ?? "",
+    email: input?.email ? normalizeEmail(input.email) : "",
+    phone: input?.phone ? normalizePhone(input.phone) : ""
+  };
+  const missingFields = [];
+  if (!details.firstName) missingFields.push("firstName");
+  if (!details.lastName) missingFields.push("lastName");
+  if (!details.email || !external_exports.string().email().safeParse(details.email).success) missingFields.push("email");
+  if (!details.phone || details.phone.replace(/\D/g, "").length < 7) missingFields.push("phone");
+  return {
+    details,
+    isReady: missingFields.length === 0,
+    missingFields
+  };
+}
+function ensureStep(session, allowedSteps) {
+  if (!allowedSteps.includes(session.currentStep)) {
+    throw new Error(`Session is not in a valid step for this action: ${session.currentStep}`);
+  }
+}
+function buildChatHistory(session, message) {
+  return [
+    ...session.transcript.map((entry) => ({
+      role: entry.role === "system" ? "assistant" : entry.role,
+      content: entry.content
+    })),
+    { role: "user", content: message }
+  ];
+}
+async function processOnboardingChat(sessionId, message, categories) {
+  let session = await getOnboardingSession(sessionId);
+  ensureStep(session, ["JOB_INTAKE", "PROFILE_INTAKE"]);
+  const aiResponse = await handleOnboardingChat(
+    buildChatHistory(session, message),
+    session.role,
+    categories.map((category) => ({ id: category.id, name: category.name, slug: category.slug })),
+    true
+  );
+  session = appendTranscript(session, "user", message);
+  if (session.role === "CUSTOMER") {
+    const merged = {
+      ...session.payload.customerJob ?? customerJobDraftSchema.parse({}),
+      ...aiResponse.extractedData ?? {}
+    };
+    const validation = validateCustomerJobDraft(merged, categories);
+    session.payload.customerJob = validation.draft;
+    if (validation.blockingMessage) {
+      session = appendTranscript(session, "assistant", validation.blockingMessage);
+      return persistSession(session);
+    }
+    if (validation.isReady) {
+      session.currentStep = "JOB_REVIEW";
+      session = appendTranscript(session, "assistant", buildIntakeSummaryMessage("CUSTOMER"));
+      return persistSession(session);
+    }
+  } else {
+    const merged = {
+      ...session.payload.professionalProfile ?? professionalProfileDraftSchema.parse({}),
+      ...aiResponse.extractedData ?? {}
+    };
+    const validation = validateProfessionalProfileDraft(merged, categories);
+    session.payload.professionalProfile = validation.draft;
+    if (validation.blockingMessage) {
+      session = appendTranscript(session, "assistant", validation.blockingMessage);
+      return persistSession(session);
+    }
+    if (validation.isReady) {
+      session.currentStep = "PROFILE_REVIEW";
+      session = appendTranscript(session, "assistant", buildIntakeSummaryMessage("PROFESSIONAL"));
+      return persistSession(session);
+    }
+  }
+  session = appendTranscript(
+    session,
+    "assistant",
+    aiResponse.reply || "I still need a little more detail before I can move you forward."
+  );
+  return persistSession(session);
+}
+async function patchOnboardingSession(sessionId, patch, categories) {
+  let session = await getOnboardingSession(sessionId);
+  const parsedPatch = onboardingPatchSchema.parse(patch);
+  if (parsedPatch.role && parsedPatch.role !== session.role) {
+    throw new Error("Role changes require a new onboarding session");
+  }
+  if (parsedPatch.customerJob && session.role === "CUSTOMER") {
+    const merged = {
+      ...session.payload.customerJob ?? customerJobDraftSchema.parse({}),
+      ...parsedPatch.customerJob
+    };
+    const validation = validateCustomerJobDraft(merged, categories);
+    session.payload.customerJob = validation.draft;
+    if (["JOB_INTAKE", "JOB_REVIEW"].includes(session.currentStep)) {
+      session.currentStep = validation.isReady ? "JOB_REVIEW" : "JOB_INTAKE";
+    }
+  }
+  if (parsedPatch.professionalProfile && session.role === "PROFESSIONAL") {
+    const merged = {
+      ...session.payload.professionalProfile ?? professionalProfileDraftSchema.parse({}),
+      ...parsedPatch.professionalProfile
+    };
+    const validation = validateProfessionalProfileDraft(merged, categories);
+    session.payload.professionalProfile = validation.draft;
+    if (["PROFILE_INTAKE", "PROFILE_REVIEW"].includes(session.currentStep)) {
+      session.currentStep = validation.isReady ? "PROFILE_REVIEW" : "PROFILE_INTAKE";
+    }
+  }
+  if (parsedPatch.personalDetails) {
+    const previousEmail = session.payload.personalDetails.email ?? "";
+    const previousPhone = session.payload.personalDetails.phone ?? "";
+    const validation = validatePersonalDetails({
+      ...session.payload.personalDetails,
+      ...parsedPatch.personalDetails
+    });
+    const emailChanged = parsedPatch.personalDetails.email !== void 0 && normalizeEmail(parsedPatch.personalDetails.email) !== normalizeEmail(previousEmail);
+    const phoneChanged = parsedPatch.personalDetails.phone !== void 0 && normalizePhone(parsedPatch.personalDetails.phone) !== normalizePhone(previousPhone);
+    session.payload.personalDetails = validation.details;
+    if (emailChanged) {
+      session.verificationState.emailVerified = false;
+      await invalidateVerificationChallenges({ sessionId }, "EMAIL");
+    }
+    if (phoneChanged) {
+      session.verificationState.phoneVerified = false;
+      await invalidateVerificationChallenges({ sessionId }, "PHONE");
+    }
+    if (["PHONE_OTP", "EMAIL_OTP", "PASSWORD", "COMPLETE"].includes(session.currentStep)) {
+      session.currentStep = validation.isReady ? "PERSONAL_REVIEW" : "PERSONAL_DETAILS";
+    } else if (session.currentStep === "PERSONAL_REVIEW" || session.currentStep === "PERSONAL_DETAILS") {
+      session.currentStep = validation.isReady ? "PERSONAL_REVIEW" : "PERSONAL_DETAILS";
+    }
+  }
+  if (parsedPatch.action === "CONFIRM_INTAKE_REVIEW") {
+    if (session.role === "CUSTOMER") {
+      ensureStep(session, ["JOB_REVIEW"]);
+      const validation = validateCustomerJobDraft(session.payload.customerJob, categories);
+      session.payload.customerJob = validation.draft;
+      if (!validation.isReady) {
+        session.currentStep = "JOB_INTAKE";
+        return persistSession(session);
+      }
+    } else {
+      ensureStep(session, ["PROFILE_REVIEW"]);
+      const validation = validateProfessionalProfileDraft(session.payload.professionalProfile, categories);
+      session.payload.professionalProfile = validation.draft;
+      if (!validation.isReady) {
+        session.currentStep = "PROFILE_INTAKE";
+        return persistSession(session);
+      }
+    }
+    session.currentStep = "PERSONAL_DETAILS";
+  }
+  if (parsedPatch.action === "CONFIRM_PERSONAL_REVIEW") {
+    ensureStep(session, ["PERSONAL_REVIEW"]);
+    const validation = validatePersonalDetails(session.payload.personalDetails);
+    session.payload.personalDetails = validation.details;
+    if (!validation.isReady) {
+      session.currentStep = "PERSONAL_DETAILS";
+      return persistSession(session);
+    }
+    session.currentStep = "PHONE_OTP";
+  }
+  return persistSession(session);
+}
+async function markOnboardingVerification(sessionId, channel) {
+  const session = await getOnboardingSession(sessionId);
+  if (channel === "PHONE") {
+    session.verificationState.phoneVerified = true;
+    session.currentStep = "EMAIL_OTP";
+  } else {
+    session.verificationState.emailVerified = true;
+    session.currentStep = "PASSWORD";
+  }
+  return persistSession(session);
+}
+async function recordOnboardingOtpSent(sessionId, channel) {
+  const session = await getOnboardingSession(sessionId);
+  if (channel === "PHONE") {
+    ensureStep(session, ["PHONE_OTP"]);
+    session.verificationState.phoneLastSentAt = (/* @__PURE__ */ new Date()).toISOString();
+  } else {
+    ensureStep(session, ["EMAIL_OTP"]);
+    session.verificationState.emailLastSentAt = (/* @__PURE__ */ new Date()).toISOString();
+  }
+  return persistSession(session);
+}
+async function completeOnboardingSession(sessionId, password, requestIp) {
+  const session = await getOnboardingSession(sessionId);
+  const parsedPassword = onboardingPasswordSchema.safeParse(password);
+  if (!parsedPassword.success) {
+    throw new Error(parsedPassword.error.issues[0]?.message || "Password is invalid");
+  }
+  const personalValidation = validatePersonalDetails(session.payload.personalDetails);
+  if (!personalValidation.isReady) {
+    throw new Error("Personal details are incomplete");
+  }
+  if (!session.verificationState.phoneVerified || !session.verificationState.emailVerified) {
+    throw new Error("Email and phone verification must be completed before account creation");
+  }
+  const email = normalizeEmail(personalValidation.details.email ?? "");
+  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (existing.length > 0) {
+    throw new Error("Email already registered");
+  }
+  const passwordHash = await hashPassword(parsedPassword.data);
+  const completion = await db.transaction(async (tx) => {
+    if (session.role === "CUSTOMER") {
+      const categories = await tx.select({
+        id: serviceCategories.id,
+        name: serviceCategories.name,
+        slug: serviceCategories.slug,
+        baseCreditCost: serviceCategories.baseCreditCost
+      }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
+      const jobValidation = validateCustomerJobDraft(session.payload.customerJob, categories);
+      const [user2] = await tx.insert(users).values({
+        email,
+        phone: personalValidation.details.phone ?? "",
+        passwordHash,
+        role: "CUSTOMER",
+        status: "ACTIVE",
+        firstName: personalValidation.details.firstName ?? "",
+        lastName: personalValidation.details.lastName ?? "",
+        emailVerified: true,
+        phoneVerified: true,
+        onboardingCompleted: true
+      }).returning();
+      const category = categories.find((item) => item.id === jobValidation.draft.categoryId);
+      const creditCost = Number(category?.baseCreditCost ?? 2);
+      const jobStatus = jobValidation.isReady ? "LIVE" : "DRAFT";
+      const [job] = await tx.insert(jobs).values({
+        customerId: user2.id,
+        categoryId: jobValidation.draft.categoryId,
+        title: jobValidation.draft.title,
+        description: jobValidation.draft.description,
+        budgetMin: jobValidation.draft.budgetMin,
+        budgetMax: jobValidation.draft.budgetMax,
+        urgency: jobValidation.draft.urgency,
+        status: jobStatus,
+        locationText: jobValidation.draft.locationText,
+        preferredDate: jobValidation.draft.preferredDate ? new Date(jobValidation.draft.preferredDate) : null,
+        creditCost,
+        originalCreditCost: creditCost,
+        aiQualityScore: jobValidation.draft.aiQualityScore,
+        aiQualityPrompt: jobValidation.draft.aiQualityPrompt
+      }).returning();
+      await tx.update(users).set({ firstJobId: job.id }).where(eq(users.id, user2.id));
+      return {
+        user: user2,
+        redirectTo: "/dashboard",
+        createdJobId: job.id,
+        jobStatus,
+        nextPrompt: jobStatus === "LIVE" ? "Your job is live and ready for professionals." : "Your account is ready. Your job was saved as a draft because it still needs a few improvements before publishing."
+      };
+    }
+    const profileValidation = validateProfessionalProfileDraft(session.payload.professionalProfile, await tx.select({
+      id: serviceCategories.id,
+      name: serviceCategories.name,
+      slug: serviceCategories.slug
+    }).from(serviceCategories).where(eq(serviceCategories.isActive, true)));
+    const [user] = await tx.insert(users).values({
+      email,
+      phone: personalValidation.details.phone ?? "",
+      passwordHash,
+      role: "PROFESSIONAL",
+      status: "ACTIVE",
+      firstName: personalValidation.details.firstName ?? "",
+      lastName: personalValidation.details.lastName ?? "",
+      bio: profileValidation.draft.bio,
+      emailVerified: true,
+      phoneVerified: true,
+      onboardingCompleted: true,
+      creditBalance: 20
+    }).returning();
+    const [profile] = await tx.insert(professionalProfiles).values({
+      userId: user.id,
+      businessName: profileValidation.draft.businessName,
+      credentials: profileValidation.draft.credentials,
+      yearsExperience: profileValidation.draft.yearsExperience,
+      radiusKm: profileValidation.draft.serviceRadius ?? 25,
+      serviceCategories: profileValidation.draft.categoryIds,
+      serviceAreas: profileValidation.draft.serviceAreas,
+      isVerified: false,
+      verificationStatus: "UNSUBMITTED",
+      verificationLevel: "NONE"
+    }).returning();
+    await tx.insert(creditTransactions).values({
+      userId: user.id,
+      type: "BONUS",
+      amount: 20,
+      balanceAfter: 20,
+      description: "Starter credits awarded during professional onboarding"
+    });
+    return {
+      user,
+      profile,
+      redirectTo: "/pro/dashboard",
+      createdProfileId: profile.id,
+      nextPrompt: "Your account is ready. Add optional trust details any time from your professional dashboard."
+    };
+  });
+  const { accessToken, refreshToken } = generateTokens(completion.user.id, completion.user.role);
+  await db.insert(userSessions).values({
+    userId: completion.user.id,
+    refreshTokenHash: Buffer.from(refreshToken).toString("base64"),
+    ipAddress: requestIp,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3)
+  });
+  const [completedSession] = await db.update(onboardingSessions).set({
+    status: "COMPLETED",
+    currentStep: "COMPLETE",
+    completedAt: /* @__PURE__ */ new Date(),
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq(onboardingSessions.id, sessionId)).returning();
+  const userPayload = {
+    id: completion.user.id,
+    email: completion.user.email,
+    firstName: completion.user.firstName,
+    lastName: completion.user.lastName,
+    role: completion.user.role,
+    phone: completion.user.phone,
+    creditBalance: completion.user.creditBalance,
+    emailVerified: completion.user.emailVerified,
+    phoneVerified: completion.user.phoneVerified,
+    onboardingCompleted: completion.user.onboardingCompleted
+  };
+  return {
+    accessToken,
+    refreshToken,
+    user: userPayload,
+    redirectTo: completion.redirectTo,
+    createdJobId: "createdJobId" in completion ? completion.createdJobId ?? null : null,
+    createdProfileId: "createdProfileId" in completion ? completion.createdProfileId ?? null : null,
+    jobStatus: "jobStatus" in completion ? completion.jobStatus ?? null : null,
+    nextPrompt: completion.nextPrompt ?? null
+  };
+}
+
+// server/onboardingRoutes.ts
+var createSessionSchema = external_exports.object({
+  role: onboardingRoleSchema,
+  previousSessionId: external_exports.string().trim().optional()
+});
+function getRouteParam(value) {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
+}
+function getOtpTarget(channel, session) {
+  if (channel === "EMAIL") {
+    const target2 = session.payload.personalDetails.email?.trim();
+    if (!target2) {
+      throw new Error("Email address is missing from the onboarding session");
+    }
+    return target2;
+  }
+  const target = session.payload.personalDetails.phone?.trim();
+  if (!target) {
+    throw new Error("Phone number is missing from the onboarding session");
+  }
+  return target;
+}
+function handleRouteError(res, error) {
+  const message = error instanceof Error ? error.message : "Unexpected error";
+  const normalized = message.toLowerCase();
+  if (normalized.includes("not found") || normalized.includes("expired") || normalized.includes("invalid")) {
+    return res.status(400).json({ error: message });
+  }
+  if (normalized.includes("already registered") || normalized.includes("must be completed") || normalized.includes("incomplete")) {
+    return res.status(409).json({ error: message });
+  }
+  return res.status(500).json({ error: message });
+}
+function registerOnboardingRoutes(app2) {
+  app2.post("/api/onboarding/sessions", async (req, res) => {
+    try {
+      const { role, previousSessionId } = createSessionSchema.parse(req.body ?? {});
+      const session = await createOnboardingSession(role, previousSessionId);
+      return res.status(201).json(session);
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+  app2.get("/api/onboarding/sessions/:id", async (req, res) => {
+    try {
+      const session = await getOnboardingSession(getRouteParam(req.params.id));
+      return res.json(session);
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+  app2.post("/api/onboarding/sessions/:id/chat", async (req, res) => {
+    try {
+      const { message } = onboardingChatRequestSchema.parse(req.body ?? {});
+      const categories = await listActiveCategories();
+      const session = await processOnboardingChat(getRouteParam(req.params.id), message, categories);
+      return res.json(session);
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+  app2.patch("/api/onboarding/sessions/:id", async (req, res) => {
+    try {
+      const patch = onboardingPatchSchema.parse(req.body ?? {});
+      const categories = await listActiveCategories();
+      const session = await patchOnboardingSession(getRouteParam(req.params.id), patch, categories);
+      return res.json(session);
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+  app2.post("/api/onboarding/sessions/:id/otp/send", async (req, res) => {
+    try {
+      const { channel } = onboardingOtpSendSchema.parse(req.body ?? {});
+      const session = await getOnboardingSession(getRouteParam(req.params.id));
+      const target = getOtpTarget(channel, session);
+      const challenge = await issueVerificationChallenge({
+        sessionId: session.id,
+        channel,
+        target,
+        purpose: "ONBOARDING"
+      });
+      const updatedSession = await recordOnboardingOtpSent(session.id, channel);
+      return res.json({
+        challenge,
+        session: updatedSession
+      });
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+  app2.post("/api/onboarding/sessions/:id/otp/verify", async (req, res) => {
+    try {
+      const { channel, code } = onboardingOtpVerifySchema.parse(req.body ?? {});
+      const isValid2 = await verifyVerificationChallenge({
+        sessionId: getRouteParam(req.params.id),
+        channel,
+        code
+      });
+      if (!isValid2) {
+        return res.status(400).json({ error: "Invalid or expired verification code." });
+      }
+      const session = await markOnboardingVerification(getRouteParam(req.params.id), channel);
+      return res.json({ success: true, session });
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+  app2.post("/api/onboarding/sessions/:id/complete", async (req, res) => {
+    try {
+      const { password } = onboardingCompleteSchema.parse(req.body ?? {});
+      const result = await completeOnboardingSession(getRouteParam(req.params.id), password, req.ip);
+      return res.status(201).json(result);
+    } catch (error) {
+      return handleRouteError(res, error);
+    }
+  });
+}
+
 // server/routes.ts
 var stripe = new stripe_esm_node_default(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder", {
-  apiVersion: "2024-12-18.acacia"
+  apiVersion: "2026-02-25.clover"
 });
 async function createNotification(userIdOrRole, type, title, message, data = {}) {
   if (!userIdOrRole) return;
@@ -51964,6 +53351,28 @@ async function createNotification(userIdOrRole, type, title, message, data = {})
     console.error("Database error creating notification:", err);
     throw err;
   }
+}
+function routeParam(value) {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
+}
+function safePagination(query, defaults2 = { page: 1, limit: 20, maxLimit: 100 }) {
+  const page = Math.max(1, parseInt(query.page || String(defaults2.page)) || defaults2.page);
+  const limit = Math.min(defaults2.maxLimit, Math.max(1, parseInt(query.limit || String(defaults2.limit)) || defaults2.limit));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+function validateBudget(budgetMin, budgetMax) {
+  const min = budgetMin != null && budgetMin !== "" ? Number(budgetMin) : null;
+  const max = budgetMax != null && budgetMax !== "" ? Number(budgetMax) : null;
+  if (min != null && (isNaN(min) || min < 0)) return { min: null, max: null, error: "Budget minimum must be a positive number" };
+  if (max != null && (isNaN(max) || max < 0)) return { min: null, max: null, error: "Budget maximum must be a positive number" };
+  if (min != null && max != null && min > max) return { min: null, max: null, error: "Budget minimum cannot exceed maximum" };
+  if (min != null && min > 1e6) return { min: null, max: null, error: "Budget minimum seems unreasonably high" };
+  if (max != null && max > 1e6) return { min: null, max: null, error: "Budget maximum seems unreasonably high" };
+  return { min, max };
 }
 async function addCredits(userId, amount, type, description, referenceType, referenceId) {
   return db.transaction(async (tx) => {
@@ -52019,6 +53428,12 @@ async function registerRoutes(httpServer, app2) {
   });
   startAftercareScheduler(createNotification, null);
   app2.post("/api/auth/register", async (req, res) => {
+    const requestedRole = req.body?.role || "CUSTOMER";
+    if (requestedRole === "CUSTOMER" || requestedRole === "PROFESSIONAL") {
+      return res.status(410).json({
+        error: "Public registration now runs through the role-aware onboarding flow. Start at /register."
+      });
+    }
     try {
       const { email, password, firstName, lastName, phone, role } = req.body;
       if (!email || !password || !firstName || !lastName || !phone) {
@@ -52125,6 +53540,7 @@ async function registerRoutes(httpServer, app2) {
     await db.update(users).set({ passwordHash, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, user.id));
     return res.json({ success: true });
   });
+  registerOnboardingRoutes(app2);
   app2.post("/api/auth/logout", requireAuth, async (req, res) => {
     const { refreshToken } = req.body;
     if (refreshToken) {
@@ -52142,18 +53558,13 @@ async function registerRoutes(httpServer, app2) {
       if (!user) return res.status(404).json({ error: "User not found" });
       if (user.phoneVerified) return res.json({ success: true, alreadyVerified: true });
       if (!user.phone) return res.status(400).json({ error: "No phone number on file. Please add your phone number first." });
-      const { randomInt } = await import("crypto");
-      const code = String(randomInt(1e5, 999999));
-      const hashedCode = await hashPassword(code);
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1e3);
-      await db.delete(phoneVerificationTokens).where(
-        and(eq(phoneVerificationTokens.userId, userId), eq(phoneVerificationTokens.used, false))
-      );
-      await db.insert(phoneVerificationTokens).values({ userId, hashedCode, expiresAt });
-      if (false) {
-        console.log(`[DEV] Phone OTP for ${user.phone}: ${code}`);
-      }
-      return res.json({ success: true, message: "Verification code sent to your phone." });
+      const result = await issueVerificationChallenge({
+        userId,
+        channel: "PHONE",
+        target: user.phone,
+        purpose: "PHONE_UPDATE"
+      });
+      return res.json(result);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -52163,22 +53574,13 @@ async function registerRoutes(httpServer, app2) {
       const userId = req.user.userId;
       const { code } = req.body;
       if (!code) return res.status(400).json({ error: "Verification code required" });
-      const [token] = await db.select().from(phoneVerificationTokens).where(and(
-        eq(phoneVerificationTokens.userId, userId),
-        eq(phoneVerificationTokens.used, false),
-        gt(phoneVerificationTokens.expiresAt, /* @__PURE__ */ new Date())
-      )).orderBy(desc(phoneVerificationTokens.createdAt)).limit(1);
-      let valid = false;
-      if (false) {
-        valid = true;
-      } else if (token) {
-        valid = await comparePassword(code, token.hashedCode);
-      }
+      const valid = await verifyVerificationChallenge({
+        userId,
+        channel: "PHONE",
+        code
+      });
       if (!valid) {
         return res.status(400).json({ error: "Invalid or expired verification code. Please request a new one." });
-      }
-      if (token) {
-        await db.update(phoneVerificationTokens).set({ used: true }).where(eq(phoneVerificationTokens.id, token.id));
       }
       await db.update(users).set({ phoneVerified: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId));
       return res.json({ success: true, message: "Phone number verified successfully." });
@@ -52187,95 +53589,19 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.post("/api/ai/onboarding-chat", async (req, res) => {
-    try {
-      const { messages: messages2, mode, isLoggedIn } = req.body;
-      if (!messages2 || !mode) return res.status(400).json({ error: "Missing messages or mode" });
-      const allCats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
-      const result = await handleOnboardingChat(messages2, mode, allCats, isLoggedIn);
-      return res.json(result);
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(410).json({
+      error: "This onboarding endpoint has been replaced. Use /api/onboarding/sessions instead."
+    });
   });
   app2.post("/api/onboarding/customer", async (req, res) => {
-    try {
-      const { email, password, firstName, lastName, phone, title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
-      if (!email || !password || !firstName || !lastName || !phone || !title || !description || !categoryId) {
-        return res.status(400).json({ error: "Missing required fields for customer onboarding (including phone number)." });
-      }
-      if (phone.trim().length < 7) {
-        return res.status(400).json({ error: "A valid phone number (min 7 digits) is required to verify your identity." });
-      }
-      const descMod = moderateText(description, { fieldName: "job description" });
-      if (descMod.blocked) return res.status(422).json({ error: descMod.userMessage });
-      const titleMod = moderateText(title, { fieldName: "job title" });
-      if (titleMod.blocked) return res.status(422).json({ error: titleMod.userMessage });
-      const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
-      if (existing.length > 0) return res.status(409).json({ error: "Email already registered" });
-      const result = await db.transaction(async (tx) => {
-        const passwordHash = await hashPassword(password);
-        const [user] = await tx.insert(users).values({
-          email: email.toLowerCase(),
-          passwordHash,
-          firstName,
-          lastName,
-          phone,
-          role: "CUSTOMER",
-          status: "ACTIVE",
-          emailVerified: false,
-          onboardingCompleted: false
-        }).returning();
-        const [cat] = await tx.select().from(serviceCategories).where(eq(serviceCategories.id, categoryId));
-        const creditCost = cat?.baseCreditCost || 2;
-        const [job] = await tx.insert(jobs).values({
-          customerId: user.id,
-          categoryId,
-          title,
-          description,
-          budgetMin: budgetMin ? String(budgetMin) : null,
-          budgetMax: budgetMax ? String(budgetMax) : null,
-          urgency: urgency || "NORMAL",
-          status: "DRAFT",
-          locationText: locationText || null,
-          creditCost,
-          originalCreditCost: creditCost,
-          preferredDate: preferredDate ? new Date(preferredDate) : null
-        }).returning();
-        await tx.update(users).set({ firstJobId: job.id }).where(eq(users.id, user.id));
-        return { user, job };
-      });
-      const { accessToken, refreshToken } = generateTokens(result.user.id, result.user.role);
-      const mockOtp = "123456";
-      return res.status(201).json({
-        accessToken,
-        refreshToken,
-        user: { ...result.user, passwordHash: void 0 },
-        jobId: result.job.id,
-        otp: mockOtp
-        // only in dev
-      });
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(410).json({
+      error: "Customer onboarding now runs through the role-aware onboarding flow at /register."
+    });
   });
   app2.post("/api/onboarding/customer/verify", requireAuth, async (req, res) => {
-    try {
-      const { otp } = req.body;
-      if (otp !== "123456") {
-        return res.status(400).json({ error: "Invalid OTP code. In demo mode use: 123456" });
-      }
-      const [user] = await db.select().from(users).where(eq(users.id, req.user.userId));
-      if (!user) return res.status(404).json({ error: "User not found" });
-      await db.update(users).set({ emailVerified: true, onboardingCompleted: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, user.id));
-      if (user.firstJobId) {
-        await db.update(jobs).set({ status: "LIVE", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, user.firstJobId));
-        const [job] = await db.select().from(jobs).where(eq(jobs.id, user.firstJobId));
-        return res.json({ success: true, job });
-      }
-      return res.json({ success: true });
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(410).json({
+      error: `Customer onboarding verification has moved into the onboarding session flow. Demo OTP remains ${DEMO_OTP_CODE}.`
+    });
   });
   app2.get("/api/categories", async (_req, res) => {
     const cats = await db.select().from(serviceCategories).where(eq(serviceCategories.isActive, true)).orderBy(asc(serviceCategories.sortOrder));
@@ -52307,12 +53633,18 @@ async function registerRoutes(httpServer, app2) {
       if (!categoryId || typeof categoryId !== "string") {
         return res.status(400).json({ error: "Please select a service category." });
       }
-      const descMod = moderateText(description, { fieldName: "job description" });
+      const budgetResult = validateBudget(budgetMin, budgetMax);
+      if (budgetResult.error) {
+        return res.status(400).json({ error: budgetResult.error });
+      }
+      const descMod = moderateText(description, { fieldName: "job description", surface: "job_description", route: "POST /api/jobs", userId });
       if (descMod.blocked) {
+        if (descMod.logEntry) console.warn("[MODERATION BLOCK]", JSON.stringify(descMod.logEntry));
         return res.status(422).json({ error: descMod.userMessage });
       }
-      const titleMod = moderateText(title, { fieldName: "job title" });
+      const titleMod = moderateText(title, { fieldName: "job title", surface: "job_title", route: "POST /api/jobs", userId });
       if (titleMod.blocked) {
+        if (titleMod.logEntry) console.warn("[MODERATION BLOCK]", JSON.stringify(titleMod.logEntry));
         return res.status(422).json({ error: titleMod.userMessage });
       }
       if (req.body.checkBlocked) {
@@ -52351,11 +53683,13 @@ async function registerRoutes(httpServer, app2) {
         });
       }
       const finalUrgency = urgencyResult.isUrgent ? "URGENT" : urgency || "NORMAL";
+      const refCode = "SC-" + Math.random().toString(36).substring(2, 8).toUpperCase();
       const [job] = await db.insert(jobs).values({
         customerId: userId,
         categoryId,
         title,
         description,
+        referenceCode: refCode,
         budgetMin: budgetMin ? String(budgetMin) : null,
         budgetMax: budgetMax ? String(budgetMax) : null,
         urgency: finalUrgency,
@@ -52363,6 +53697,8 @@ async function registerRoutes(httpServer, app2) {
         creditCost,
         originalCreditCost: creditCost,
         locationText: locationText || null,
+        locationTown: req.body.locationTown || null,
+        locationEircode: req.body.locationEircode || null,
         preferredDate: preferredDate ? new Date(preferredDate) : null,
         // AI columns
         aiQualityScore: qualityResult.score,
@@ -52398,27 +53734,37 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.get("/api/jobs", requireAuth, async (req, res) => {
-    const { status, categoryId, page = "1", limit = "20" } = req.query;
+    const { status, categoryId } = req.query;
     const userId = req.user.userId;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { limit, offset } = safePagination(req.query);
     let conditions = [eq(jobs.customerId, userId)];
     if (status) conditions.push(eq(jobs.status, status));
     if (categoryId) conditions.push(eq(jobs.categoryId, categoryId));
-    const result = await db.select().from(jobs).where(and(...conditions)).orderBy(desc(jobs.createdAt)).limit(parseInt(limit)).offset(offset);
+    const result = await db.select().from(jobs).where(and(...conditions)).orderBy(desc(jobs.createdAt)).limit(limit).offset(offset);
     return res.json(result);
   });
   app2.get("/api/jobs/feed", requireAuth, requireRole("PROFESSIONAL", "ADMIN"), async (req, res) => {
-    const { categoryId, location, page = "1", limit = "20" } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { categoryId, location, scope } = req.query;
+    const { limit, offset } = safePagination(req.query);
     let conditions = [
       inArray(jobs.status, ["LIVE", "BOOSTED", "IN_DISCUSSION"])
     ];
-    if (categoryId) conditions.push(eq(jobs.categoryId, categoryId));
+    if (categoryId) {
+      conditions.push(eq(jobs.categoryId, categoryId));
+    } else if (scope !== "all") {
+      const [profile] = await db.select({ serviceCategories: professionalProfiles.serviceCategories }).from(professionalProfiles).where(eq(professionalProfiles.userId, req.user.userId));
+      const proCats = profile?.serviceCategories ?? [];
+      if (proCats.length > 0) {
+        conditions.push(inArray(jobs.categoryId, proCats));
+      } else {
+        return res.json({ jobs: [], noCategories: true });
+      }
+    }
     const liveJobs = await db.select({
       job: jobs,
       category: serviceCategories,
       customer: { firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl }
-    }).from(jobs).leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id)).leftJoin(users, eq(jobs.customerId, users.id)).where(and(...conditions)).orderBy(desc(jobs.isBoosted), desc(jobs.createdAt)).limit(parseInt(limit)).offset(offset);
+    }).from(jobs).leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id)).leftJoin(users, eq(jobs.customerId, users.id)).where(and(...conditions)).orderBy(desc(jobs.isBoosted), desc(jobs.createdAt)).limit(limit).offset(offset);
     const proId = req.user.userId;
     const result = await Promise.all(liveJobs.map(async (row) => {
       const matchbookCount = await db.select({ c: count() }).from(jobMatchbooks).where(and(eq(jobMatchbooks.jobId, row.job.id), isNull(jobMatchbooks.removedAt)));
@@ -52472,15 +53818,30 @@ async function registerRoutes(httpServer, app2) {
     const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
     if (!job) return res.status(404).json({ error: "Job not found" });
     if (job.customerId !== req.user.userId) return res.status(403).json({ error: "Forbidden" });
-    const { title, description, budgetMin, budgetMax, urgency, locationText } = req.body;
-    const [updated] = await db.update(jobs).set({ title, description, budgetMin, budgetMax, urgency, locationText, updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id)).returning();
+    const editableStatuses = ["DRAFT", "LIVE", "BOOSTED", "IN_DISCUSSION"];
+    if (!editableStatuses.includes(job.status)) {
+      return res.status(400).json({ error: `Cannot edit a job with status '${job.status}'. Only draft, live, or in-discussion jobs can be modified.` });
+    }
+    const { title, description, budgetMin, budgetMax, urgency, locationText, locationTown, locationEircode } = req.body;
+    const updates = { updatedAt: /* @__PURE__ */ new Date() };
+    if (title !== void 0) updates.title = title;
+    if (description !== void 0) updates.description = description;
+    if (budgetMin !== void 0) updates.budgetMin = budgetMin ? String(budgetMin) : null;
+    if (budgetMax !== void 0) updates.budgetMax = budgetMax ? String(budgetMax) : null;
+    if (urgency !== void 0) updates.urgency = urgency;
+    if (locationText !== void 0) updates.locationText = locationText;
+    if (locationTown !== void 0) updates.locationTown = locationTown;
+    if (locationEircode !== void 0) updates.locationEircode = locationEircode;
+    const [updated] = await db.update(jobs).set(updates).where(eq(jobs.id, req.params.id)).returning();
     return res.json(updated);
   });
   app2.delete("/api/jobs/:id", requireAuth, async (req, res) => {
     const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
     if (!job) return res.status(404).json({ error: "Job not found" });
     if (job.customerId !== req.user.userId && req.user.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
-    await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id));
+    const delJobId = req.params.id;
+    await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, delJobId));
+    await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, delJobId));
     return res.json({ success: true });
   });
   app2.post("/api/jobs/:id/publish", requireAuth, async (req, res) => {
@@ -52715,6 +54076,7 @@ async function registerRoutes(httpServer, app2) {
       if (sorted) {
         await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(eq(jobAftercares.id, aftercare.id));
         await db.update(jobs).set({ status: "COMPLETED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId));
+        await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, jobId));
         return res.json({ success: true, action: "closed", reviewPrompt: aftercare.branch === "FIVE_DAY" });
       } else {
         await db.update(jobAftercares).set({ boostOffered: true }).where(eq(jobAftercares.id, aftercare.id));
@@ -52727,13 +54089,15 @@ async function registerRoutes(httpServer, app2) {
   app2.post("/api/jobs/:id/aftercare/decline-boost", requireAuth, async (req, res) => {
     try {
       const { action } = req.body;
-      const jobId = req.params.id;
+      const jobId = routeParam(req.params.id);
       const userId = req.user.userId;
       const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
       if (!job) return res.status(404).json({ error: "Job not found or not authorized" });
       if (action === "close") {
-        await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id));
-        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, req.params.id), isNull(jobAftercares.closedAt)));
+        const declineJobId = req.params.id;
+        await db.update(jobs).set({ status: "CLOSED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, declineJobId));
+        await db.update(jobAftercares).set({ closedAt: /* @__PURE__ */ new Date() }).where(and(eq(jobAftercares.jobId, declineJobId), isNull(jobAftercares.closedAt)));
+        await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, declineJobId));
         return res.json({ success: true, action: "closed" });
       } else if (action === "leave_open") {
         await db.update(jobs).set({ blockedRepost: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, req.params.id));
@@ -52748,7 +54112,7 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.post("/api/jobs/:id/boost", requireAuth, async (req, res) => {
     try {
-      const jobId = req.params.id;
+      const jobId = routeParam(req.params.id);
       const userId = req.user.userId;
       const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.customerId, userId)));
       if (!job) return res.status(404).json({ error: "Job not found" });
@@ -52794,11 +54158,13 @@ async function registerRoutes(httpServer, app2) {
     const { blockRepost } = req.body;
     const [job] = await db.select().from(jobs).where(and(eq(jobs.id, req.params.id), eq(jobs.customerId, req.user.userId)));
     if (!job) return res.status(404).json({ error: "Job not found" });
+    const closeJobId = req.params.id;
     await db.update(jobs).set({
       status: "CLOSED",
       blockedRepost: blockRepost ? true : false,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq(jobs.id, req.params.id));
+    }).where(eq(jobs.id, closeJobId));
+    await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, closeJobId));
     return res.json({ success: true });
   });
   app2.post("/api/quotes", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
@@ -52810,8 +54176,9 @@ async function registerRoutes(httpServer, app2) {
       const [unlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, jobId), eq(jobUnlocks.professionalId, proId)));
       if (!unlock) return res.status(403).json({ error: "You must unlock this job first" });
       if (message) {
-        const quoteMod = moderateText(message, { fieldName: "quote message" });
+        const quoteMod = moderateText(message, { fieldName: "quote message", surface: "quote", route: "POST /api/quotes", userId: proId });
         if (quoteMod.blocked) {
+          if (quoteMod.logEntry) console.warn("[MODERATION BLOCK]", JSON.stringify(quoteMod.logEntry));
           return res.status(422).json({ error: quoteMod.userMessage });
         }
       }
@@ -52847,11 +54214,17 @@ async function registerRoutes(httpServer, app2) {
       else conditions.push(eq(quotes.professionalId, userId));
       const rawQuotes = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
       const enriched = await Promise.all(rawQuotes.map(async (q) => {
-        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId }).from(jobs).where(eq(jobs.id, q.jobId));
+        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId, referenceCode: jobs.referenceCode }).from(jobs).where(eq(jobs.id, q.jobId));
         const [cat] = job?.categoryId ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId)) : [null];
         const [conv] = await db.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.jobId, q.jobId))).limit(1);
         return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null };
       }));
+      if (userRow.role === "PROFESSIONAL") {
+        const activeStatuses = ["LIVE", "IN_DISCUSSION", "MATCHED", "BOOSTED"];
+        const active = enriched.filter((q) => q.job && activeStatuses.includes(q.job.status));
+        const archived = enriched.filter((q) => !q.job || !activeStatuses.includes(q.job.status));
+        return res.json({ quotes: active, archived });
+      }
       return res.json(enriched);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -52907,11 +54280,13 @@ async function registerRoutes(httpServer, app2) {
       const [job] = await db.select().from(jobs).where(eq(jobs.id, b.jobId));
       const [customer] = await db.select().from(users).where(eq(users.id, b.customerId));
       const [professional] = await db.select().from(users).where(eq(users.id, b.professionalId));
+      const [conv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, b.jobId)).limit(1);
       return {
         ...b,
         job,
-        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl } : null,
-        professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: professional.businessName } : null
+        conversationId: conv?.id || null,
+        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl, phone: customer.phone } : null,
+        professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: null } : null
       };
     }));
     return res.json(enrichedBookings);
@@ -52942,6 +54317,7 @@ async function registerRoutes(httpServer, app2) {
     }
     await db.update(bookings).set({ status: "COMPLETED", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq(bookings.id, req.params.id));
     await db.update(jobs).set({ status: "COMPLETED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, booking.jobId));
+    await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, booking.jobId));
     return res.json({ success: true });
   });
   app2.post("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
@@ -53147,13 +54523,29 @@ async function registerRoutes(httpServer, app2) {
     try {
       const userId = req.user.userId;
       const convId = req.params.id;
-      const { page = "1", limit = "50" } = req.query;
-      const offset = (parseInt(page) - 1) * parseInt(limit);
+      const { limit, offset } = safePagination(req.query, { page: 1, limit: 50, maxLimit: 200 });
       const [participant] = await db.select().from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), eq(conversationParticipants.userId, userId)));
       if (!participant) return res.status(403).json({ error: "Not a participant in this conversation" });
-      const msgs = await db.select().from(messages).where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt))).orderBy(asc(messages.createdAt)).limit(parseInt(limit)).offset(offset);
+      const rawMsgs = await db.select().from(messages).where(and(eq(messages.conversationId, convId), isNull(messages.deletedAt))).orderBy(asc(messages.createdAt)).limit(limit).offset(offset);
+      const senderCache = /* @__PURE__ */ new Map();
+      const enrichedMsgs = await Promise.all(rawMsgs.map(async (msg) => {
+        if (!senderCache.has(msg.senderId)) {
+          const [sender2] = await db.select({
+            firstName: users.firstName,
+            lastName: users.lastName,
+            role: users.role
+          }).from(users).where(eq(users.id, msg.senderId));
+          if (sender2) senderCache.set(msg.senderId, sender2);
+        }
+        const sender = senderCache.get(msg.senderId);
+        return {
+          ...msg,
+          senderName: sender ? `${sender.firstName} ${sender.lastName}`.trim() : "System",
+          senderRole: sender?.role || "SYSTEM"
+        };
+      }));
       await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(eq(conversationParticipants.conversationId, req.params.id), eq(conversationParticipants.userId, userId)));
-      return res.json(msgs);
+      return res.json(enrichedMsgs);
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
@@ -53177,8 +54569,38 @@ async function registerRoutes(httpServer, app2) {
         ));
         if (stdUnlock) allowPhone = true;
       }
-      const chatMod = moderateText(content, { allowPhone, fieldName: "message" });
+      const chatMod = moderateText(content, {
+        allowPhone,
+        fieldName: "message",
+        route: "POST /api/chat/conversations/:id/messages",
+        surface: "chat",
+        userId,
+        userRole: req.user.role,
+        referenceId: convId
+      });
       if (chatMod.blocked) {
+        if (chatMod.logEntry) {
+          console.warn("[MODERATION BLOCK]", JSON.stringify(chatMod.logEntry));
+          try {
+            await db.insert(adminAuditLogs).values({
+              adminId: userId,
+              action: "MODERATION_BLOCK",
+              resourceType: "message",
+              resourceId: convId,
+              changes: {
+                blocked: true,
+                reason: chatMod.reason,
+                flags: chatMod.flags,
+                confidence: chatMod.logEntry.confidence,
+                reconstructedDigits: chatMod.logEntry.reconstructedDigits,
+                normalizedText: chatMod.logEntry.normalizedText.substring(0, 500),
+                originalText: chatMod.logEntry.originalText.substring(0, 500)
+              },
+              ipAddress: req.ip || "unknown"
+            });
+          } catch (_logErr) {
+          }
+        }
         return res.status(422).json({ error: chatMod.userMessage });
       }
       let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(chatMod.cleanedText, !allowPhone);
@@ -53268,7 +54690,7 @@ async function registerRoutes(httpServer, app2) {
   app2.patch("/api/chat/conversations/:id/read", requireAuth, async (req, res) => {
     try {
       await db.update(conversationParticipants).set({ lastReadAt: /* @__PURE__ */ new Date() }).where(and(
-        eq(conversationParticipants.conversationId, req.params.id),
+        eq(conversationParticipants.conversationId, routeParam(req.params.id)),
         eq(conversationParticipants.userId, req.user.userId)
       ));
       return res.json({ success: true });
@@ -53428,9 +54850,8 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.get("/api/notifications", requireAuth, async (req, res) => {
-    const { page = "1", limit = "20" } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    const notifs = await db.select().from(notifications).where(eq(notifications.userId, req.user.userId)).orderBy(desc(notifications.createdAt)).limit(parseInt(limit)).offset(offset);
+    const { limit, offset } = safePagination(req.query, { page: 1, limit: 50, maxLimit: 100 });
+    const notifs = await db.select().from(notifications).where(eq(notifications.userId, req.user.userId)).orderBy(desc(notifications.createdAt)).limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(notifications).where(and(eq(notifications.userId, req.user.userId), eq(notifications.isRead, false)));
     return res.json({ notifications: notifs, unreadCount: c });
   });
@@ -53439,7 +54860,7 @@ async function registerRoutes(httpServer, app2) {
     return res.json({ success: true });
   });
   app2.post("/api/notifications/:id/read", requireAuth, async (req, res) => {
-    await db.update(notifications).set({ isRead: true, readAt: /* @__PURE__ */ new Date() }).where(and(eq(notifications.id, req.params.id), eq(notifications.userId, req.user.userId)));
+    await db.update(notifications).set({ isRead: true, readAt: /* @__PURE__ */ new Date() }).where(and(eq(notifications.id, routeParam(req.params.id)), eq(notifications.userId, req.user.userId)));
     return res.json({ success: true });
   });
   const SLA_HOURS = { LOW: 72, MEDIUM: 48, HIGH: 24, URGENT: 4 };
@@ -53516,7 +54937,7 @@ async function registerRoutes(httpServer, app2) {
     return res.json(enriched);
   });
   app2.get("/api/support/tickets/:id", requireAuth, async (req, res) => {
-    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, req.params.id));
+    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, routeParam(req.params.id)));
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
     const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.user.userId));
     if (user.role !== "ADMIN" && user.role !== "SUPPORT" && ticket.userId !== req.user.userId) {
@@ -53771,7 +55192,7 @@ async function registerRoutes(httpServer, app2) {
       const field = helpful ? faqArticles.helpfulCount : faqArticles.notHelpfulCount;
       const [article] = await db.update(faqArticles).set({
         [helpful ? "helpfulCount" : "notHelpfulCount"]: sql`${field} + 1`
-      }).where(eq(faqArticles.id, req.params.id)).returning();
+      }).where(eq(faqArticles.id, routeParam(req.params.id))).returning();
       return res.json(article);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -53808,14 +55229,14 @@ async function registerRoutes(httpServer, app2) {
         sortOrder,
         isPublished,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq(faqArticles.id, req.params.id)).returning();
+      }).where(eq(faqArticles.id, routeParam(req.params.id))).returning();
       return res.json(article);
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
   });
   app2.delete("/api/admin/support/faq/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    await db.delete(faqArticles).where(eq(faqArticles.id, req.params.id));
+    await db.delete(faqArticles).where(eq(faqArticles.id, routeParam(req.params.id)));
     return res.json({ success: true });
   });
   app2.get("/api/admin/support/canned-responses", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
@@ -53847,20 +55268,20 @@ async function registerRoutes(httpServer, app2) {
         category,
         shortcut,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq(cannedResponses.id, req.params.id)).returning();
+      }).where(eq(cannedResponses.id, routeParam(req.params.id))).returning();
       return res.json(response);
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
   });
   app2.delete("/api/admin/support/canned-responses/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    await db.delete(cannedResponses).where(eq(cannedResponses.id, req.params.id));
+    await db.delete(cannedResponses).where(eq(cannedResponses.id, routeParam(req.params.id)));
     return res.json({ success: true });
   });
   app2.post("/api/admin/support/canned-responses/:id/use", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
     await db.update(cannedResponses).set({
       usageCount: sql`${cannedResponses.usageCount} + 1`
-    }).where(eq(cannedResponses.id, req.params.id));
+    }).where(eq(cannedResponses.id, routeParam(req.params.id)));
     return res.json({ success: true });
   });
   app2.get("/api/pro/profile", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
@@ -53953,12 +55374,13 @@ async function registerRoutes(httpServer, app2) {
     const [user] = await db.select().from(users).where(eq(users.id, req.params.id));
     if (!user) return res.status(404).json({ error: "User not found" });
     const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.params.id));
-    const proReviews = await db.select().from(reviews).where(eq(reviews.revieweeId, req.params.id)).limit(10);
-    const [hiresRow] = await db.select({ c: count() }).from(bookings).where(and(eq(bookings.professionalId, req.params.id), eq(bookings.status, "COMPLETED")));
+    const targetProId = routeParam(req.params.id);
+    const proReviews = await db.select().from(reviews).where(eq(reviews.revieweeId, targetProId)).limit(10);
+    const [hiresRow] = await db.select({ c: count() }).from(bookings).where(and(eq(bookings.professionalId, targetProId), eq(bookings.status, "COMPLETED")));
     const totalHires = hiresRow?.c ?? 0;
     let avgResponseMinutes = null;
     try {
-      const proConvs = await db.select({ id: conversations.id, createdAt: conversations.createdAt }).from(conversations).innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id)).where(eq(conversationParticipants.userId, req.params.id)).limit(20);
+      const proConvs = await db.select({ id: conversations.id, createdAt: conversations.createdAt }).from(conversations).innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id)).where(eq(conversationParticipants.userId, targetProId)).limit(20);
       if (proConvs.length > 0) {
         const convIds = proConvs.map((c) => c.id);
         const firstMsgs = await db.select({ convId: messages.conversationId, sentAt: messages.createdAt }).from(messages).where(and(eq(messages.senderId, req.params.id), inArray(messages.conversationId, convIds))).orderBy(messages.createdAt);
@@ -54030,13 +55452,13 @@ async function registerRoutes(httpServer, app2) {
     });
   });
   app2.get("/api/admin/users", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    const { role, status, search, page = "1", limit = "20" } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { role, status, search } = req.query;
+    const { limit, offset } = safePagination(req.query);
     let conditions = [isNull(users.deletedAt)];
     if (role) conditions.push(eq(users.role, role));
     if (status) conditions.push(eq(users.status, status));
     if (search) conditions.push(or(ilike(users.email, `%${search}%`), ilike(users.firstName, `%${search}%`), ilike(users.lastName, `%${search}%`)));
-    const result = await db.select().from(users).where(and(...conditions)).orderBy(desc(users.createdAt)).limit(parseInt(limit)).offset(offset);
+    const result = await db.select().from(users).where(and(...conditions)).orderBy(desc(users.createdAt)).limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(users).where(and(...conditions));
     const usersWithVerification = await Promise.all(result.map(async (u) => {
       if (u.role === "PROFESSIONAL") {
@@ -54055,23 +55477,45 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.patch("/api/admin/users/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
     const { status, role } = req.body;
-    const [user] = await db.update(users).set({ status: status || void 0, role: role || void 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, req.params.id)).returning();
+    const targetUserId = routeParam(req.params.id);
+    const [user] = await db.update(users).set({ status: status || void 0, role: role || void 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, targetUserId)).returning();
     await db.insert(adminAuditLogs).values({
       adminId: req.user.userId,
       action: "UPDATE_USER",
       resourceType: "USER",
-      resourceId: req.params.id,
+      resourceId: targetUserId,
       changes: { status, role },
       ipAddress: req.ip
     });
     return res.json({ ...user, passwordHash: void 0 });
   });
   app2.get("/api/admin/jobs", requireAuth, requireRole("ADMIN"), async (req, res) => {
-    const { status, page = "1", limit = "20" } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { status, search } = req.query;
+    const { limit, offset } = safePagination(req.query);
     let conditions = [];
     if (status) conditions.push(eq(jobs.status, status));
-    const result = await db.select().from(jobs).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(jobs.createdAt)).limit(parseInt(limit)).offset(offset);
+    if (search) conditions.push(or(ilike(jobs.title, `%${search}%`), ilike(jobs.locationText, `%${search}%`)));
+    const result = await db.select({
+      id: jobs.id,
+      title: jobs.title,
+      description: jobs.description,
+      customerId: jobs.customerId,
+      categoryId: jobs.categoryId,
+      budgetMin: jobs.budgetMin,
+      budgetMax: jobs.budgetMax,
+      locationText: jobs.locationText,
+      urgency: jobs.urgency,
+      status: jobs.status,
+      creditCost: jobs.creditCost,
+      isBoosted: jobs.isBoosted,
+      boostCount: jobs.boostCount,
+      aiQualityScore: jobs.aiQualityScore,
+      aiIsFakeFlag: jobs.aiIsFakeFlag,
+      aiIsUrgent: jobs.aiIsUrgent,
+      createdAt: jobs.createdAt,
+      updatedAt: jobs.updatedAt,
+      customerName: sql`(select concat(first_name, ' ', last_name) from users where id = ${jobs.customerId})`
+    }).from(jobs).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(jobs.createdAt)).limit(limit).offset(offset);
     const [{ c }] = await db.select({ c: count() }).from(jobs).where(conditions.length > 0 ? and(...conditions) : void 0);
     return res.json({ jobs: result, total: c });
   });
@@ -54110,13 +55554,16 @@ async function registerRoutes(httpServer, app2) {
         const [msgCount] = await db.select({ c: count() }).from(messages).where(and(eq(messages.conversationId, conv.id), isNull(messages.deletedAt)));
         const [flagCount] = await db.select({ c: count() }).from(messages).where(and(eq(messages.conversationId, conv.id), eq(messages.isFiltered, true), isNull(messages.deletedAt)));
         let jobTitle = null;
+        let jobStatus = null;
         if (conv.jobId) {
-          const [j] = await db.select({ title: jobs.title }).from(jobs).where(eq(jobs.id, conv.jobId));
+          const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
           jobTitle = j?.title || null;
+          jobStatus = j?.status || null;
         }
         return {
           ...conv,
           jobTitle,
+          jobStatus,
           participants,
           lastMessage: lastMsg?.content || null,
           lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
@@ -54286,6 +55733,45 @@ async function registerRoutes(httpServer, app2) {
     const rows = await db.select().from(conversations).innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id)).where(eq(conversationParticipants.userId, userId)).orderBy(desc(conversations.lastMessageAt));
     return res.json(rows.map((r) => r.conversations));
   });
+  app2.post("/api/conversations", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { participantId, jobId } = req.body;
+      if (!participantId) return res.status(400).json({ error: "participantId required" });
+      if (jobId) {
+        const myJobConvs = await db.select({ conv: conversations }).from(conversations).innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id)).where(and(eq(conversations.jobId, jobId), eq(conversationParticipants.userId, userId)));
+        if (myJobConvs.length > 0) {
+          return res.json({ id: myJobConvs[0].conv.id, ...myJobConvs[0].conv });
+        }
+      }
+      const myConvIds = await db.select({ convId: conversationParticipants.conversationId }).from(conversationParticipants).where(eq(conversationParticipants.userId, userId));
+      if (myConvIds.length > 0) {
+        const convIdList = myConvIds.map((r) => r.convId);
+        const sharedConvs = await db.select({ convId: conversationParticipants.conversationId }).from(conversationParticipants).where(and(
+          eq(conversationParticipants.userId, participantId),
+          inArray(conversationParticipants.conversationId, convIdList)
+        ));
+        if (sharedConvs.length > 0) {
+          const [existingConv] = await db.select().from(conversations).where(eq(conversations.id, sharedConvs[0].convId));
+          if (existingConv) return res.json(existingConv);
+        }
+      }
+      const [newConv] = await db.insert(conversations).values({
+        type: "DIRECT",
+        status: "ACTIVE",
+        createdBy: userId,
+        jobId: jobId || null,
+        lastMessageAt: /* @__PURE__ */ new Date()
+      }).returning();
+      await db.insert(conversationParticipants).values([
+        { conversationId: newConv.id, userId, role: "MEMBER" },
+        { conversationId: newConv.id, userId: participantId, role: "MEMBER" }
+      ]);
+      return res.json(newConv);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
   app2.get("/api/reviews", requireAuth, async (req, res) => {
     try {
       const userId = req.user.userId;
@@ -54360,13 +55846,16 @@ async function registerRoutes(httpServer, app2) {
       if (replyMod.blocked) {
         return res.status(422).json({ error: replyMod.userMessage });
       }
-      const [updated] = await db.update(reviews).set({ proReply: reply.trim(), proRepliedAt: /* @__PURE__ */ new Date() }).where(eq(reviews.id, req.params.id)).returning();
+      const [updated] = await db.update(reviews).set({ proReply: reply.trim(), proRepliedAt: /* @__PURE__ */ new Date() }).where(eq(reviews.id, routeParam(req.params.id))).returning();
       return res.json(updated);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
   });
   app2.post("/api/onboarding/professional", async (req, res) => {
+    return res.status(410).json({
+      error: "Professional onboarding now runs through the role-aware onboarding flow at /register."
+    });
     try {
       const {
         email,
@@ -54480,19 +55969,24 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.patch("/api/admin/users/:id/name", requireAuth, requireRole("ADMIN"), async (req, res) => {
     try {
-      const { firstName, lastName } = req.body;
+      const { firstName, lastName, reason } = req.body;
       if (!firstName && !lastName) return res.status(400).json({ error: "Provide firstName or lastName to update" });
+      const [existing] = await db.select().from(users).where(eq(users.id, req.params.id));
+      if (!existing) return res.status(404).json({ error: "User not found" });
       const updateData = { updatedAt: /* @__PURE__ */ new Date() };
       if (firstName) updateData.firstName = firstName;
       if (lastName) updateData.lastName = lastName;
       const [updated] = await db.update(users).set(updateData).where(eq(users.id, req.params.id)).returning();
-      if (!updated) return res.status(404).json({ error: "User not found" });
       await db.insert(adminAuditLogs).values({
         adminId: req.user.userId,
         action: "UPDATE_USER_NAME",
         resourceType: "USER",
         resourceId: req.params.id,
-        changes: { firstName, lastName },
+        changes: {
+          previous: { firstName: existing.firstName, lastName: existing.lastName },
+          new: { firstName: updated.firstName, lastName: updated.lastName },
+          reason: reason || void 0
+        },
         ipAddress: req.ip
       });
       return res.json({ success: true, firstName: updated.firstName, lastName: updated.lastName });
@@ -54613,6 +56107,421 @@ async function registerRoutes(httpServer, app2) {
       return res.status(500).json({ error: err.message });
     }
   });
+  app2.get("/api/admin/quotes", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { status, search } = req.query;
+      const { limit, offset } = safePagination(req.query);
+      let conditions = [];
+      if (status) conditions.push(eq(quotes.status, status));
+      const result = await db.select({
+        id: quotes.id,
+        jobId: quotes.jobId,
+        professionalId: quotes.professionalId,
+        customerId: quotes.customerId,
+        amount: quotes.amount,
+        message: quotes.message,
+        estimatedDuration: quotes.estimatedDuration,
+        status: quotes.status,
+        validUntil: quotes.validUntil,
+        createdAt: quotes.createdAt,
+        updatedAt: quotes.updatedAt,
+        jobTitle: sql`(select title from jobs where id = ${quotes.jobId})`,
+        proName: sql`(select concat(first_name, ' ', last_name) from users where id = ${quotes.professionalId})`,
+        customerName: sql`(select concat(first_name, ' ', last_name) from users where id = ${quotes.customerId})`
+      }).from(quotes).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(quotes.createdAt)).limit(limit).offset(offset);
+      const [{ c }] = await db.select({ c: count() }).from(quotes).where(conditions.length > 0 ? and(...conditions) : void 0);
+      const [totalQuotes] = await db.select({ c: count() }).from(quotes);
+      const [pendingQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "PENDING"));
+      const [acceptedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "ACCEPTED"));
+      const [rejectedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "REJECTED"));
+      const [avgAmount] = await db.select({ a: avg(quotes.amount) }).from(quotes);
+      return res.json({
+        quotes: result,
+        total: c,
+        funnel: {
+          total: totalQuotes.c,
+          pending: pendingQuotes.c,
+          accepted: acceptedQuotes.c,
+          rejected: rejectedQuotes.c,
+          avgAmount: avgAmount.a || "0",
+          conversionRate: totalQuotes.c > 0 ? (acceptedQuotes.c / totalQuotes.c * 100).toFixed(1) : "0"
+        }
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/quotes/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { status } = req.body;
+      const quoteId = routeParam(req.params.id);
+      const [updated] = await db.update(quotes).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(eq(quotes.id, quoteId)).returning();
+      if (!updated) return res.status(404).json({ error: "Quote not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "UPDATE_QUOTE_STATUS",
+        resourceType: "QUOTE",
+        resourceId: quoteId,
+        changes: { status },
+        ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/bookings", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { status, search } = req.query;
+      const { limit, offset } = safePagination(req.query);
+      let conditions = [];
+      if (status) conditions.push(eq(bookings.status, status));
+      const result = await db.select({
+        id: bookings.id,
+        quoteId: bookings.quoteId,
+        jobId: bookings.jobId,
+        customerId: bookings.customerId,
+        professionalId: bookings.professionalId,
+        serviceDate: bookings.serviceDate,
+        serviceTime: bookings.serviceTime,
+        durationHours: bookings.durationHours,
+        totalAmount: bookings.totalAmount,
+        status: bookings.status,
+        cancellationReason: bookings.cancellationReason,
+        completedAt: bookings.completedAt,
+        createdAt: bookings.createdAt,
+        updatedAt: bookings.updatedAt,
+        jobTitle: sql`(select title from jobs where id = ${bookings.jobId})`,
+        proName: sql`(select concat(first_name, ' ', last_name) from users where id = ${bookings.professionalId})`,
+        customerName: sql`(select concat(first_name, ' ', last_name) from users where id = ${bookings.customerId})`
+      }).from(bookings).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(bookings.createdAt)).limit(limit).offset(offset);
+      const [{ c }] = await db.select({ c: count() }).from(bookings).where(conditions.length > 0 ? and(...conditions) : void 0);
+      const [totalBookings] = await db.select({ c: count() }).from(bookings);
+      const [confirmed] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "CONFIRMED"));
+      const [inProgress] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "IN_PROGRESS"));
+      const [completed] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "COMPLETED"));
+      const [cancelled] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "CANCELLED"));
+      const [disputed] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "DISPUTED"));
+      const [totalValue] = await db.select({ s: sum(bookings.totalAmount) }).from(bookings).where(eq(bookings.status, "COMPLETED"));
+      return res.json({
+        bookings: result,
+        total: c,
+        funnel: {
+          total: totalBookings.c,
+          confirmed: confirmed.c,
+          inProgress: inProgress.c,
+          completed: completed.c,
+          cancelled: cancelled.c,
+          disputed: disputed.c,
+          completionRate: totalBookings.c > 0 ? (completed.c / totalBookings.c * 100).toFixed(1) : "0",
+          totalCompletedValue: totalValue.s || "0"
+        }
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/bookings/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { status, cancellationReason } = req.body;
+      const bookingId = routeParam(req.params.id);
+      const updateData = { status, updatedAt: /* @__PURE__ */ new Date() };
+      if (cancellationReason) updateData.cancellationReason = cancellationReason;
+      if (status === "COMPLETED") updateData.completedAt = /* @__PURE__ */ new Date();
+      const [updated] = await db.update(bookings).set(updateData).where(eq(bookings.id, bookingId)).returning();
+      if (!updated) return res.status(404).json({ error: "Booking not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "UPDATE_BOOKING_STATUS",
+        resourceType: "BOOKING",
+        resourceId: bookingId,
+        changes: { status, cancellationReason },
+        ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/reviews", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { visible } = req.query;
+      const { limit, offset } = safePagination(req.query);
+      let conditions = [];
+      if (visible === "true") conditions.push(eq(reviews.isVisible, true));
+      if (visible === "false") conditions.push(eq(reviews.isVisible, false));
+      const result = await db.select({
+        id: reviews.id,
+        bookingId: reviews.bookingId,
+        reviewerId: reviews.reviewerId,
+        revieweeId: reviews.revieweeId,
+        rating: reviews.rating,
+        title: reviews.title,
+        comment: reviews.comment,
+        response: reviews.response,
+        proReply: reviews.proReply,
+        isVisible: reviews.isVisible,
+        createdAt: reviews.createdAt,
+        reviewerName: sql`(select concat(first_name, ' ', last_name) from users where id = ${reviews.reviewerId})`,
+        revieweeName: sql`(select concat(first_name, ' ', last_name) from users where id = ${reviews.revieweeId})`
+      }).from(reviews).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(reviews.createdAt)).limit(limit).offset(offset);
+      const [{ c }] = await db.select({ c: count() }).from(reviews).where(conditions.length > 0 ? and(...conditions) : void 0);
+      const [avgRating] = await db.select({ a: avg(reviews.rating) }).from(reviews).where(eq(reviews.isVisible, true));
+      const [totalReviews] = await db.select({ c: count() }).from(reviews);
+      const distribution = await db.select({ rating: reviews.rating, c: count() }).from(reviews).where(eq(reviews.isVisible, true)).groupBy(reviews.rating);
+      return res.json({
+        reviews: result,
+        total: c,
+        stats: {
+          avgRating: avgRating.a ? parseFloat(String(avgRating.a)).toFixed(1) : "0",
+          totalReviews: totalReviews.c,
+          distribution: distribution.reduce((acc, d) => {
+            acc[d.rating] = d.c;
+            return acc;
+          }, {})
+        }
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/reviews/:id/visibility", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { isVisible, reason } = req.body;
+      const reviewId = routeParam(req.params.id);
+      const [updated] = await db.update(reviews).set({ isVisible }).where(eq(reviews.id, reviewId)).returning();
+      if (!updated) return res.status(404).json({ error: "Review not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: isVisible ? "SHOW_REVIEW" : "HIDE_REVIEW",
+        resourceType: "REVIEW",
+        resourceId: reviewId,
+        changes: { isVisible, reason },
+        ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/users/:id/detail", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const userId = routeParam(req.params.id);
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) return res.status(404).json({ error: "User not found" });
+      let profile = null;
+      if (user.role === "PROFESSIONAL") {
+        const [p] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, userId));
+        profile = p || null;
+      }
+      const userJobs = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.customerId, userId)).orderBy(desc(jobs.createdAt)).limit(20);
+      const userQuotes = await db.select({
+        id: quotes.id,
+        jobId: quotes.jobId,
+        amount: quotes.amount,
+        status: quotes.status,
+        createdAt: quotes.createdAt,
+        jobTitle: sql`(select title from jobs where id = ${quotes.jobId})`
+      }).from(quotes).where(or(eq(quotes.professionalId, userId), eq(quotes.customerId, userId))).orderBy(desc(quotes.createdAt)).limit(20);
+      const userBookings = await db.select({
+        id: bookings.id,
+        jobId: bookings.jobId,
+        totalAmount: bookings.totalAmount,
+        status: bookings.status,
+        serviceDate: bookings.serviceDate,
+        createdAt: bookings.createdAt,
+        jobTitle: sql`(select title from jobs where id = ${bookings.jobId})`
+      }).from(bookings).where(or(eq(bookings.professionalId, userId), eq(bookings.customerId, userId))).orderBy(desc(bookings.createdAt)).limit(20);
+      const reviewsGiven = await db.select({
+        id: reviews.id,
+        rating: reviews.rating,
+        comment: reviews.comment,
+        createdAt: reviews.createdAt,
+        revieweeName: sql`(select concat(first_name, ' ', last_name) from users where id = ${reviews.revieweeId})`
+      }).from(reviews).where(eq(reviews.reviewerId, userId)).orderBy(desc(reviews.createdAt)).limit(10);
+      const reviewsReceived = await db.select({
+        id: reviews.id,
+        rating: reviews.rating,
+        comment: reviews.comment,
+        createdAt: reviews.createdAt,
+        reviewerName: sql`(select concat(first_name, ' ', last_name) from users where id = ${reviews.reviewerId})`
+      }).from(reviews).where(eq(reviews.revieweeId, userId)).orderBy(desc(reviews.createdAt)).limit(10);
+      const creditTx = await db.select().from(creditTransactions).where(eq(creditTransactions.userId, userId)).orderBy(desc(creditTransactions.createdAt)).limit(20);
+      const auditTrail = await db.select().from(adminAuditLogs).where(eq(adminAuditLogs.resourceId, userId)).orderBy(desc(adminAuditLogs.createdAt)).limit(20);
+      return res.json({
+        user: { ...user, passwordHash: void 0 },
+        profile,
+        jobs: userJobs,
+        quotes: userQuotes,
+        bookings: userBookings,
+        reviewsGiven,
+        reviewsReceived,
+        creditTransactions: creditTx,
+        auditTrail
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/jobs/:id/detail", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const jobId = routeParam(req.params.id);
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      const [customer] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where(eq(users.id, job.customerId));
+      const [category] = await db.select({ name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId));
+      const unlocks = await db.select({
+        id: jobUnlocks.id,
+        professionalId: jobUnlocks.professionalId,
+        tier: jobUnlocks.tier,
+        creditsSpent: jobUnlocks.creditsSpent,
+        unlockedAt: jobUnlocks.unlockedAt,
+        proName: sql`(select concat(first_name, ' ', last_name) from users where id = ${jobUnlocks.professionalId})`
+      }).from(jobUnlocks).where(eq(jobUnlocks.jobId, jobId)).orderBy(desc(jobUnlocks.unlockedAt));
+      const jobQuotes = await db.select({
+        id: quotes.id,
+        professionalId: quotes.professionalId,
+        amount: quotes.amount,
+        status: quotes.status,
+        createdAt: quotes.createdAt,
+        proName: sql`(select concat(first_name, ' ', last_name) from users where id = ${quotes.professionalId})`
+      }).from(quotes).where(eq(quotes.jobId, jobId)).orderBy(desc(quotes.createdAt));
+      const jobBookings = await db.select({
+        id: bookings.id,
+        professionalId: bookings.professionalId,
+        totalAmount: bookings.totalAmount,
+        status: bookings.status,
+        serviceDate: bookings.serviceDate,
+        completedAt: bookings.completedAt,
+        proName: sql`(select concat(first_name, ' ', last_name) from users where id = ${bookings.professionalId})`
+      }).from(bookings).where(eq(bookings.jobId, jobId)).orderBy(desc(bookings.createdAt));
+      const boosts = await db.select().from(jobBoosts).where(eq(jobBoosts.jobId, jobId));
+      const aftercare = await db.select().from(jobAftercares).where(eq(jobAftercares.jobId, jobId));
+      return res.json({
+        job,
+        customer,
+        category,
+        unlocks,
+        quotes: jobQuotes,
+        bookings: jobBookings,
+        boosts,
+        aftercare
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/categories", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const cats = await db.select().from(serviceCategories).orderBy(asc(serviceCategories.sortOrder));
+      const withCounts = await Promise.all(cats.map(async (cat) => {
+        const [{ c }] = await db.select({ c: count() }).from(jobs).where(eq(jobs.categoryId, cat.id));
+        return { ...cat, jobCount: c };
+      }));
+      return res.json(withCounts);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/categories/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { name, description, isActive, sortOrder, baseCreditCost, icon } = req.body;
+      const catId = routeParam(req.params.id);
+      const updateData = {};
+      if (name !== void 0) updateData.name = name;
+      if (description !== void 0) updateData.description = description;
+      if (isActive !== void 0) updateData.isActive = isActive;
+      if (sortOrder !== void 0) updateData.sortOrder = sortOrder;
+      if (baseCreditCost !== void 0) updateData.baseCreditCost = baseCreditCost;
+      if (icon !== void 0) updateData.icon = icon;
+      const [updated] = await db.update(serviceCategories).set(updateData).where(eq(serviceCategories.id, catId)).returning();
+      if (!updated) return res.status(404).json({ error: "Category not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "UPDATE_CATEGORY",
+        resourceType: "CATEGORY",
+        resourceId: catId,
+        changes: updateData,
+        ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.get("/api/admin/dashboard/enhanced", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const now = /* @__PURE__ */ new Date();
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1e3);
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1e3);
+      const [totalUsers] = await db.select({ c: count() }).from(users).where(isNull(users.deletedAt));
+      const [totalJobs] = await db.select({ c: count() }).from(jobs);
+      const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED")));
+      const [totalBookings] = await db.select({ c: count() }).from(bookings);
+      const [completedBookings] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "COMPLETED"));
+      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      const [totalQuotes] = await db.select({ c: count() }).from(quotes);
+      const [acceptedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "ACCEPTED"));
+      const [totalUnlocks] = await db.select({ c: count() }).from(jobUnlocks);
+      const [totalReviews] = await db.select({ c: count() }).from(reviews).where(eq(reviews.isVisible, true));
+      const [avgRating] = await db.select({ a: avg(reviews.rating) }).from(reviews).where(eq(reviews.isVisible, true));
+      const [openTickets] = await db.select({ c: count() }).from(supportTickets).where(or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS")));
+      const [disputedBookings] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "DISPUTED"));
+      const [flaggedMessages] = await db.select({ c: count() }).from(messages).where(and(eq(messages.isFiltered, true), isNull(messages.deletedAt)));
+      const [pendingVerifications] = await db.select({ c: count() }).from(professionalProfiles).where(eq(professionalProfiles.verificationStatus, "PENDING"));
+      const [recentUsers] = await db.select({ c: count() }).from(users).where(gte(users.createdAt, sevenDaysAgo));
+      const [recentJobs] = await db.select({ c: count() }).from(jobs).where(gte(jobs.createdAt, sevenDaysAgo));
+      const [recentBookings] = await db.select({ c: count() }).from(bookings).where(gte(bookings.createdAt, sevenDaysAgo));
+      const usersByRole = await db.select({ role: users.role, c: count() }).from(users).where(isNull(users.deletedAt)).groupBy(users.role);
+      const jobsByStatus = await db.select({ status: jobs.status, c: count() }).from(jobs).groupBy(jobs.status);
+      const bookingsByStatus = await db.select({ status: bookings.status, c: count() }).from(bookings).groupBy(bookings.status);
+      const quoteConversion = totalQuotes.c > 0 ? (acceptedQuotes.c / totalQuotes.c * 100).toFixed(1) : "0";
+      const bookingCompletion = totalBookings.c > 0 ? (completedBookings.c / totalBookings.c * 100).toFixed(1) : "0";
+      return res.json({
+        kpis: {
+          totalUsers: totalUsers.c,
+          totalJobs: totalJobs.c,
+          activeJobs: activeJobs.c,
+          totalBookings: totalBookings.c,
+          completedBookings: completedBookings.c,
+          totalRevenue: totalRevenue.s || "0",
+          totalQuotes: totalQuotes.c,
+          acceptedQuotes: acceptedQuotes.c,
+          totalUnlocks: totalUnlocks.c,
+          totalReviews: totalReviews.c,
+          avgRating: avgRating.a ? parseFloat(String(avgRating.a)).toFixed(1) : "0",
+          openTickets: openTickets.c,
+          disputedBookings: disputedBookings.c,
+          flaggedMessages: flaggedMessages.c,
+          pendingVerifications: pendingVerifications.c
+        },
+        trends: { recentUsers: recentUsers.c, recentJobs: recentJobs.c, recentBookings: recentBookings.c },
+        health: { quoteConversion, bookingCompletion },
+        breakdowns: { usersByRole, jobsByStatus, bookingsByStatus }
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app2.patch("/api/admin/jobs/:id/status", requireAuth, requireRole("ADMIN"), async (req, res) => {
+    try {
+      const { status, reason } = req.body;
+      const jobId = routeParam(req.params.id);
+      const [updated] = await db.update(jobs).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, jobId)).returning();
+      if (!updated) return res.status(404).json({ error: "Job not found" });
+      await db.insert(adminAuditLogs).values({
+        adminId: req.user.userId,
+        action: "UPDATE_JOB_STATUS",
+        resourceType: "JOB",
+        resourceId: jobId,
+        changes: { status, reason },
+        ipAddress: req.ip
+      });
+      return res.json(updated);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
   app2.get("/api/ai/status", (req, res) => {
     res.json({ available: isGeminiAvailable(), model: "gemini-2.0-flash" });
   });
@@ -54690,6 +56599,47 @@ async function registerRoutes(httpServer, app2) {
       return res.status(500).json({ error: e.message });
     }
   });
+  app2.post("/api/ai/create-draft", requireAuth, requireRole("CUSTOMER"), async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { title, description, categorySlug, locationText, locationTown, locationEircode, urgency, budgetMin, budgetMax } = req.body;
+      if (!title || !description) return res.status(400).json({ error: "title and description required" });
+      let categoryId = null;
+      if (categorySlug) {
+        const [cat2] = await db.select().from(serviceCategories).where(eq(serviceCategories.slug, categorySlug));
+        categoryId = cat2?.id || null;
+      }
+      if (!categoryId) {
+        const allCats = await db.select().from(serviceCategories);
+        const catResult = detectCategory(title, description, allCats);
+        const matchedCat = allCats.find((c) => c.slug === catResult.categorySlug);
+        categoryId = matchedCat?.id || allCats[0]?.id || null;
+      }
+      if (!categoryId) return res.status(400).json({ error: "No categories available" });
+      const [cat] = await db.select().from(serviceCategories).where(eq(serviceCategories.id, categoryId));
+      const creditCost = cat?.baseCreditCost || 2;
+      const refCode = "SC-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const [job] = await db.insert(jobs).values({
+        customerId: userId,
+        categoryId,
+        title,
+        description,
+        referenceCode: refCode,
+        budgetMin: budgetMin ? String(budgetMin) : null,
+        budgetMax: budgetMax ? String(budgetMax) : null,
+        urgency: urgency || "NORMAL",
+        status: "DRAFT",
+        creditCost,
+        originalCreditCost: creditCost,
+        locationText: locationText || null,
+        locationTown: locationTown || null,
+        locationEircode: locationEircode || null
+      }).returning();
+      return res.status(201).json(job);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
   app2.post("/api/ai/enhance-bio", requireAuth, requireRole("PROFESSIONAL", "ADMIN"), async (req, res) => {
     try {
       const { bio, skills } = req.body;
@@ -54703,7 +56653,7 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.get("/api/ai/review-summary/:proId", requireAuth, async (req, res) => {
     try {
-      const { proId } = req.params;
+      const proId = routeParam(req.params.proId);
       const proReviews = await db.select({
         rating: reviews.rating,
         comment: reviews.comment
