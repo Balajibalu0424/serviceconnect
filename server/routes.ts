@@ -2918,7 +2918,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           .innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id))
           .where(and(eq(conversations.jobId, jobId), eq(conversationParticipants.userId, userId)));
         if (myJobConvs.length > 0) {
-          return res.json({ id: myJobConvs[0].conv.id, ...myJobConvs[0].conv });
+          return res.json({ ...myJobConvs[0].conv });
         }
       }
 

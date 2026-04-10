@@ -55741,7 +55741,7 @@ async function registerRoutes(httpServer, app2) {
       if (jobId) {
         const myJobConvs = await db.select({ conv: conversations }).from(conversations).innerJoin(conversationParticipants, eq(conversationParticipants.conversationId, conversations.id)).where(and(eq(conversations.jobId, jobId), eq(conversationParticipants.userId, userId)));
         if (myJobConvs.length > 0) {
-          return res.json({ id: myJobConvs[0].conv.id, ...myJobConvs[0].conv });
+          return res.json({ ...myJobConvs[0].conv });
         }
       }
       const myConvIds = await db.select({ convId: conversationParticipants.conversationId }).from(conversationParticipants).where(eq(conversationParticipants.userId, userId));
