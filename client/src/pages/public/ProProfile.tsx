@@ -78,7 +78,7 @@ export default function ProPublicProfile() {
     : null;
   const yearsExp = profile.yearsExperience ?? null;
   const isElitePro = profile.subscriptionTier === "ELITE" || profile.earnedBadges?.includes("elite_pro");
-  const isVerified = pro.status === "ACTIVE" || profile.isVerified;
+  const isVerified = profile.isVerified === true;
   const isAvailableOnline = profile.availability?.availableOnline === true;
 
   const earnedBadges: string[] = profile.earnedBadges || [];

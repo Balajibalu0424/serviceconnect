@@ -2630,8 +2630,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return { ...r, reviewerFirstName: reviewer?.firstName || "Customer" };
     }));
 
+    // Resolve category IDs to human-readable names
+    let resolvedCategoryNames: string[] = [];
+    if (profile?.serviceCategories && profile.serviceCategories.length > 0) {
+      const catIds = profile.serviceCategories.filter((c: string) =>
+        c.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+      );
+      const plainNames = profile.serviceCategories.filter((c: string) =>
+        !c.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+      );
+      if (catIds.length > 0) {
+        const catRows = await db.select({ id: serviceCategories.id, name: serviceCategories.name })
+          .from(serviceCategories)
+          .where(inArray(serviceCategories.id, catIds));
+        const catMap = new Map(catRows.map(c => [c.id, c.name]));
+        resolvedCategoryNames = [
+          ...catIds.map((id: string) => catMap.get(id) || id),
+          ...plainNames,
+        ];
+      } else {
+        resolvedCategoryNames = plainNames;
+      }
+    }
+
     const safeProfile = profile ? {
       ...profile,
+      // Resolve category IDs to names for public display
+      serviceCategories: resolvedCategoryNames.length > 0 ? resolvedCategoryNames : profile.serviceCategories,
       // Strip sensitive verification docs from public view
       verificationDocumentUrl: undefined,
       verificationReviewNote: undefined,
