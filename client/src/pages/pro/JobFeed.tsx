@@ -37,7 +37,7 @@ function UnlockModal({ job, onClose, onUnlocked }: { job: any; onClose: () => vo
       setChosenTier(tier);
       setUnlockResult(data);
       qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] });
-      qc.invalidateQueries({ queryKey: ["/api/conversations"] });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       refreshUser();
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" })
