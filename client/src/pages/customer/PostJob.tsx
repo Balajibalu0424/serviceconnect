@@ -401,7 +401,7 @@ export default function PostJob() {
 
 
 
-  const handleAccountSubmit = async () => {
+  const handleAccountSubmit = async (skipPhoneCheck = false) => {
     setLoading(true);
     setShowProcessing(false);
     try {
@@ -419,7 +419,8 @@ export default function PostJob() {
 
       if (isLoggedIn) {
         // Gate: verified phone required to publish — one-time, skipped once verified
-        if (!(user as any)?.phoneVerified) {
+        // skipPhoneCheck=true when called directly from onVerified callback (avoids stale closure issue)
+        if (!skipPhoneCheck && !(user as any)?.phoneVerified) {
           setShowPhoneVerify(true);
           setLoading(false);
           return;
@@ -756,7 +757,7 @@ export default function PostJob() {
         onVerified={async () => {
           setShowPhoneVerify(false);
           await refreshUser();
-          handleAccountSubmit();
+          handleAccountSubmit(true); // skip phone check — just verified, closure has stale user
         }}
         onDismiss={() => setShowPhoneVerify(false)}
       />

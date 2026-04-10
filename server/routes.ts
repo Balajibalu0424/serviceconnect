@@ -28,7 +28,8 @@ import {
 import {
   enhanceJobDescription, smartCategoryDetect, deepFakeAnalysis,
   generateQuoteSuggestion, aiChatAssistant, smartProMatch,
-  generateReviewSummary, enhanceProBio, isGeminiAvailable
+  generateReviewSummary, enhanceProBio, isGeminiAvailable,
+  handleOnboardingChat
 } from "./geminiService";
 import { z } from "zod";
 import Stripe from "stripe";
@@ -370,22 +371,138 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   // ONBOARDING
   // ═══════════════════════════════════════════════════════════════════════════
+
+  // AI chat assistant used by PostJob page (step 1) — extracts job details conversationally
   app.post("/api/ai/onboarding-chat", async (req: Request, res: Response) => {
-    return res.status(410).json({
-      error: "This onboarding endpoint has been replaced. Use /api/onboarding/sessions instead.",
-    });
+    try {
+      const { messages, mode = "CUSTOMER", isLoggedIn = true } = req.body;
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: "messages must be a non-empty array" });
+      }
+      const cats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug })
+        .from(serviceCategories).where(eq(serviceCategories.isActive, true));
+      const result = await handleOnboardingChat(messages, mode as "CUSTOMER" | "PROFESSIONAL", cats, isLoggedIn);
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[onboarding-chat]", err);
+      return res.status(500).json({ error: err.message || "AI service unavailable" });
+    }
   });
 
+  // Legacy one-shot customer onboarding used by PostJob page for non-logged-in users
   app.post("/api/onboarding/customer", async (req: Request, res: Response) => {
-    return res.status(410).json({
-      error: "Customer onboarding now runs through the role-aware onboarding flow at /register.",
-    });
+    try {
+      const {
+        firstName, lastName, email, password, phone,
+        title, description, categoryId, locationText,
+        urgency = "NORMAL", budgetMin, budgetMax, preferredDate
+      } = req.body;
+
+      if (!firstName || !lastName || !email || !password) {
+        return res.status(400).json({ error: "First name, last name, email and password are required" });
+      }
+      if (!title || !description) {
+        return res.status(400).json({ error: "Job title and description are required" });
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+
+      // Check for existing user
+      const [existing] = await db.select().from(users).where(eq(users.email, normalizedEmail));
+      if (existing) {
+        return res.status(409).json({ error: "An account with this email already exists. Please log in." });
+      }
+
+      const passwordHash = await hashPassword(password);
+
+      // Create user
+      const [newUser] = await db.insert(users).values({
+        email: normalizedEmail,
+        passwordHash,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phone: phone?.trim() || null,
+        role: "CUSTOMER",
+        status: "ACTIVE",
+        emailVerified: false,
+        onboardingCompleted: false,
+        creditBalance: 0,
+      }).returning();
+
+      // Create draft job
+      const referenceCode = "SC-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const [newJob] = await db.insert(jobs).values({
+        customerId: newUser.id,
+        categoryId: categoryId || null,
+        title: title.trim(),
+        description: description.trim(),
+        locationText: locationText?.trim() || null,
+        urgency,
+        budgetMin: budgetMin ? String(budgetMin) : null,
+        budgetMax: budgetMax ? String(budgetMax) : null,
+        preferredDate: preferredDate || null,
+        status: "DRAFT",
+        referenceCode,
+      }).returning();
+
+      // Issue email verification challenge
+      await issueVerificationChallenge({ userId: newUser.id, channel: "EMAIL", target: normalizedEmail, purpose: "ONBOARDING" });
+
+      // Generate tokens
+      const { accessToken, refreshToken } = generateTokens(newUser.id, newUser.role);
+
+      // Store refresh token (base64-encoded, matching the login route pattern)
+      await db.insert(userSessions).values({
+        userId: newUser.id,
+        refreshTokenHash: Buffer.from(refreshToken).toString("base64"),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        ipAddress: req.ip || null,
+      });
+
+      return res.status(201).json({ accessToken, refreshToken, jobId: newJob.id });
+    } catch (err: any) {
+      console.error("[onboarding/customer]", err);
+      return res.status(500).json({ error: err.message || "Failed to create account" });
+    }
   });
 
+  // Verify email OTP and publish the user's draft job
   app.post("/api/onboarding/customer/verify", requireAuth, async (req: AuthRequest, res: Response) => {
-    return res.status(410).json({
-      error: `Customer onboarding verification has moved into the onboarding session flow. Demo OTP remains ${DEMO_OTP_CODE}.`,
-    });
+    try {
+      const { otp } = req.body;
+      if (!otp) return res.status(400).json({ error: "OTP is required" });
+
+      const userId = req.user!.userId;
+
+      const isValid = await verifyVerificationChallenge({ userId, channel: "EMAIL", code: otp });
+      if (!isValid) {
+        return res.status(400).json({ error: `Invalid or expired code. Demo code: ${DEMO_OTP_CODE}` });
+      }
+
+      // Mark user as verified + onboarding complete
+      await db.update(users)
+        .set({ emailVerified: true, onboardingCompleted: true })
+        .where(eq(users.id, userId));
+
+      // Fetch user name for notification
+      const [fullUser] = await db.select().from(users).where(eq(users.id, userId));
+
+      // Publish their most recent DRAFT job
+      const [draftJob] = await db.select().from(jobs)
+        .where(and(eq(jobs.customerId, userId), eq(jobs.status, "DRAFT")))
+        .orderBy(desc(jobs.createdAt))
+        .limit(1);
+
+      if (draftJob) {
+        await db.update(jobs).set({ status: "LIVE" }).where(eq(jobs.id, draftJob.id));
+        await createNotification("admin", "JOB_POSTED", "New Job Posted", `${fullUser?.firstName || "Customer"} posted a new job: ${draftJob.title}`);
+      }
+
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("[onboarding/customer/verify]", err);
+      return res.status(500).json({ error: err.message || "Verification failed" });
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
