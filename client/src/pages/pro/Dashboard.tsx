@@ -17,12 +17,13 @@ export default function ProDashboard() {
   const { data: matchbooked = [] } = useQuery<any[]>({ queryKey: ["/api/jobs/matchbooked"] });
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const { data: spinStatus } = useQuery<any>({ queryKey: ["/api/spin-wheel/status"] });
-  const { data: quotes = [] } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
+  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"] });
   const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/conversations"] });
 
+  const quotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : (quotesRaw?.quotes || []);
   const activeBookings = (bookings as any[]).filter(b => b.status === "ACTIVE" || b.status === "CONFIRMED");
   const completedBookings = (bookings as any[]).filter(b => b.status === "COMPLETED");
-  const pendingQuotes = (quotes as any[]).filter(q => q.status === "PENDING");
+  const pendingQuotes = quotes.filter(q => q.status === "PENDING");
 
   // Credit level indicator
   const credits = user?.creditBalance || 0;
