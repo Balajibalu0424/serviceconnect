@@ -25,6 +25,7 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
     onSuccess: (data, tier) => {
       qc.invalidateQueries({ queryKey: ["/api/jobs/matchbooked"] });
       qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       refreshUser();
       if (tier === "STANDARD" && data.customerPhone) {
         toast({ title: "Unlocked!", description: `Customer's phone: ${data.customerPhone}` });
