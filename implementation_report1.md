@@ -400,3 +400,213 @@ The swap should primarily happen inside the centralized verification service rat
 ### Gemini API Fix
 - Removed `genAI = null` from `validateKeyOnStartup` catch block — transient cold-start failures no longer disable AI for the lifetime of the process
 - Updated revoked API key to new working key
+
+---
+
+## Section 16: Completed/Closed Job Chat Status (2026-04-10)
+
+**Scope:** Chat/conversation system — visual and logical distinction between active and finished-job conversations across customer, professional, and admin views.
+
+---
+
+### Problem
+
+When a job transitioned to COMPLETED or CLOSED, the related chat conversations continued to appear identical to active ones. There was no visual distinction in the inbox, no status banner in the thread, and no way to know at a glance whether a conversation belonged to an active or finished job.
+
+---
+
+### What Was Changed
+
+#### Backend — `server/routes.ts` (5 transition points)
+
+At every point where a job becomes COMPLETED or CLOSED, all linked conversations are now immediately archived:
+
+| Trigger | Route | Job → Status | Action |
+|---|---|---|---|
+| Customer deletes job | `DELETE /api/jobs/:id` | → CLOSED | Archive conversations |
+| Aftercare SORTED response | `POST /api/jobs/:id/aftercare/respond` | → COMPLETED | Archive conversations |
+| Decline boost → close | `POST /api/jobs/:id/aftercare/decline-boost` | → CLOSED | Archive conversations |
+| Manual close | `POST /api/jobs/:id/close` | → CLOSED | Archive conversations |
+| Booking completed | `POST /api/bookings/:id/complete` | → COMPLETED | Archive conversations |
+
+Archive query: `UPDATE conversations SET status = 'ARCHIVED' WHERE job_id = <jobId>`
+
+Admin `/api/admin/conversations` now also returns `jobStatus` alongside `jobTitle`.
+
+#### Backend — `server/scheduler.ts`
+
+Auto-close (jobs in aftercare 72h+ with no response) now archives conversations inside the same transaction as the CLOSED status update.
+
+#### Frontend — `client/src/pages/customer/Chat.tsx` (complete rewrite)
+
+**Inbox/sidebar:**
+- Active conversations appear first; archived/finished appear below a "Past Jobs" section divider
+- Finished conversation rows shown at 60% opacity with muted avatar colour
+- COMPLETED jobs show a green `COMPLETED` micro-badge next to the job title
+- CLOSED jobs show a muted `CLOSED` micro-badge
+- Unread count badge suppressed on finished conversations
+
+**Chat header:**
+- Green "Completed" badge (with checkmark icon) or grey "Closed" badge (with lock icon) shown inline when the job is in a terminal state
+- "Request Call" button hidden for finished conversations (no point requesting a call on a completed job)
+- Header background slightly muted for finished conversations
+
+**Status banner (beneath header):**
+- Completed jobs: green banner — *"This job has been completed. You can still send follow-up messages."*
+- Closed jobs: muted banner — *"This job is closed. The conversation history is preserved for reference."*
+
+**Message input:**
+- Stays fully enabled — messaging remains open for follow-up (payment queries, reviews, disputes)
+- Placeholder text changes to "Send a follow-up message…" on finished conversations
+
+#### Frontend — `client/src/pages/admin/ChatMonitor.tsx`
+
+- Conversation list rows show "Done" (green) or "Closed" (grey) job status badges
+- ARCHIVED conversation rows shown at 70% opacity with muted icon
+- Thread panel header shows "Job Completed" or "Job Closed" badge next to the job title
+
+#### Pro chat
+
+`/client/src/pages/pro/Chat.tsx` re-exports the customer Chat component, so all changes apply equally to professionals.
+
+---
+
+### Decision: Messaging stays open after completion
+
+Messaging is kept open on completed and closed conversations — not read-only. Rationale:
+- Customers and professionals often need post-job communication (receipts, follow-ups, reviews, dispute resolution)
+- Blocking messages after completion would create frustration and push communication off-platform
+- The visual status indicators (banner, badge, muted styling) make it obvious the job is done without locking the channel
+- Admins can always archive or block a specific conversation if needed
+
+---
+
+### Status Sync
+
+| Event | Job status | Conversation.status | When |
+|---|---|---|---|
+| Booking completed | COMPLETED | ARCHIVED | Immediate |
+| Aftercare SORTED | COMPLETED | ARCHIVED | Immediate |
+| Manual close | CLOSED | ARCHIVED | Immediate |
+| Job deleted | CLOSED | ARCHIVED | Immediate |
+| Decline boost → close | CLOSED | ARCHIVED | Immediate |
+| Scheduler auto-close | CLOSED | ARCHIVED | In same transaction |
+
+---
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `server/routes.ts` | Archive conversations at 5 COMPLETED/CLOSED transition points; return jobStatus from admin endpoint |
+| `server/scheduler.ts` | Import conversations table; archive in auto-close transaction |
+| `client/src/pages/customer/Chat.tsx` | Full rewrite — visual distinction, sorting, banners, badges |
+| `client/src/pages/admin/ChatMonitor.tsx` | Job status badges in conversation list and thread header |
+
+---
+
+### Test Coverage
+
+| Scenario | Result |
+|---|---|
+| Active job chat — sidebar | Shows normally, no special treatment |
+| Completed job chat — sidebar | Muted, "Past Jobs" section, green COMPLETED badge |
+| Closed job chat — sidebar | Muted, "Past Jobs" section, grey CLOSED badge |
+| Completed chat — thread header | Green "Completed" badge, no Call button |
+| Closed chat — thread header | Grey "Closed" badge, no Call button |
+| Completed chat — banner | Green info banner displayed |
+| Closed chat — banner | Muted info banner displayed |
+| Messaging on finished chat | Stays open, placeholder updated |
+| Admin conversation list | Shows job status badge, archived rows muted |
+| Admin thread header | Shows Job Completed / Job Closed badge |
+| Build | ✓ 2,713 modules, no errors |
+| Deploy | ✓ https://codebasefull.vercel.app |
+
+---
+
+### Remaining Limitations
+
+- Conversations already in COMPLETED/CLOSED state before this deploy are not retroactively archived — they will display as active in the UI until the next job status change. A one-time migration query can be run if needed: `UPDATE conversations c SET status = 'ARCHIVED' FROM jobs j WHERE c.job_id = j.id AND j.status IN ('COMPLETED', 'CLOSED') AND c.status = 'ACTIVE'`
+- No support-ticket conversations are affected (they use a separate ticketMessages system)
+
+---
+
+## Session 3: Quote Flow, Chat Routing, AI Widget & Page Enhancements
+
+**Date:** 2026-04-09  
+**Scope:** End-to-end flow fixes across quote acceptance, professional bookings chat, AI widget trigger, and enhanced Leads/Bookings pages
+
+---
+
+### Problems Fixed
+
+#### 1. Missing `POST /api/conversations` endpoint
+
+**Symptom:** Clicking "Chat" in pro Bookings resulted in an error — the page called `POST /api/conversations` but the endpoint didn't exist (404).
+
+**Fix:** Added endpoint to `server/routes.ts` with three-tier find-or-create logic:
+1. If `jobId` provided: find conversation linked to that job where the requesting user is a participant
+2. If no job match: find any existing direct conversation between the two users
+3. Otherwise: create a new DIRECT conversation with both users as participants
+
+This ensures pro Bookings always finds the correct existing conversation (the one created when the job was unlocked) rather than creating a duplicate.
+
+#### 2. Pro Bookings wrong field names
+
+**Symptom:** Job location and service category not displaying in the booking dialog.
+
+**Fix:** `job.location` → `job.locationText`, `job.serviceCategory` → `job.category?.name` (those fields don't exist on the job object from the API).
+
+#### 3. Bookings API missing `conversationId`
+
+**Symptom:** Chat buttons in customer Bookings had no conversationId to route to.
+
+**Fix:** `/api/bookings` enrichment now looks up the conversation for the booking's jobId and returns `conversationId` on every booking object.
+
+#### 4. AI widget not triggering for registered users
+
+**Symptom:** The "Ready to post your job" extraction prompt never appeared after the first user message.
+
+**Fix:** Changed trigger condition from `userCount >= 2` to `userCount >= 1 && combinedLen >= 30` — triggers after just one substantive message (30+ combined characters).
+
+#### 5. Quote acceptance had no follow-through
+
+**Symptom:** After accepting a quote, the user saw a toast but had no clear path to their new booking.
+
+**Fix:**
+- Quote acceptance mutation now also invalidates `/api/bookings` cache so the booking appears immediately
+- Added MATCHED banner on JobDetail: shows accepted quote amount, "View Booking" → /bookings, "Open Chat" → /chat?conversationId=...
+- Added per-quote action buttons on ACCEPTED quotes: View Booking + Open Chat
+
+---
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `server/routes.ts` | Added `POST /api/conversations` (lines ~2905–2960); enriched `/api/bookings` with `conversationId` and `customer.phone` |
+| `client/src/components/ai/AiAssistantWidget.tsx` | Extraction trigger: 1 message + 30 chars (was: 2 messages) |
+| `client/src/pages/customer/JobDetail.tsx` | MATCHED banner, View Booking + Open Chat buttons on accepted quotes, booking cache invalidation |
+| `client/src/pages/customer/Bookings.tsx` | Full rewrite: direct conversationId routing, active/past sections, STATUS_COLORS, job title link |
+| `client/src/pages/pro/Bookings.tsx` | Full rewrite: Open Chat uses jobId lookup, fixed field names, eircode display, enhanced dialog |
+| `client/src/pages/pro/Leads.tsx` | Full rewrite: STATUS_CONFIG+icon system, chat as direct Link, View Booking on accepted, section headers |
+
+---
+
+### Test Matrix — Session 3
+
+| Scenario | Result |
+|---|---|
+| Pro clicks Chat in Bookings (conversation exists) | Routes directly to conversation |
+| Pro clicks Chat in Bookings (no conversationId) | POST /api/conversations finds by jobId |
+| Customer accepts quote | Booking created, MATCHED banner shown with navigation buttons |
+| Customer navigates to /bookings after acceptance | Booking visible immediately (cache invalidated) |
+| Customer clicks Chat on booking | Routes directly to conversationId from API |
+| AI widget — first message (30+ chars) | Extraction draft UI appears |
+| AI widget — first message (short) | No draft yet (waits for substance) |
+| Pro Bookings dialog — location | Shows locationText correctly |
+| Pro Bookings dialog — category | Shows category.name correctly |
+| Pro Leads — accepted quote | Shows "View Booking" button + green status badge |
+| Pro Leads — pending quote | Shows AlertCircle + amber badge |
+| Build | ✓ 2,713 modules, no TypeScript errors |
+| Deploy | ✓ https://codebasefull.vercel.app |
