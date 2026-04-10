@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -9,11 +8,37 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { MessageSquare, Send, Loader2, ArrowLeft, Phone } from "lucide-react";
+import { MessageSquare, Send, Loader2, ArrowLeft, Phone, CheckCircle2, Lock, Archive } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useSearch } from "wouter";
 
+const TERMINAL_JOB_STATUSES = ["COMPLETED", "CLOSED"];
+
+function isFinishedConv(conv: any): boolean {
+  return (
+    conv.status === "ARCHIVED" ||
+    TERMINAL_JOB_STATUSES.includes(conv.job?.status)
+  );
+}
+
+function JobStatusBadge({ status }: { status: string }) {
+  if (status === "COMPLETED") {
+    return (
+      <Badge className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 gap-1">
+        <CheckCircle2 className="w-3 h-3" /> Completed
+      </Badge>
+    );
+  }
+  if (status === "CLOSED") {
+    return (
+      <Badge variant="secondary" className="text-xs px-2 py-0.5 gap-1">
+        <Lock className="w-3 h-3" /> Closed
+      </Badge>
+    );
+  }
+  return null;
+}
 
 export default function Chat() {
   const { user } = useAuth();
@@ -27,16 +52,24 @@ export default function Chat() {
   const [message, setMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Sync from URL param on mount or param change
   useEffect(() => {
     if (urlConvId && urlConvId !== activeConvId) {
       setActiveConvId(urlConvId);
     }
   }, [urlConvId]);
 
-  const { data: conversations = [], isLoading: loadingConvs } = useQuery<any[]>({
+  const { data: allConversations = [], isLoading: loadingConvs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations"],
     refetchInterval: 5000,
+  });
+
+  // Sort: active first, archived/finished last
+  const conversations = [...(allConversations as any[])].sort((a, b) => {
+    const aFinished = isFinishedConv(a);
+    const bFinished = isFinishedConv(b);
+    if (aFinished && !bFinished) return 1;
+    if (!aFinished && bFinished) return -1;
+    return 0;
   });
 
   const { data: msgList = [], isLoading: loadingMsgs } = useQuery<any[]>({
@@ -106,6 +139,12 @@ export default function Chat() {
   };
 
   const activeConv = (conversations as any[]).find((c: any) => c.id === activeConvId);
+  const isActiveConvFinished = activeConv ? isFinishedConv(activeConv) : false;
+  const activeJobStatus = activeConv?.job?.status;
+
+  // Group conversations for sidebar
+  const activeConvs = (conversations as any[]).filter(c => !isFinishedConv(c));
+  const archivedConvs = (conversations as any[]).filter(c => isFinishedConv(c));
 
   return (
     <DashboardLayout>
@@ -135,52 +174,27 @@ export default function Chat() {
                 <p className="text-xs mt-1">Unlock a job to start chatting.</p>
               </div>
             ) : (
-              (conversations as any[]).map((conv: any) => (
-                <button
-                  key={conv.id}
-                  data-testid={`conv-${conv.id}`}
-                  onClick={() => setActiveConvId(conv.id)}
-                  className={cn(
-                    "w-full flex items-start gap-3 p-4 hover:bg-accent/50 transition-colors text-left border-b last:border-0",
-                    activeConvId === conv.id && "bg-accent"
-                  )}
-                >
-                  <Avatar className="w-10 h-10 flex-shrink-0">
-                    <AvatarFallback className="text-sm bg-primary/10 text-primary">
-                      {(() => {
-                        const other = conv.participants?.find((p: any) => p.id !== user?.id);
-                        return other ? (other.firstName?.[0] || "?") : (conv.jobTitle?.[0] || "J");
-                      })()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="font-medium text-sm truncate">
-                        {(() => {
-                          const other = conv.participants?.find((p: any) => p.id !== user?.id);
-                          return other ? `${other.firstName} ${other.lastName}`.trim() : (conv.jobTitle || "Conversation");
-                        })()}
-                      </p>
-                      {conv.lastMessageAt && (
-                        <span className="text-xs text-muted-foreground flex-shrink-0">
-                          {formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: false })}
-                        </span>
-                      )}
-                    </div>
-                    {conv.job?.title && (
-                      <p className="text-[10px] text-primary/70 truncate">{conv.job.title}</p>
+              <>
+                {/* Active conversations */}
+                {activeConvs.map((conv: any) => (
+                  <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => setActiveConvId(conv.id)} finished={false} />
+                ))}
+
+                {/* Archived/finished conversations */}
+                {archivedConvs.length > 0 && (
+                  <>
+                    {activeConvs.length > 0 && (
+                      <div className="px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground border-t bg-muted/30">
+                        <Archive className="w-3 h-3" />
+                        <span className="font-medium uppercase tracking-wider">Past Jobs</span>
+                      </div>
                     )}
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {conv.lastMessage || "Start the conversation…"}
-                    </p>
-                  </div>
-                  {conv.unreadCount > 0 && (
-                    <Badge className="text-xs w-5 h-5 flex items-center justify-center rounded-full p-0">
-                      {conv.unreadCount}
-                    </Badge>
-                  )}
-                </button>
-              ))
+                    {archivedConvs.map((conv: any) => (
+                      <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => setActiveConvId(conv.id)} finished={true} />
+                    ))}
+                  </>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -198,7 +212,10 @@ export default function Chat() {
           ) : (
             <>
               {/* Header */}
-              <div className="flex items-center gap-3 p-4 border-b">
+              <div className={cn(
+                "flex items-center gap-3 p-4 border-b",
+                isActiveConvFinished && "bg-muted/30"
+              )}>
                 <button
                   className="md:hidden text-muted-foreground hover:text-foreground"
                   onClick={() => setActiveConvId(null)}
@@ -206,7 +223,10 @@ export default function Chat() {
                   <ArrowLeft className="w-5 h-5" />
                 </button>
                 <Avatar className="w-9 h-9">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                  <AvatarFallback className={cn(
+                    "text-sm",
+                    isActiveConvFinished ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"
+                  )}>
                     {(() => {
                       const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
                       return other ? (other.firstName?.[0] || "?") : (activeConv?.jobTitle?.[0] || "J");
@@ -214,32 +234,60 @@ export default function Chat() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
-                  <p className="font-semibold text-sm">
-                    {(() => {
-                      const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
-                      return other ? `${other.firstName} ${other.lastName}`.trim() : "Conversation";
-                    })()}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-sm">
+                      {(() => {
+                        const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+                        return other ? `${other.firstName} ${other.lastName}`.trim() : "Conversation";
+                      })()}
+                    </p>
+                    {activeJobStatus && TERMINAL_JOB_STATUSES.includes(activeJobStatus) && (
+                      <JobStatusBadge status={activeJobStatus} />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {activeConv?.job?.title || activeConv?.jobTitle || ""}
+                    {isActiveConvFinished && !activeConv?.job?.title && "Archived conversation"}
                   </p>
-                  <p className="text-xs text-muted-foreground">{activeConv?.jobTitle || "Active now"}</p>
                 </div>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="gap-1.5 text-xs bg-green-500 hover:bg-green-600 shadow-lg"
-                  disabled={requestCall.isPending}
-                  onClick={() => {
-                    const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id);
-                    if (otherParticipant) {
-                      requestCall.mutate(otherParticipant.id);
-                    } else {
-                      toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
-                    }
-                  }}
-                >
-                  <Phone className="w-4 h-4" />
-                  {requestCall.isPending ? "Requesting…" : "Request Call"}
-                </Button>
+                {!isActiveConvFinished && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="gap-1.5 text-xs bg-green-500 hover:bg-green-600 shadow-lg"
+                    disabled={requestCall.isPending}
+                    onClick={() => {
+                      const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+                      if (other) requestCall.mutate(other.id);
+                      else toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
+                    }}
+                  >
+                    <Phone className="w-4 h-4" />
+                    {requestCall.isPending ? "Requesting…" : "Request Call"}
+                  </Button>
+                )}
               </div>
+
+              {/* Finished job banner */}
+              {isActiveConvFinished && (
+                <div className={cn(
+                  "flex items-center gap-2.5 px-4 py-2.5 text-sm border-b",
+                  activeJobStatus === "COMPLETED"
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                    : "bg-muted/50 text-muted-foreground border-border"
+                )}>
+                  {activeJobStatus === "COMPLETED"
+                    ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                    : <Lock className="w-4 h-4 flex-shrink-0" />
+                  }
+                  <span>
+                    {activeJobStatus === "COMPLETED"
+                      ? "This job has been completed. You can still send follow-up messages."
+                      : "This job is closed. The conversation history is preserved for reference."
+                    }
+                  </span>
+                </div>
+              )}
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -287,11 +335,14 @@ export default function Chat() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Input */}
-              <form onSubmit={handleSend} className="p-4 border-t bg-background flex gap-2">
+              {/* Input — stays enabled for follow-up even on completed/closed jobs */}
+              <form onSubmit={handleSend} className={cn(
+                "p-4 border-t bg-background flex gap-2",
+                isActiveConvFinished && "bg-muted/20"
+              )}>
                 <Input
                   data-testid="input-message"
-                  placeholder="Type a message…"
+                  placeholder={isActiveConvFinished ? "Send a follow-up message…" : "Type a message…"}
                   value={message}
                   onChange={e => setMessage(e.target.value)}
                   className="flex-1"
@@ -307,10 +358,7 @@ export default function Chat() {
                   {sendMessage.isPending ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <>
-                      Send
-                      <Send className="w-4 h-4" />
-                    </>
+                    <>Send <Send className="w-4 h-4" /></>
                   )}
                 </Button>
               </form>
@@ -319,5 +367,74 @@ export default function Chat() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+// Sidebar conversation row — extracted for clarity
+function ConvRow({ conv, user, activeConvId, onClick, finished }: {
+  conv: any; user: any; activeConvId: string | null; onClick: () => void; finished: boolean;
+}) {
+  const other = conv.participants?.find((p: any) => p.id !== user?.id);
+  const displayName = other
+    ? `${other.firstName} ${other.lastName}`.trim()
+    : (conv.jobTitle || "Conversation");
+
+  return (
+    <button
+      key={conv.id}
+      data-testid={`conv-${conv.id}`}
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-start gap-3 p-4 hover:bg-accent/50 transition-colors text-left border-b last:border-0",
+        activeConvId === conv.id && "bg-accent",
+        finished && "opacity-60"
+      )}
+    >
+      <Avatar className="w-10 h-10 flex-shrink-0">
+        <AvatarFallback className={cn(
+          "text-sm",
+          finished ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"
+        )}>
+          {other ? (other.firstName?.[0] || "?") : (conv.jobTitle?.[0] || "J")}
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-1">
+          <p className={cn("font-medium text-sm truncate", finished && "text-muted-foreground")}>
+            {displayName}
+          </p>
+          {conv.lastMessageAt && (
+            <span className="text-xs text-muted-foreground flex-shrink-0">
+              {formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: false })}
+            </span>
+          )}
+        </div>
+        {conv.job?.title && (
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <p className={cn("text-[10px] truncate", finished ? "text-muted-foreground" : "text-primary/70")}>
+              {conv.job.title}
+            </p>
+            {finished && conv.job?.status && (
+              <span className={cn(
+                "text-[9px] font-semibold uppercase tracking-wider px-1 py-0 rounded",
+                conv.job.status === "COMPLETED"
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                  : "bg-muted text-muted-foreground"
+              )}>
+                {conv.job.status}
+              </span>
+            )}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground truncate mt-0.5">
+          {conv.lastMessage || "Start the conversation…"}
+        </p>
+      </div>
+      {!finished && conv.unreadCount > 0 && (
+        <Badge className="text-xs w-5 h-5 flex items-center justify-center rounded-full p-0">
+          {conv.unreadCount}
+        </Badge>
+      )}
+    </button>
   );
 }

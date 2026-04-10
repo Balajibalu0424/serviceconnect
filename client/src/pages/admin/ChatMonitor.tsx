@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   MessageSquare, AlertTriangle, Search, Eye, CheckCircle, Trash2,
-  ChevronRight, Users, Briefcase, Clock, X
+  ChevronRight, Users, Briefcase, Clock, X, CheckCircle2, Lock
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -189,11 +189,15 @@ export default function AdminChatMonitor() {
                         className={cn(
                           "w-full flex items-start gap-3 p-3.5 hover:bg-accent/50 transition-colors text-left border-b last:border-0",
                           selectedConvId === conv.id && "bg-accent",
-                          conv.flaggedCount > 0 && "border-l-2 border-l-orange-400"
+                          conv.flaggedCount > 0 && "border-l-2 border-l-orange-400",
+                          conv.status === "ARCHIVED" && "opacity-70"
                         )}
                       >
-                        <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <Briefcase className="w-4 h-4 text-primary" />
+                        <div className={cn(
+                          "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
+                          conv.status === "ARCHIVED" ? "bg-muted" : "bg-primary/10"
+                        )}>
+                          <Briefcase className={cn("w-4 h-4", conv.status === "ARCHIVED" ? "text-muted-foreground" : "text-primary")} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-1">
@@ -204,6 +208,16 @@ export default function AdminChatMonitor() {
                               {conv.flaggedCount > 0 && (
                                 <Badge variant="destructive" className="text-xs px-1.5 py-0">
                                   {conv.flaggedCount} ⚑
+                                </Badge>
+                              )}
+                              {conv.jobStatus === "COMPLETED" && (
+                                <Badge className="text-xs px-1.5 py-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 gap-0.5">
+                                  <CheckCircle2 className="w-2.5 h-2.5" /> Done
+                                </Badge>
+                              )}
+                              {conv.jobStatus === "CLOSED" && (
+                                <Badge variant="secondary" className="text-xs px-1.5 py-0 gap-0.5">
+                                  <Lock className="w-2.5 h-2.5" /> Closed
                                 </Badge>
                               )}
                               <Badge
@@ -256,9 +270,21 @@ export default function AdminChatMonitor() {
                         <X className="w-4 h-4" />
                       </button>
                       <div>
-                        <p className="font-semibold text-sm">
-                          {selectedConv?.jobTitle || "Conversation"}
-                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-semibold text-sm">
+                            {selectedConv?.jobTitle || "Conversation"}
+                          </p>
+                          {selectedConv?.jobStatus === "COMPLETED" && (
+                            <Badge className="text-xs px-1.5 py-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 gap-1">
+                              <CheckCircle2 className="w-2.5 h-2.5" /> Job Completed
+                            </Badge>
+                          )}
+                          {selectedConv?.jobStatus === "CLOSED" && (
+                            <Badge variant="secondary" className="text-xs px-1.5 py-0 gap-1">
+                              <Lock className="w-2.5 h-2.5" /> Job Closed
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground">
                           {(selectedConv?.participants as any[] || []).map((p: any) =>
                             `${p.firstName} ${p.lastName} (${p.role})`

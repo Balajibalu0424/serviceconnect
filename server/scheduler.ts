@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { db } from "./db";
-import { jobs, jobAftercares } from "@shared/schema";
+import { jobs, jobAftercares, conversations } from "@shared/schema";
 import { eq, and, lt, isNull, or } from "drizzle-orm";
 
 // Standalone function — called by both the cron scheduler (local) and
@@ -106,6 +106,8 @@ export async function runAftercareCheck(
       await tx.update(jobAftercares).set({ autoClosedAt: new Date(), closedAt: new Date() })
         .where(eq(jobAftercares.id, aftercare.id));
       await tx.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, job.id));
+      // Archive all conversations linked to this job
+      await tx.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, job.id));
     });
 
     await createNotification(job.customerId, "JOB_AUTO_CLOSED", "Job automatically closed",

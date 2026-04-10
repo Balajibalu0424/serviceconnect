@@ -718,7 +718,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id as string));
     if (!job) return res.status(404).json({ error: "Job not found" });
     if (job.customerId !== req.user!.userId && req.user!.role !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
-    await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, req.params.id as string));
+    const delJobId = req.params.id as string;
+    await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, delJobId));
+    // Archive all conversations linked to this job
+    await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, delJobId));
     return res.json({ success: true });
   });
 
@@ -992,6 +995,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (sorted) {
         await db.update(jobAftercares).set({ closedAt: new Date() }).where(eq(jobAftercares.id, aftercare.id));
         await db.update(jobs).set({ status: "COMPLETED", updatedAt: new Date() }).where(eq(jobs.id, jobId));
+        // Archive all conversations linked to this job
+        await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, jobId));
         return res.json({ success: true, action: "closed", reviewPrompt: aftercare.branch === "FIVE_DAY" });
       } else {
         // Offer boost
@@ -1015,9 +1020,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!job) return res.status(404).json({ error: "Job not found or not authorized" });
 
       if (action === "close") {
-        await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, req.params.id as string));
+        const declineJobId = req.params.id as string;
+        await db.update(jobs).set({ status: "CLOSED", updatedAt: new Date() }).where(eq(jobs.id, declineJobId));
         await db.update(jobAftercares).set({ closedAt: new Date() })
-          .where(and(eq(jobAftercares.jobId, req.params.id as string), isNull(jobAftercares.closedAt)));
+          .where(and(eq(jobAftercares.jobId, declineJobId), isNull(jobAftercares.closedAt)));
+        // Archive all conversations linked to this job
+        await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, declineJobId));
         return res.json({ success: true, action: "closed" });
       } else if (action === "leave_open") {
         // Mark blockedRepost so the customer cannot repost the same job category
@@ -1083,9 +1091,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { blockRepost } = req.body;
     const [job] = await db.select().from(jobs).where(and(eq(jobs.id, req.params.id as string), eq(jobs.customerId, req.user!.userId)));
     if (!job) return res.status(404).json({ error: "Job not found" });
+    const closeJobId = req.params.id as string;
     await db.update(jobs).set({
       status: "CLOSED", blockedRepost: blockRepost ? true : false, updatedAt: new Date()
-    }).where(eq(jobs.id, req.params.id as string));
+    }).where(eq(jobs.id, closeJobId));
+    // Archive all conversations linked to this job
+    await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, closeJobId));
     return res.json({ success: true });
   });
 
@@ -1270,6 +1281,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.update(bookings).set({ status: "COMPLETED", completedAt: new Date(), updatedAt: new Date() })
       .where(eq(bookings.id, req.params.id as string));
     await db.update(jobs).set({ status: "COMPLETED", updatedAt: new Date() }).where(eq(jobs.id, booking.jobId));
+    // Archive all conversations linked to this job
+    await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, booking.jobId));
     return res.json({ success: true });
   });
 
@@ -2669,14 +2682,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           .where(and(eq(messages.conversationId, conv.id), eq(messages.isFiltered, true), isNull(messages.deletedAt)));
 
         let jobTitle: string | null = null;
+        let jobStatus: string | null = null;
         if (conv.jobId) {
-          const [j] = await db.select({ title: jobs.title }).from(jobs).where(eq(jobs.id, conv.jobId));
+          const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
           jobTitle = j?.title || null;
+          jobStatus = j?.status || null;
         }
 
         return {
           ...conv,
           jobTitle,
+          jobStatus,
           participants,
           lastMessage: lastMsg?.content || null,
           lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
