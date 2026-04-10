@@ -163,7 +163,7 @@ export default function CustomerDashboard() {
   const { data: jobs = [] } = useQuery<any[]>({ queryKey: ["/api/jobs"] });
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
-  const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/conversations"] });
+  const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
 
   const activeJobs = (jobs as any[]).filter(j => ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(j.status));
   const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
@@ -378,7 +378,7 @@ export default function CustomerDashboard() {
               ) : (
                 <div className="space-y-1">
                   {(conversations as any[]).slice(0, 4).map((conv: any) => (
-                    <Link key={conv.id} href={`/chat?conv=${conv.id}`}>
+                    <Link key={conv.id} href={`/chat?conversationId=${conv.id}`}>
                       <div className="flex items-center gap-4 p-3.5 rounded-xl border border-transparent hover:border-border/60 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer">
                         <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
                           <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
