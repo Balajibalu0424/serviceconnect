@@ -40,10 +40,11 @@ export default function JobDetail() {
   const [editForm, setEditForm] = useState({ title: "", description: "", locationText: "", locationTown: "", locationEircode: "", budgetMin: "", budgetMax: "", urgency: "NORMAL" });
   const [enhancing, setEnhancing] = useState(false);
 
-  const { data: job, isLoading } = useQuery<any>({ queryKey: [`/api/jobs/${params?.id}`] });
+  const { data: job, isLoading } = useQuery<any>({ queryKey: [`/api/jobs/${params?.id}`], enabled: !!params?.id });
   const { data: allQuotes = [] } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
 
-  const jobQuotes = (allQuotes as any[]).filter((q: any) => q.jobId === params?.id);
+  const quotesArray = Array.isArray(allQuotes) ? allQuotes : [];
+  const jobQuotes = quotesArray.filter((q: any) => q.jobId === params?.id);
   const acceptedQuote = jobQuotes.find((q: any) => q.status === "ACCEPTED");
 
   const acceptQuote = useMutation({
