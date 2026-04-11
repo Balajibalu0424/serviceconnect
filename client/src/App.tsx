@@ -42,6 +42,7 @@ import ProProfile from "@/pages/pro/ProfileEditor";
 import ProCredits from "@/pages/pro/Credits";
 import ProSpinWheel from "@/pages/pro/SpinWheel";
 import ProVerificationPending from "@/pages/pro/VerificationPending";
+import ProNotifications from "@/pages/pro/Notifications";
 
 // Admin pages
 import AdminDashboard from "@/pages/admin/Dashboard";
@@ -151,6 +152,9 @@ function AppRoutes() {
       </Route>
       <Route path="/pro/spin">
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProSpinWheel /></ProtectedRoute>
+      </Route>
+      <Route path="/pro/notifications">
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProNotifications /></ProtectedRoute>
       </Route>
 
       {/* Admin */}

@@ -37,6 +37,7 @@ function ProNav(): NavItem[] {
     { label: "My Leads", href: "/pro/leads", icon: Users },
     { label: "Bookings", href: "/pro/bookings", icon: ListChecks },
     { label: "Messages", href: "/pro/chat", icon: MessageSquare },
+    { label: "Notifications", href: "/pro/notifications", icon: Bell },
     { label: "Credits", href: "/pro/credits", icon: CreditCard },
     { label: "Spin the Wheel", href: "/pro/spin", icon: Dices },
     { label: "My Profile", href: "/pro/profile", icon: Settings },

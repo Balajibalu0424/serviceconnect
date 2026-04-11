@@ -251,6 +251,7 @@ export default function ProJobFeed() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState("my");
+  const [urgencyFilter, setUrgencyFilter] = useState<string>("all");
   const [unlockJob, setUnlockJob] = useState<any | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -332,8 +333,12 @@ export default function ProJobFeed() {
   const seen = new Set<string>();
   const filteredJobs = displayedJobs.filter(j => { if (seen.has(j.id)) return false; seen.add(j.id); return true; });
 
+  const displayJobs = urgencyFilter === "all"
+    ? filteredJobs
+    : filteredJobs.filter(j => j.urgency === urgencyFilter || (j.aiIsUrgent && urgencyFilter === "URGENT"));
+
   const handleCategoryChange = (value: string) => {
-    setCategoryFilter(value); setPage(1); setHasMore(true); setLoadedPages({});
+    setCategoryFilter(value); setPage(1); setHasMore(true); setLoadedPages({}); setUrgencyFilter("all");
   };
 
   const URGENCY_COLORS: Record<string, string> = { LOW: "secondary", NORMAL: "outline", HIGH: "default", URGENT: "destructive" };
@@ -370,6 +375,24 @@ export default function ProJobFeed() {
           </div>
         </div>
 
+        {/* Urgency filter pills */}
+        <div className="flex flex-wrap gap-2">
+          {["all", "URGENT", "HIGH", "NORMAL", "LOW"].map((u) => (
+            <button
+              key={u}
+              onClick={() => setUrgencyFilter(u)}
+              className={cn(
+                "px-3 py-1.5 rounded-full text-xs font-semibold border transition-all",
+                urgencyFilter === u
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-white/60 dark:bg-black/40 border-white/40 dark:border-white/10 text-muted-foreground hover:border-primary/40 hover:text-primary"
+              )}
+            >
+              {u === "all" ? "All urgencies" : u.charAt(0) + u.slice(1).toLowerCase()}
+            </button>
+          ))}
+        </div>
+
         {isLoading && page === 1 ? (
           <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 rounded-2xl bg-white/40 dark:bg-white/5 animate-pulse" />)}</div>
         ) : noCategories ? (
@@ -384,7 +407,7 @@ export default function ProJobFeed() {
               <Button variant="outline" onClick={() => handleCategoryChange("browse_all")}>Browse all jobs</Button>
             </div>
           </div>
-        ) : filteredJobs.length === 0 ? (
+        ) : displayJobs.length === 0 ? (
           <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
             <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
               <Briefcase className="w-8 h-8 opacity-50" />
@@ -395,7 +418,7 @@ export default function ProJobFeed() {
         ) : (
           <>
             <div className="space-y-4">
-              {filteredJobs.map((job: any) => (
+              {displayJobs.map((job: any) => (
                 <Card
                   key={job.id}
                   className={cn(
@@ -519,7 +542,7 @@ export default function ProJobFeed() {
                 </Button>
               </div>
             )}
-            {!hasMore && filteredJobs.length > PAGE_SIZE && (
+            {!hasMore && displayJobs.length > PAGE_SIZE && (
               <p className="text-center text-xs text-muted-foreground pt-2">All jobs loaded</p>
             )}
           </>

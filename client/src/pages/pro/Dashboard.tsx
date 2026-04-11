@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   Briefcase, Star, CreditCard, MessageSquare, Dices, TrendingUp,
-  Users, ArrowRight, Zap, ChevronRight, BadgeCheck, Clock
+  Users, ArrowRight, Zap, ChevronRight, BadgeCheck, Clock,
+  Bell, AlertTriangle, Wrench
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -19,11 +20,14 @@ export default function ProDashboard() {
   const { data: spinStatus } = useQuery<any>({ queryKey: ["/api/spin-wheel/status"] });
   const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"] });
   const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
+  const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
+  const { data: profile } = useQuery<any>({ queryKey: ["/api/pro/profile"] });
 
   const quotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : (quotesRaw?.quotes || []);
   const activeBookings = (bookings as any[]).filter(b => b.status === "ACTIVE" || b.status === "CONFIRMED");
   const completedBookings = (bookings as any[]).filter(b => b.status === "COMPLETED");
   const pendingQuotes = quotes.filter(q => q.status === "PENDING");
+  const unreadNotifCount = notifData?.unreadCount || 0;
 
   // Credit level indicator
   const credits = user?.creditBalance || 0;
@@ -50,6 +54,26 @@ export default function ProDashboard() {
             </Button>
           </Link>
         </div>
+
+        {/* Category setup banner */}
+        {(!profile?.serviceCategories?.length || profile?.serviceCategories?.length === 0) && (
+          <div className="bg-amber-50/80 dark:bg-amber-950/20 backdrop-blur-xl border border-amber-200/60 dark:border-amber-500/20 rounded-2xl p-5 md:p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 border border-amber-500/20">
+                <Wrench className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Complete your profile to see relevant jobs</p>
+                <p className="text-xs text-amber-700/80 dark:text-amber-400/70 mt-0.5">Add your trade categories to get matched with the right jobs in your feed.</p>
+              </div>
+            </div>
+            <Link href="/pro/profile" className="shrink-0">
+              <Button size="sm" className="gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20">
+                <Wrench className="w-3.5 h-3.5" /> Set Up Profile
+              </Button>
+            </Link>
+          </div>
+        )}
 
         {/* Spin wheel banner — always visible, with countdown when on cooldown */}
         {spinStatus && (
@@ -130,13 +154,13 @@ export default function ProDashboard() {
               sub: "awaiting response"
             },
             {
-              label: "Jobs Done",
-              value: completedBookings.length,
-              icon: BadgeCheck,
-              href: "/pro/bookings",
-              color: "text-emerald-600 dark:text-emerald-400",
-              bg: "from-emerald-500/10 to-green-500/10",
-              sub: "completed"
+              label: "Notifications",
+              value: unreadNotifCount,
+              icon: Bell,
+              href: "/pro/notifications",
+              color: "text-orange-500",
+              bg: "from-orange-500/10 to-amber-500/10",
+              sub: "unread"
             },
           ].map((stat) => (
             <Link key={stat.label} href={stat.href} className="block group">
@@ -154,6 +178,66 @@ export default function ProDashboard() {
             </Link>
           ))}
         </div>
+
+        {/* Actions Required banner */}
+        {(unreadNotifCount > 0 || pendingQuotes.length > 0 || activeBookings.length > 0) && (
+          <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-indigo-200/60 dark:border-indigo-500/20 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 bg-indigo-50/60 dark:bg-indigo-500/10 border-b border-indigo-100/60 dark:border-indigo-500/10 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span className="text-sm font-bold font-outfit text-indigo-700 dark:text-indigo-300">Actions Required</span>
+            </div>
+            <div className="divide-y divide-border/40">
+              {unreadNotifCount > 0 && (
+                <Link href="/pro/notifications">
+                  <div className="flex items-center gap-4 px-5 py-4 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer group">
+                    <div className="w-9 h-9 rounded-xl bg-orange-500/10 flex items-center justify-center shrink-0 border border-orange-500/20">
+                      <Bell className="w-4 h-4 text-orange-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold group-hover:text-primary transition-colors">
+                        {unreadNotifCount} unread notification{unreadNotifCount !== 1 ? "s" : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Stay updated with your leads and bookings</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary transition-colors shrink-0" />
+                  </div>
+                </Link>
+              )}
+              {pendingQuotes.length > 0 && (
+                <Link href="/pro/leads">
+                  <div className="flex items-center gap-4 px-5 py-4 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer group">
+                    <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20">
+                      <TrendingUp className="w-4 h-4 text-blue-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold group-hover:text-primary transition-colors">
+                        {pendingQuotes.length} quote{pendingQuotes.length !== 1 ? "s" : ""} awaiting customer response
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Track quote outcomes in My Leads</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary transition-colors shrink-0" />
+                  </div>
+                </Link>
+              )}
+              {activeBookings.length > 0 && (
+                <Link href="/pro/bookings">
+                  <div className="flex items-center gap-4 px-5 py-4 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer group">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
+                      <Briefcase className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold group-hover:text-primary transition-colors">
+                        {activeBookings.length} active booking{activeBookings.length !== 1 ? "s" : ""} in progress
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Keep the customer updated</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary transition-colors shrink-0" />
+                  </div>
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Credit balance card */}
         <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 p-5 md:p-6 rounded-2xl shadow-sm relative overflow-hidden">

@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
 import {
   Bell, CheckCheck, Briefcase, MessageSquare, CreditCard,
   Star, AlertTriangle, ShieldCheck, Zap, Gift, Phone, FileText,
-  UserCheck, ThumbsUp, Calendar, Filter, Loader2, Inbox, ExternalLink
+  UserCheck, ThumbsUp, Calendar, Filter, Loader2, Inbox, ExternalLink,
+  XCircle, CalendarCheck, CheckCircle2
 } from "lucide-react";
 
 const NOTIFICATION_ICONS: Record<string, { icon: any; color: string; bg: string }> = {
@@ -42,6 +43,17 @@ const NOTIFICATION_ICONS: Record<string, { icon: any; color: string; bg: string 
   JOB_UNLOCK: { icon: ShieldCheck, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
   TICKET_REPLY: { icon: MessageSquare, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
   TICKET_STATUS: { icon: FileText, color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-500/10" },
+  // New notification types
+  QUOTE_REJECTED: { icon: XCircle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  REVIEW_POSTED: { icon: Star, color: "text-yellow-600 dark:text-yellow-400", bg: "bg-yellow-500/10" },
+  BOOKING_CREATED: { icon: CalendarCheck, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
+  BOOKING_COMPLETED: { icon: CheckCircle2, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
+  BOOKING_CANCELLED: { icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  AFTERCARE_2D: { icon: Calendar, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/10" },
+  AFTERCARE_5D: { icon: Calendar, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/10" },
+  AFTERCARE_REMINDER: { icon: Calendar, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/10" },
+  JOB_AUTO_CLOSED: { icon: Briefcase, color: "text-muted-foreground", bg: "bg-muted/20" },
+  SYSTEM: { icon: AlertTriangle, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/10" },
 };
 
 function getNotifStyle(type: string) {
@@ -93,6 +105,19 @@ function getNotificationLink(n: any, userRole: string): string | null {
     case "TICKET_REPLY":
     case "TICKET_STATUS":
       return "/support";
+    case "QUOTE_REJECTED":
+      return isProRole ? "/pro/leads" : null;
+    case "REVIEW_POSTED":
+      return isProRole ? "/pro/profile" : "/bookings";
+    case "BOOKING_CREATED":
+    case "BOOKING_COMPLETED":
+    case "BOOKING_CANCELLED":
+      return isProRole ? "/pro/bookings" : "/bookings";
+    case "AFTERCARE_2D":
+    case "AFTERCARE_5D":
+    case "AFTERCARE_REMINDER":
+    case "JOB_AUTO_CLOSED":
+      return data.jobId ? (isProRole ? "/pro/feed" : `/jobs/${data.jobId}`) : null;
     default:
       // Try to infer from data
       if (data.jobId) return isProRole ? "/pro/feed" : `/jobs/${data.jobId}`;
@@ -128,6 +153,7 @@ const FILTER_OPTIONS = [
   { value: "JOB_QUOTE", label: "Quotes" },
   { value: "NEW_MESSAGE", label: "Messages" },
   { value: "JOB_UPDATE", label: "Job Updates" },
+  { value: "BOOKING", label: "Bookings" },
   { value: "PAYMENT", label: "Payments" },
 ];
 
@@ -143,9 +169,10 @@ export default function Notifications() {
     if (filter === "all") return true;
     if (filter === "unread") return !n.isRead;
     // Match both exact type and similar types (e.g. JOB_QUOTE and NEW_QUOTE)
-    if (filter === "JOB_QUOTE") return ["JOB_QUOTE", "NEW_QUOTE", "QUOTE_ACCEPTED"].includes(n.type);
+    if (filter === "JOB_QUOTE") return ["JOB_QUOTE", "NEW_QUOTE", "QUOTE_ACCEPTED", "QUOTE_REJECTED"].includes(n.type);
     if (filter === "NEW_MESSAGE") return ["NEW_MESSAGE", "MESSAGE_FLAGGED"].includes(n.type);
-    if (filter === "JOB_UPDATE") return ["JOB_UPDATE", "JOB_MATCHED", "JOB_COMPLETED", "JOB_BOOSTED", "AFTERCARE", "JOB_UNLOCK", "URGENT_JOB"].includes(n.type);
+    if (filter === "JOB_UPDATE") return ["JOB_UPDATE", "JOB_MATCHED", "JOB_COMPLETED", "JOB_BOOSTED", "AFTERCARE", "JOB_UNLOCK", "URGENT_JOB", "AFTERCARE_2D", "AFTERCARE_5D", "AFTERCARE_REMINDER", "JOB_AUTO_CLOSED"].includes(n.type);
+    if (filter === "BOOKING") return ["BOOKING_CREATED", "BOOKING_COMPLETED", "BOOKING_CANCELLED"].includes(n.type);
     return n.type === filter;
   });
 

@@ -12,7 +12,7 @@ import { DEMO_OTP_CODE } from "@shared/verification";
 import {
   PlusCircle, Briefcase, MessageSquare, CheckCircle, AlertCircle,
   TrendingUp, ThumbsUp, ThumbsDown, Zap, ChevronRight, Clock,
-  ArrowRight, Star, BadgeCheck, Mail
+  ArrowRight, Star, BadgeCheck, Mail, FileText, Bell
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -164,6 +164,15 @@ export default function CustomerDashboard() {
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
   const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
+  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"] });
+  const allQuotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : [];
+  const pendingQuotes = allQuotes.filter((q: any) => q.status === "PENDING");
+
+  // Quote count per job (pending only)
+  const pendingQuotesByJob: Record<string, number> = {};
+  pendingQuotes.forEach((q: any) => {
+    if (q.jobId) pendingQuotesByJob[q.jobId] = (pendingQuotesByJob[q.jobId] || 0) + 1;
+  });
 
   const activeJobs = (jobs as any[]).filter(j => ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(j.status));
   const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
@@ -291,6 +300,54 @@ export default function CustomerDashboard() {
           ))}
         </div>
 
+        {/* Actions Required — only shown when there's something to do */}
+        {(pendingQuotes.length > 0 || (notifData?.unreadCount || 0) > 0) && (
+          <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-indigo-200/60 dark:border-indigo-800/40 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-border/40 bg-indigo-50/60 dark:bg-indigo-950/20 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-indigo-500" />
+              <p className="text-sm font-semibold text-indigo-900 dark:text-indigo-100">Actions Required</p>
+            </div>
+            <div className="divide-y divide-border/30">
+              {pendingQuotes.length > 0 && (
+                <Link href="/my-jobs">
+                  <div className="flex items-center justify-between px-5 py-3.5 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-colors cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
+                        <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {pendingQuotes.length} quote{pendingQuotes.length > 1 ? "s" : ""} waiting for your decision
+                        </p>
+                        <p className="text-xs text-muted-foreground">Review and accept or decline</p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                </Link>
+              )}
+              {(notifData?.unreadCount || 0) > 0 && (
+                <Link href="/notifications">
+                  <div className="flex items-center justify-between px-5 py-3.5 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-colors cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center shrink-0">
+                        <Bell className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {notifData.unreadCount} unread notification{notifData.unreadCount > 1 ? "s" : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Stay up to date with your activity</p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Two column: Jobs pipeline + Recent messages */}
         <div className="grid lg:grid-cols-2 gap-6 md:gap-8">
           {/* Active job pipeline */}
@@ -334,9 +391,16 @@ export default function CustomerDashboard() {
                             {formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}
                           </p>
                         </div>
-                        <Badge variant={STATUS_COLORS[job.status] as any} className="sm:ml-2 shrink-0 py-1 text-[11px] font-semibold w-fit">
-                          {STATUS_LABELS[job.status] || job.status}
-                        </Badge>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {pendingQuotesByJob[job.id] > 0 && (
+                            <Badge variant="outline" className="text-[11px] border-blue-300 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 py-1 font-semibold shrink-0">
+                              {pendingQuotesByJob[job.id]} quote{pendingQuotesByJob[job.id] > 1 ? "s" : ""}
+                            </Badge>
+                          )}
+                          <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 py-1 text-[11px] font-semibold w-fit">
+                            {STATUS_LABELS[job.status] || job.status}
+                          </Badge>
+                        </div>
                       </div>
                     </Link>
                   ))}

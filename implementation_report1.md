@@ -610,3 +610,171 @@ This ensures pro Bookings always finds the correct existing conversation (the on
 | Pro Leads — pending quote | Shows AlertCircle + amber badge |
 | Build | ✓ 2,713 modules, no TypeScript errors |
 | Deploy | ✓ https://codebasefull.vercel.app |
+
+---
+
+## Session 4: Comprehensive Customer & Professional Platform Enhancements
+
+**Date:** 2026-04-11  
+**Scope:** Holistic product advancement across both customer and professional sides — notifications, dashboards, job feed, bookings, profile, and UI/UX polish
+
+---
+
+### Overview
+
+This session significantly advanced both sides of the platform. Key focus areas:
+
+1. Professional notification system (previously completely missing)
+2. Backend notification coverage for all key lifecycle events
+3. Customer and professional dashboard intelligence
+4. Job Feed urgency filtering
+5. Pro profile service category picker
+6. Pro Bookings: mark complete workflow
+7. UI/UX polish across all pages
+
+---
+
+### A. Backend Notification Coverage
+
+Five missing notification events were added to `server/routes.ts`:
+
+| Event | Recipient | Type | Trigger |
+|---|---|---|---|
+| Quote rejected by customer | Professional | `QUOTE_REJECTED` | `POST /api/quotes/:id/reject` |
+| Booking created (quote accepted) | Professional | `BOOKING_CREATED` | `POST /api/quotes/:id/accept` |
+| Booking completed | Both parties (non-caller) | `BOOKING_COMPLETED` | `POST /api/bookings/:id/complete` |
+| Booking cancelled | Both parties (non-caller) | `BOOKING_CANCELLED` | `POST /api/bookings/:id/cancel` |
+| Review posted | Professional (reviewee) | `REVIEW_POSTED` | `POST /api/bookings/:id/review` |
+
+All use the existing `createNotification(userId, type, title, message, data)` helper which writes to the DB and pushes via Pusher in real time.
+
+The BOOKING_CREATED notification required capturing the booking ID from within the transaction scope (hoisted via `let createdBookingId = ""` before the transaction block).
+
+---
+
+### B. Professional Notification System
+
+Previously professionals had no notification system whatsoever. This session delivers a complete one:
+
+**`client/src/pages/pro/Notifications.tsx`** — Created as a role-aware re-export of the customer Notifications component. The shared component already reads `user.role` and uses `isProRole` to route notification deep links correctly for professionals vs customers.
+
+**`client/src/App.tsx`** — Added `/pro/notifications` route protected by `roles={["PROFESSIONAL"]}`.
+
+**`client/src/components/layouts/DashboardLayout.tsx`** — Added `{ label: "Notifications", href: "/pro/notifications", icon: Bell }` to `ProNav()`. The existing unread badge logic at line 121 triggers automatically for any nav item labeled "Notifications" — no additional change needed.
+
+**`client/src/pages/customer/Notifications.tsx`** — Enriched with:
+- New `NOTIFICATION_ICONS` entries: `QUOTE_REJECTED` (XCircle, red), `REVIEW_POSTED` (Star, yellow), `BOOKING_CREATED` (CalendarCheck, emerald), `BOOKING_COMPLETED` (CheckCircle2, emerald), `BOOKING_CANCELLED` (AlertTriangle, red), `AFTERCARE_2D/5D/REMINDER` (Calendar, orange), `JOB_AUTO_CLOSED` (Briefcase, muted), `SYSTEM` (AlertTriangle, orange)
+- New deep-link cases in `getNotificationLink()` routing pros to `/pro/bookings`, `/pro/leads`, `/pro/profile` for booking/quote/review events
+- Added `BOOKING` filter group covering `BOOKING_CREATED`, `BOOKING_COMPLETED`, `BOOKING_CANCELLED`
+
+---
+
+### C. Pro Profile Service Category Picker
+
+`client/src/pages/pro/ProfileEditor.tsx` — Added a complete category management UI:
+
+- Fetches all categories from `/api/categories`
+- Shows each as a toggleable pill button (selected = primary colour, unselected = outline)
+- Shows a loading skeleton while categories load
+- Saves to `/api/pro/profile` PATCH with `serviceCategories: selectedCategories` array
+- Initialises `selectedCategories` from the existing profile on load
+- Added bio character counter (0/500 characters)
+
+---
+
+### D. Pro Bookings: Mark Complete Button
+
+`client/src/pages/pro/Bookings.tsx` — Added `markComplete` mutation and an emerald "Mark Complete" button in the booking detail Dialog, visible only when `selectedBooking.status === "IN_PROGRESS"`. Previously professionals could mark bookings as In Progress but had no way to complete them from their own side.
+
+Loading state improved from a basic spinner to three skeleton cards (animated pulse with realistic proportions).
+
+---
+
+### E. Customer Dashboard Enhancements
+
+`client/src/pages/customer/Dashboard.tsx` — Two key improvements:
+
+**Actions Required banner:** Appears between stats and the two-column layout whenever `pendingQuotes.length > 0 || unreadNotifCount > 0`. Shows clickable rows:
+- "X quotes waiting for your decision" → `/my-jobs`
+- "X unread notifications" → `/notifications`
+
+**Quote count badges on job cards:** Each job in the Job Pipeline now shows a blue "N quotes" badge when `pendingQuotesByJob[job.id] > 0`, computed from the `/api/quotes` response filtered to PENDING status, grouped by jobId.
+
+---
+
+### F. Pro Dashboard Enhancements
+
+`client/src/pages/pro/Dashboard.tsx` — Three key improvements:
+
+**4th stat card changed to "Notifications":** Shows unread notification count with Bell icon and link to `/pro/notifications`. Previously showed "Jobs Done" which is less actionable.
+
+**Actions Required banner:** Shown when `unreadNotifCount > 0 || pendingQuotes.length > 0 || activeBookings.length > 0`. Three rows:
+- Unread notifications → `/pro/notifications`
+- Quotes awaiting response → `/pro/leads`
+- Active bookings in progress → `/pro/bookings`
+
+**Category setup amber banner:** Shown when `!profile?.serviceCategories?.length`. Prompts the pro to complete their profile with a "Set Up Profile" button linking to `/pro/profile`. Disappears once categories are set. Prevents the common confusion of seeing an empty job feed without understanding why.
+
+---
+
+### G. Pro Job Feed: Urgency Filter Pills
+
+`client/src/pages/pro/JobFeed.tsx` — Added a row of urgency filter pills below the "How it works" banner:
+- "All urgencies" / "Urgent" / "High" / "Normal" / "Low"
+- Client-side filter on `job.urgency` field; URGENT also matches `job.aiIsUrgent === true`
+- Active pill uses primary colour with shadow; inactive uses glassmorphism outline style
+- Filter resets to "all" when category changes
+
+---
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `server/routes.ts` | 5 new `createNotification` calls for QUOTE_REJECTED, BOOKING_CREATED, BOOKING_COMPLETED, BOOKING_CANCELLED, REVIEW_POSTED |
+| `client/src/pages/customer/Notifications.tsx` | New icon types, deep-link cases, BOOKING filter group |
+| `client/src/pages/pro/Notifications.tsx` | New file — re-exports the role-aware Notifications component |
+| `client/src/App.tsx` | Added `/pro/notifications` protected route |
+| `client/src/components/layouts/DashboardLayout.tsx` | Added Notifications to ProNav |
+| `client/src/pages/pro/ProfileEditor.tsx` | Service category picker + bio counter |
+| `client/src/pages/pro/Bookings.tsx` | Mark Complete button + skeleton loader |
+| `client/src/pages/customer/Dashboard.tsx` | Actions Required banner + quote count badges on job cards |
+| `client/src/pages/pro/Dashboard.tsx` | Notifications stat, Actions Required banner, category setup banner |
+| `client/src/pages/pro/JobFeed.tsx` | Urgency filter pills |
+
+---
+
+### Notification System — Role Deep Links
+
+| Notification type | Customer link | Professional link |
+|---|---|---|
+| `NEW_QUOTE` / `JOB_QUOTE` | `/jobs/:jobId` | — |
+| `QUOTE_ACCEPTED` | `/jobs/:jobId` | `/pro/leads` |
+| `QUOTE_REJECTED` | — | `/pro/leads` |
+| `BOOKING_CREATED` | `/bookings` | `/pro/bookings` |
+| `BOOKING_COMPLETED` | `/bookings` | `/pro/bookings` |
+| `BOOKING_CANCELLED` | `/bookings` | `/pro/bookings` |
+| `REVIEW_POSTED` | `/bookings` | `/pro/profile` |
+| `NEW_MESSAGE` | `/chat?conversationId=X` | `/pro/chat?conversationId=X` |
+| `JOB_UNLOCK` | `/jobs/:jobId` | `/pro/feed` |
+
+---
+
+### Remaining Limitations
+
+1. No "new relevant job available" push to professionals when a matching job is posted — would require a category-matching fan-out at job publish time
+2. No batch notification digests or email delivery — all notifications are in-app only
+3. Pro category picker saves categories but the job feed category filter still requires a page refresh to reflect the new profile state
+4. OTP delivery remains demo-only (`123456`)
+
+---
+
+### Recommended Next Priorities
+
+1. New job notification fan-out: when a job goes LIVE, notify all professionals whose `serviceCategories` overlap with the job's category
+2. Email digest for unread notifications (daily/weekly)
+3. Admin notification management UI (send broadcast, view logs)
+4. Review reminder nudge 48h after booking completion
+5. Pro profile completeness score — show a percentage bar and guide pros through missing fields
+6. Customer re-engagement: if a job has been LIVE for 3 days with no quotes, send a prompt to boost or revise
+7. Real SMS/email OTP provider integration

@@ -1326,6 +1326,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!quote) return res.status(404).json({ error: "Quote not found" });
       if (quote.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
 
+      let createdBookingId = "";
       await db.transaction(async (tx) => {
         await tx.update(quotes).set({ status: "ACCEPTED", updatedAt: new Date() }).where(eq(quotes.id, quote.id));
 
@@ -1334,6 +1335,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           customerId: quote.customerId, professionalId: quote.professionalId,
           totalAmount: quote.amount, status: "CONFIRMED"
         }).returning();
+        createdBookingId = booking.id;
 
         await tx.update(jobs).set({ status: "MATCHED", updatedAt: new Date() }).where(eq(jobs.id, quote.jobId));
 
@@ -1349,6 +1351,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await createNotification(quote.professionalId, "QUOTE_ACCEPTED", "Your quote was accepted!",
         "The customer has accepted your quote.", { quoteId: quote.id, jobId: quote.jobId });
+      await createNotification(quote.professionalId, "BOOKING_CREATED", "Booking confirmed!",
+        "A booking has been created. You can now arrange to begin work.",
+        { bookingId: createdBookingId, jobId: quote.jobId });
 
       return res.json({ success: true });
     } catch (e: any) {
@@ -1361,6 +1366,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!quote) return res.status(404).json({ error: "Quote not found" });
     if (quote.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
     await db.update(quotes).set({ status: "REJECTED", updatedAt: new Date() }).where(eq(quotes.id, quote.id));
+    await createNotification(quote.professionalId, "QUOTE_REJECTED",
+      "Your quote was not accepted",
+      "The customer has declined your quote for this job. Keep trying — other jobs are waiting!",
+      { quoteId: quote.id, jobId: quote.jobId });
     return res.json({ success: true });
   });
 
@@ -1427,6 +1436,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.update(jobs).set({ status: "COMPLETED", updatedAt: new Date() }).where(eq(jobs.id, booking.jobId));
     // Archive all conversations linked to this job
     await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, booking.jobId));
+    // Notify both parties (skip the caller)
+    const callerId = req.user!.userId;
+    if (callerId !== booking.professionalId) {
+      await createNotification(booking.professionalId, "BOOKING_COMPLETED",
+        "Booking marked complete",
+        "The job has been marked as complete. Encourage the customer to leave a review!",
+        { bookingId: booking.id, jobId: booking.jobId });
+    }
+    if (callerId !== booking.customerId) {
+      await createNotification(booking.customerId, "BOOKING_COMPLETED",
+        "Your booking is complete",
+        "The job has been completed. Share your experience by leaving a review.",
+        { bookingId: booking.id, jobId: booking.jobId });
+    }
     return res.json({ success: true });
   });
 
@@ -1437,6 +1460,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.update(bookings).set({
       status: "CANCELLED", cancellationReason: reason || null, updatedAt: new Date()
     }).where(eq(bookings.id, req.params.id as string));
+    // Notify both parties (skip the canceller)
+    const cancellerIdBooking = req.user!.userId;
+    const reasonSuffix = reason ? `: "${reason}"` : ".";
+    if (cancellerIdBooking !== booking.professionalId) {
+      await createNotification(booking.professionalId, "BOOKING_CANCELLED",
+        "Booking cancelled",
+        `A booking has been cancelled${reasonSuffix}`,
+        { bookingId: booking.id, jobId: booking.jobId });
+    }
+    if (cancellerIdBooking !== booking.customerId) {
+      await createNotification(booking.customerId, "BOOKING_CANCELLED",
+        "Booking cancelled",
+        `Your booking has been cancelled${reasonSuffix}`,
+        { bookingId: booking.id, jobId: booking.jobId });
+    }
     return res.json({ success: true });
   });
 
@@ -1485,6 +1523,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ratingAvg: String(avg.toFixed(2)), totalReviews: proReviews.length, updatedAt: new Date()
         }).where(eq(professionalProfiles.userId, booking.professionalId));
       }
+
+      // Notify the professional they received a review
+      await createNotification(revieweeId, "REVIEW_POSTED",
+        "You received a new review",
+        `A customer rated you ${rating} star${rating !== 1 ? "s" : ""}.`,
+        { reviewId: review.id, bookingId: booking.id, jobId: booking.jobId });
 
       return res.status(201).json(review);
     } catch (e: any) {

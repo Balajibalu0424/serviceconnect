@@ -44,6 +44,22 @@ export default function ProBookings() {
     }
   });
 
+  const markComplete = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("POST", `/api/bookings/${id}/complete`);
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Booking completed! 🎉", description: "The job has been marked as complete. Encourage the customer to leave a review." });
+      setSelectedBooking((prev: any) => prev ? { ...prev, status: "COMPLETED" } : null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    }
+  });
+
   const startMessage = useMutation({
     mutationFn: async (booking: any) => {
       // Pass jobId so we find the existing conversation linked to this job (not create a new one)
@@ -137,8 +153,19 @@ export default function ProBookings() {
         </div>
 
         {isLoading ? (
-          <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-5 md:p-6 animate-pulse">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="flex-1 space-y-2">
+                    <div className="h-5 w-48 bg-muted rounded-lg" />
+                    <div className="h-3.5 w-32 bg-muted/60 rounded" />
+                    <div className="h-3 w-24 bg-muted/40 rounded" />
+                  </div>
+                  <div className="h-6 w-24 bg-muted rounded-full shrink-0" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : (bookings as any[]).length === 0 ? (
           <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
@@ -257,6 +284,16 @@ export default function ProBookings() {
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   {markInProgress.isPending ? "Updating…" : "Mark In Progress"}
+                </Button>
+              )}
+              {selectedBooking.status === "IN_PROGRESS" && (
+                <Button
+                  className="gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 text-white"
+                  onClick={() => markComplete.mutate(selectedBooking.id)}
+                  disabled={markComplete.isPending}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {markComplete.isPending ? "Completing…" : "Mark Complete"}
                 </Button>
               )}
             </div>
