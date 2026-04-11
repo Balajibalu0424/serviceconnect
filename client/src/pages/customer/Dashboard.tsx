@@ -178,7 +178,7 @@ export default function CustomerDashboard() {
   const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
   const aftercareJobs = (jobs as any[]).filter(j => ["AFTERCARE_2D", "AFTERCARE_5D"].includes(j.status));
   const completedBookings = (bookings as any[]).filter(b => b.status === "COMPLETED");
-  const activeBookings = (bookings as any[]).filter(b => ["ACTIVE", "CONFIRMED"].includes(b.status));
+  const activeBookings = (bookings as any[]).filter(b => ["ACTIVE", "CONFIRMED", "IN_PROGRESS"].includes(b.status));
 
   return (
     <DashboardLayout>
@@ -271,7 +271,7 @@ export default function CustomerDashboard() {
             {
               label: "Bookings", value: activeBookings.length, icon: BadgeCheck,
               color: "text-blue-500 dark:text-blue-400", bg: "from-blue-500/10 to-cyan-500/10",
-              sub: "confirmed", href: "/bookings"
+              sub: "confirmed & in progress", href: "/bookings"
             },
             {
               label: "Notifications", value: notifData?.unreadCount || 0, icon: AlertCircle,
@@ -467,6 +467,50 @@ export default function CustomerDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Active bookings summary */}
+        {activeBookings.length > 0 && (
+          <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-5 md:p-6 border-b border-border/50 bg-white/40 dark:bg-white/5 flex items-center justify-between">
+              <h2 className="text-lg font-bold font-outfit flex items-center gap-2">
+                <BadgeCheck className="w-5 h-5 text-blue-500" /> Active Bookings
+              </h2>
+              <Link href="/bookings">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs rounded-xl hover:bg-white/50 dark:hover:bg-white/10">
+                  View all <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+            </div>
+            <div className="p-3 md:p-4">
+              <div className="space-y-1">
+                {activeBookings.slice(0, 3).map((b: any) => (
+                  <Link key={b.id} href="/bookings">
+                    <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-transparent hover:border-border/60 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer group">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm truncate group-hover:text-primary transition-colors">
+                          {b.job?.title || `Booking #${b.id.slice(-6)}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {b.professional?.firstName} {b.professional?.lastName}
+                          {b.totalAmount ? ` · €${b.totalAmount}` : ""}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider shrink-0 ${
+                        b.status === "CONFIRMED"
+                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                          : b.status === "IN_PROGRESS"
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                          : "bg-muted text-muted-foreground"
+                      }`}>
+                        {b.status?.replace("_", " ")}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Quick actions footer */}
         <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-border/40">

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { MapPin, Clock, DollarSign, Zap, CheckCircle2, XCircle, Star, AlertTriangle, MessageCircle, Pencil, Hash, Sparkles, ArrowRight, MessageSquare } from "lucide-react";
+import { MapPin, Clock, DollarSign, Zap, CheckCircle2, XCircle, Star, AlertTriangle, MessageCircle, Pencil, Hash, Sparkles, ArrowRight, MessageSquare, SortAsc, TrendingDown, Award } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,7 @@ export default function JobDetail() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({ title: "", description: "", locationText: "", locationTown: "", locationEircode: "", budgetMin: "", budgetMax: "", urgency: "NORMAL" });
   const [enhancing, setEnhancing] = useState(false);
+  const [quoteSortBy, setQuoteSortBy] = useState<"amount" | "date">("amount");
 
   const { data: job, isLoading } = useQuery<any>({ queryKey: [`/api/jobs/${params?.id}`], enabled: !!params?.id });
   const { data: allQuotes = [] } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
@@ -46,6 +47,13 @@ export default function JobDetail() {
   const quotesArray = Array.isArray(allQuotes) ? allQuotes : [];
   const jobQuotes = quotesArray.filter((q: any) => q.jobId === params?.id);
   const acceptedQuote = jobQuotes.find((q: any) => q.status === "ACCEPTED");
+
+  const sortedJobQuotes = [...jobQuotes].sort((a: any, b: any) => {
+    if (quoteSortBy === "amount") return Number(a.amount) - Number(b.amount);
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+  const lowestQuote = jobQuotes.length ? Math.min(...jobQuotes.map((q: any) => Number(q.amount))) : null;
+  const pendingQuotesCount = jobQuotes.filter((q: any) => q.status === "PENDING").length;
 
   const acceptQuote = useMutation({
     mutationFn: async (quoteId: string) => {
@@ -413,10 +421,46 @@ export default function JobDetail() {
         {/* Quotes */}
         <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
           <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
-            <CardTitle className="flex items-center gap-2 text-base font-heading font-semibold text-foreground/80">
-              Quotes received
-              <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20">{jobQuotes.length}</Badge>
-            </CardTitle>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <CardTitle className="flex items-center gap-2 text-base font-heading font-semibold text-foreground/80">
+                Quotes received
+                <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20">{jobQuotes.length}</Badge>
+              </CardTitle>
+              {jobQuotes.length > 1 && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className="font-medium">Sort:</span>
+                  <button
+                    onClick={() => setQuoteSortBy("amount")}
+                    className={cn("px-2.5 py-1 rounded-lg border transition-colors", quoteSortBy === "amount" ? "bg-primary/10 text-primary border-primary/20 font-semibold" : "border-border/40 hover:bg-muted/50")}
+                  >
+                    Lowest price
+                  </button>
+                  <button
+                    onClick={() => setQuoteSortBy("date")}
+                    className={cn("px-2.5 py-1 rounded-lg border transition-colors", quoteSortBy === "date" ? "bg-primary/10 text-primary border-primary/20 font-semibold" : "border-border/40 hover:bg-muted/50")}
+                  >
+                    Newest first
+                  </button>
+                </div>
+              )}
+            </div>
+            {jobQuotes.length > 0 && lowestQuote !== null && (
+              <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/30 flex-wrap text-sm">
+                <span className="flex items-center gap-1.5 text-green-700 dark:text-green-400 font-medium">
+                  <TrendingDown className="w-4 h-4" /> Lowest: €{lowestQuote}
+                </span>
+                {pendingQuotesCount > 0 && (
+                  <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                    <Award className="w-4 h-4" /> {pendingQuotesCount} awaiting your decision
+                  </span>
+                )}
+                {acceptedQuote && (
+                  <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-medium">
+                    <CheckCircle2 className="w-4 h-4" /> Accepted: €{acceptedQuote.amount}
+                  </span>
+                )}
+              </div>
+            )}
           </CardHeader>
           <CardContent className="pt-6">
             {jobQuotes.length === 0 ? (
@@ -429,7 +473,7 @@ export default function JobDetail() {
               </div>
             ) : (
               <div className="space-y-4">
-                {jobQuotes.map((q: any) => (
+                {sortedJobQuotes.map((q: any) => (
                   <div key={q.id} data-testid={`quote-${q.id}`}
                     className={cn(
                       "p-5 md:p-6 rounded-2xl transition-all duration-300 border backdrop-blur-sm",
@@ -446,6 +490,15 @@ export default function JobDetail() {
                             q.status === "REJECTED" ? "destructive" : "outline"
                           } className={cn("text-xs uppercase tracking-wider", q.status === "ACCEPTED" && "bg-green-500 hover:bg-green-600 shadow-sm shadow-green-500/20")}>{q.status}</Badge>
                         </div>
+                        {q.professional && (
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center uppercase">
+                              {q.professional.firstName?.[0]}{q.professional.lastName?.[0]}
+                            </div>
+                            <span className="text-sm font-medium">{q.professional.firstName} {q.professional.lastName}</span>
+                            {q.status === "ACCEPTED" && <Badge className="bg-green-500 text-white text-xs border-0 ml-auto">Accepted</Badge>}
+                          </div>
+                        )}
                         {q.message && <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-sm text-foreground/90 mt-2 mb-3 leading-relaxed">{q.message}</div>}
                         <div className="flex items-center gap-x-4 gap-y-2 mt-2 flex-wrap text-sm text-muted-foreground">
                           {q.estimatedDays && (

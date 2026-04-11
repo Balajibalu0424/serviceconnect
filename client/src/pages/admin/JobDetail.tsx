@@ -94,7 +94,13 @@ export default function AdminJobDetail() {
             </div>
             <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground flex-wrap">
               {job.referenceCode && <span className="flex items-center gap-1 font-mono text-xs bg-muted px-2 py-0.5 rounded"><Hash className="w-3 h-3" /> {job.referenceCode}</span>}
-              <span className="font-mono text-xs text-muted-foreground/60">{job.id}</span>
+              <button
+                className="font-mono text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors cursor-copy bg-muted/30 px-1.5 py-0.5 rounded"
+                onClick={() => { navigator.clipboard.writeText(job.id); }}
+                title="Click to copy job ID"
+              >
+                {job.id}
+              </button>
             </div>
           </div>
           {!["CLOSED", "COMPLETED"].includes(job.status) && (
@@ -173,9 +179,26 @@ export default function AdminJobDetail() {
                   <User className="w-4 h-4" /> Customer
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="font-medium">{customer?.firstName} {customer?.lastName}</p>
-                <p className="text-sm text-muted-foreground">{customer?.email}</p>
+              <CardContent className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 text-primary text-sm font-bold flex items-center justify-center uppercase flex-shrink-0">
+                    {customer?.firstName?.[0]}{customer?.lastName?.[0]}
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">{customer?.firstName} {customer?.lastName}</p>
+                    <p className="text-xs text-muted-foreground">{customer?.email}</p>
+                  </div>
+                </div>
+                {customer?.phone && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5 ml-12">
+                    <span>📞</span> {customer.phone}
+                  </p>
+                )}
+                <Link href={`/admin/users?search=${encodeURIComponent(customer?.email || '')}`}>
+                  <Button variant="outline" size="sm" className="text-xs gap-1 mt-1 rounded-lg">
+                    View customer account
+                  </Button>
+                </Link>
               </CardContent>
             </Card>
 
@@ -249,15 +272,20 @@ export default function AdminJobDetail() {
             ) : (
               <div className="divide-y divide-border/30">
                 {quotes.map((q: any) => (
-                  <div key={q.id} className="flex items-center justify-between py-3">
-                    <div>
-                      <p className="text-sm font-medium">{q.proName}</p>
-                      <p className="text-xs text-muted-foreground">{format(new Date(q.createdAt), "PPp")}</p>
+                  <div key={q.id} className="py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{q.proName}</p>
+                        <p className="text-xs text-muted-foreground">{format(new Date(q.createdAt), "PPp")}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-bold">€{q.amount}</span>
+                        <Badge className={cn("text-xs border-0 rounded-full", QUOTE_STATUS[q.status])}>{q.status}</Badge>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold">€{q.amount}</span>
-                      <Badge className={cn("text-xs border-0 rounded-full", QUOTE_STATUS[q.status])}>{q.status}</Badge>
-                    </div>
+                    {q.message && (
+                      <p className="text-xs text-muted-foreground mt-1 ml-0 line-clamp-2 italic">"{q.message}"</p>
+                    )}
                   </div>
                 ))}
               </div>

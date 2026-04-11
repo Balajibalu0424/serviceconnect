@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { Star, Briefcase, TrendingUp, CheckCircle2, Wrench } from "lucide-react";
+import { Star, Briefcase, TrendingUp, CheckCircle2, Wrench, ExternalLink } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ReviewReplyForm } from "@/components/reviews/ReviewReplyForm";
 
@@ -29,6 +29,8 @@ export default function ProProfileEditor() {
     yearsExperience: "",
     hourlyRate: "",
     bio: "",
+    website: "",
+    serviceAreas: "",
   });
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
@@ -40,6 +42,8 @@ export default function ProProfileEditor() {
         yearsExperience: profile.yearsExperience != null ? String(profile.yearsExperience) : "",
         hourlyRate: profile.hourlyRate != null ? String(profile.hourlyRate) : "",
         bio: profile.bio || "",
+        website: profile.website || "",
+        serviceAreas: profile.serviceAreas || "",
       });
       // Pre-populate selected categories (stored as UUID array)
       setSelectedCategories(profile.serviceCategories || []);
@@ -53,6 +57,8 @@ export default function ProProfileEditor() {
         yearsExperience: form.yearsExperience ? parseInt(form.yearsExperience) : null,
         hourlyRate: form.hourlyRate ? parseFloat(form.hourlyRate) : null,
         bio: form.bio || null,
+        website: form.website || undefined,
+        serviceAreas: form.serviceAreas || undefined,
         serviceCategories: selectedCategories,
       });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -172,9 +178,9 @@ export default function ProProfileEditor() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Years experience</Label>
+                    <Label>Years of Experience</Label>
                     <Input
-                      type="number" min="0" max="50"
+                      type="number" min="0" max="60"
                       placeholder="e.g. 8"
                       value={form.yearsExperience}
                       onChange={e => setForm(f => ({ ...f, yearsExperience: e.target.value }))}
@@ -202,6 +208,27 @@ export default function ProProfileEditor() {
                     data-testid="input-bio"
                   />
                   <p className="text-xs text-muted-foreground mt-1">{form.bio.length}/500 characters</p>
+                </div>
+                <div>
+                  <Label>Website</Label>
+                  <Input
+                    type="url"
+                    placeholder="https://yourwebsite.ie"
+                    value={form.website}
+                    onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
+                    data-testid="input-website"
+                  />
+                </div>
+                <div>
+                  <Label>Service Areas</Label>
+                  <Textarea
+                    placeholder="e.g. Dublin, Wicklow, Kildare"
+                    value={form.serviceAreas}
+                    onChange={e => setForm(f => ({ ...f, serviceAreas: e.target.value }))}
+                    rows={2}
+                    data-testid="input-service-areas"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Comma-separated list of counties, cities, or areas you serve</p>
                 </div>
                 <Button onClick={() => updateProfile.mutate()} disabled={updateProfile.isPending} className="rounded-xl px-6 h-11 w-full sm:w-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all mt-2" data-testid="button-save-business">
                   {updateProfile.isPending ? "Saving..." : "Save Business Info"}
@@ -263,6 +290,28 @@ export default function ProProfileEditor() {
             >
               {updateProfile.isPending ? "Saving..." : "Save Categories"}
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* Public Profile */}
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-sm font-heading font-semibold text-foreground/80 flex items-center gap-2">
+              <ExternalLink className="w-4 h-4 text-primary/70" /> Public Profile
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-5 pb-4">
+            <p className="text-sm text-muted-foreground mb-3">Your public profile is visible to customers reviewing professionals.</p>
+            {user?.id && (
+              <a
+                href={`/#/pro/${user.id}/profile`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> View your public profile
+              </a>
+            )}
           </CardContent>
         </Card>
 

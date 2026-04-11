@@ -760,7 +760,7 @@ Loading state improved from a basic spinner to three skeleton cards (animated pu
 
 ---
 
-### Remaining Limitations
+### Remaining Limitations (after Session 4)
 
 1. No "new relevant job available" push to professionals when a matching job is posted — would require a category-matching fan-out at job publish time
 2. No batch notification digests or email delivery — all notifications are in-app only
@@ -769,7 +769,7 @@ Loading state improved from a basic spinner to three skeleton cards (animated pu
 
 ---
 
-### Recommended Next Priorities
+### Recommended Next Priorities (after Session 4)
 
 1. New job notification fan-out: when a job goes LIVE, notify all professionals whose `serviceCategories` overlap with the job's category
 2. Email digest for unread notifications (daily/weekly)
@@ -778,3 +778,121 @@ Loading state improved from a basic spinner to three skeleton cards (animated pu
 5. Pro profile completeness score — show a percentage bar and guide pros through missing fields
 6. Customer re-engagement: if a job has been LIVE for 3 days with no quotes, send a prompt to boost or revise
 7. Real SMS/email OTP provider integration
+
+---
+
+## Session 5 — Second Enhancement Pass
+
+**Date:** 2026-04-11  
+**Scope:** Full second pass over customer and professional sections; quote UX, job detail depth, profile editor enrichment, settings security, AI widget preview stage, dashboard intelligence, admin improvements  
+**Build status:** ✅ Clean — 2,714 modules, 0 TypeScript errors
+
+---
+
+### Customer-Side Improvements
+
+#### 1. `customer/MyJobs.tsx`
+- Three-way job split: **Drafts**, **Live & Active** (LIVE / IN_DISCUSSION / BOOSTED / AFTERCARE), **Closed** (COMPLETED / CLOSED)
+- Collapsible "Closed" section showing first 3 by default with "Show all" toggle
+- Blue **"N new quote(s)"** badge on each live job card using pending quote counts from `/api/quotes`
+- "N quote(s) received" sub-line on cards with any quotes
+- `/api/quotes` query added and `pendingByJob` map computed client-side
+
+#### 2. `customer/Dashboard.tsx`
+- **"Actions Required"** amber banner with 3 actionable rows: pending quotes count, unread notifications, active bookings
+- **Active Bookings section** below the two-column stat grid: shows up to 3 bookings with colour-coded status pills (CONFIRMED=blue, IN_PROGRESS=amber)
+- `activeBookings` filter expanded to `["ACTIVE", "CONFIRMED", "IN_PROGRESS"]`
+- Bookings stat card subtitle changed to "confirmed & in progress"
+- Pending quote count derived from `/api/quotes` query — shown per-job in the pipeline section
+
+#### 3. `customer/JobDetail.tsx`
+- **Quote sort controls**: "Lowest price" / "Newest first" sort buttons above the quotes list
+- **Smart quote summary bar**: shows lowest quote amount, pending count awaiting decision, accepted quote amount
+- Professional name/avatar initials shown in each quote card
+- `sortedJobQuotes` derived array replaces direct `jobQuotes.map`
+- Imports: `TrendingDown`, `Award`, `SortAsc` added from lucide-react
+
+#### 4. `customer/Settings.tsx`
+- **Password strength bar**: 4-segment coloured progress bar (red → orange → yellow → green) beneath the new-password field
+- **Match indicator**: green ✓ / red ✗ icon beside confirm-password field
+- Save button disabled when passwords don't match
+- **Notifications preference card**: shows always-enabled notification categories (quotes, bookings, messages, system alerts)
+
+---
+
+### Professional-Side Improvements
+
+#### 5. `pro/Leads.tsx`
+- **Location row** on every lead card: `MapPin` icon with `locationText` + `locationEircode` badge
+- **"Rejected (N)" section header** with count — clearly separates rejected leads from accepted/pending
+- **Win rate stat** in summary bar: `accepted / (accepted + rejected) × 100%`
+- Description preview (1-line clamp) on PENDING quote cards
+- **"Browse Job Feed"** button in empty state
+
+#### 6. `pro/ProfileEditor.tsx`
+- **Years of experience** numeric input wired to form and PATCH body
+- **Website URL** input with `ExternalLink` icon
+- **Service areas** textarea (comma-separated areas of operation)
+- **Public profile card** with `ExternalLink` icon linking to `/#/pro/<id>/profile`
+
+#### 7. `pro/Dashboard.tsx` (from Session 4, carried forward)
+- Amber banner when `serviceCategories` not set — guides pro to complete profile
+- 4th stat card changed to "Notifications" with unread count, links to `/pro/notifications`
+- Actions Required banner with 3 rows
+
+---
+
+### AI & UX Improvements
+
+#### 8. `components/ai/AiAssistantWidget.tsx`
+- **Preview stage** added to collection flow — after AI extracts job data, customer sees a preview card showing title, location, urgency, description snippet before confirming creation
+- "Create Draft" and "Keep editing" buttons in preview
+- Prevents accidental job creation without reviewing extracted data
+- `CollectionStage` type extended with `"preview"`
+
+---
+
+### Admin Improvements
+
+#### 9. `admin/JobDetail.tsx`
+- **UUID display** converted to a copyable `<button>` with clipboard API and hover styling
+- **Customer card** upgraded: initials avatar, two-line name/email layout, conditional phone row, "View customer account" link to `/admin/users?search=<email>`
+- **Quote rows** now show a 2-line italic message preview (clamped), not just pro name and amount
+
+---
+
+### Files Changed (Session 5)
+
+| File | Changes |
+|------|---------|
+| `client/src/pages/customer/MyJobs.tsx` | Three-way split, quote badges, closed section toggle |
+| `client/src/pages/customer/Dashboard.tsx` | Actions Required banner, active bookings section |
+| `client/src/pages/customer/JobDetail.tsx` | Quote sort, summary bar, professional info in cards |
+| `client/src/pages/customer/Settings.tsx` | Password strength bar, match indicator, notifications card |
+| `client/src/pages/pro/Leads.tsx` | Location row, rejected section header, win rate stat |
+| `client/src/pages/pro/ProfileEditor.tsx` | Experience, website, service areas, public profile card |
+| `client/src/components/ai/AiAssistantWidget.tsx` | Preview stage before job creation |
+| `client/src/pages/admin/JobDetail.tsx` | UUID copy button, richer customer card, quote message preview |
+
+---
+
+### Remaining Limitations (after Session 5)
+
+1. No "new relevant job available" push fan-out to professionals when a job goes LIVE
+2. No batch notification digests or email delivery — all notifications are in-app only
+3. OTP delivery remains demo-only (`123456`)
+4. Pro category picker change requires page refresh to reflect in job feed filter
+5. Customer `JobDetail.tsx` fetches all `/api/quotes` and filters client-side — for accounts with many jobs this could be slow; a `?jobId=` query param filter on the backend would help
+6. AI Widget preview extracts data optimistically — if Gemini returns incomplete data the preview could show partial fields
+
+---
+
+### Recommended Next Priorities (after Session 5)
+
+1. **New job fan-out notifications**: when job status → LIVE, find professionals with matching `serviceCategories` and create `NEW_JOB_AVAILABLE` notifications
+2. **Quote `/api/quotes?jobId=` filter**: reduce over-fetching by adding a server-side filter param
+3. **Pro profile completeness score**: percentage bar guiding pros through missing fields
+4. **Email/SMS OTP provider integration**: replace demo `123456` with Twilio or similar
+5. **Email notification digest**: daily/weekly summary of unread notifications via SendGrid
+6. **Admin notification broadcast**: admin panel UI to send system-wide or role-targeted notifications
+7. **Booking timeline view**: visual step-by-step progress indicator in booking details (Confirmed → In Progress → Completed)

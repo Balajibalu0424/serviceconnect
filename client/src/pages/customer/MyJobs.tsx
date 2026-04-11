@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Briefcase, PlusCircle, MapPin, Clock, Zap, AlertCircle, Hash } from "lucide-react";
+import { Briefcase, PlusCircle, MapPin, Clock, Zap, AlertCircle, Hash, FileText } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -39,8 +40,23 @@ export default function MyJobs() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"] });
+  const allQuotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : [];
+  const pendingByJob: Record<string, number> = {};
+  allQuotes.filter((q: any) => q.status === "PENDING").forEach((q: any) => {
+    if (q.jobId) pendingByJob[q.jobId] = (pendingByJob[q.jobId] || 0) + 1;
+  });
+
+  const [showClosed, setShowClosed] = useState(false);
+
   const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
-  const activeJobs = (jobs as any[]).filter(j => j.status !== "DRAFT");
+  const liveJobs = (jobs as any[]).filter(j =>
+    ["LIVE", "IN_DISCUSSION", "BOOSTED", "AFTERCARE_2D", "AFTERCARE_5D"].includes(j.status)
+  );
+  const closedJobs = (jobs as any[]).filter(j =>
+    ["COMPLETED", "CLOSED"].includes(j.status)
+  );
+  const visibleClosedJobs = showClosed ? closedJobs : closedJobs.slice(0, 3);
 
   return (
     <DashboardLayout>
@@ -64,7 +80,8 @@ export default function MyJobs() {
             <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
               <Briefcase className="w-8 h-8 opacity-50" />
             </div>
-            <p className="font-heading font-medium text-lg text-foreground">You haven't posted any jobs yet</p>
+            <p className="font-heading font-medium text-lg text-foreground">No jobs posted yet</p>
+            <p className="text-sm mt-2 max-w-xs mx-auto">Post your first job and start receiving quotes from trusted professionals in minutes.</p>
             <Link href="/post-job"><Button className="mt-6 rounded-xl shadow-lg">Post your first job</Button></Link>
           </div>
         ) : (
@@ -114,16 +131,64 @@ export default function MyJobs() {
               </div>
             )}
 
-            {/* Active/completed jobs */}
-            {activeJobs.length > 0 && (
-              <div className="space-y-4">
-                {activeJobs.map((job: any) => (
+            {/* Active / live jobs */}
+            {liveJobs.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
+                  Active ({liveJobs.length})
+                </h2>
+                {liveJobs.map((job: any) => (
                   <Link key={job.id} href={`/jobs/${job.id}`}>
                     <Card className="cursor-pointer transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] bg-white/60 dark:bg-black/40 backdrop-blur-xl border-white/40 dark:border-white/10 rounded-2xl overflow-hidden group mb-4 block" data-testid={`job-${job.id}`}>
                       <CardContent className="p-5 md:p-6">
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-3 mb-2">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <h3 className="font-heading font-bold text-lg truncate group-hover:text-primary transition-colors">{job.title}</h3>
+                              <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 text-xs bg-white/50 dark:bg-black/50 backdrop-blur shadow-sm">
+                                {STATUS_LABELS[job.status] || job.status}
+                              </Badge>
+                              {pendingByJob[job.id] > 0 && (
+                                <Badge variant="outline" className="text-xs border-blue-300 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 shrink-0 font-semibold">
+                                  {pendingByJob[job.id]} new quote{pendingByJob[job.id] > 1 ? "s" : ""}
+                                </Badge>
+                              )}
+                              {job.referenceCode && <span className="text-xs font-mono text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />{job.referenceCode}</span>}
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{job.description}</p>
+                            {allQuotes.filter((q: any) => q.jobId === job.id).length > 0 && (
+                              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                                <FileText className="w-3 h-3" />
+                                {allQuotes.filter((q: any) => q.jobId === job.id).length} quote{allQuotes.filter((q: any) => q.jobId === job.id).length > 1 ? "s" : ""} received
+                              </p>
+                            )}
+                            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-xs text-muted-foreground bg-white/40 dark:bg-white/5 backdrop-blur-sm p-3 rounded-xl border border-white/20 dark:border-white/5 w-fit">
+                              {job.locationText && <span className="flex items-center gap-1.5 font-medium text-foreground/80"><MapPin className="w-4 h-4 text-primary/70"/>{job.locationText}</span>}
+                              <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-muted-foreground/70"/>{formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}</span>
+                              {job.budgetMin && <span className="flex items-center gap-1.5 font-medium text-foreground/80"><Zap className="w-4 h-4 text-green-500/70" />€{job.budgetMin}–€{job.budgetMax}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {/* Closed / completed jobs */}
+            {closedJobs.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
+                  Closed ({closedJobs.length})
+                </h2>
+                {visibleClosedJobs.map((job: any) => (
+                  <Link key={job.id} href={`/jobs/${job.id}`}>
+                    <Card className="cursor-pointer transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] bg-white/40 dark:bg-black/30 backdrop-blur-xl border-white/30 dark:border-white/5 rounded-2xl overflow-hidden group mb-4 block opacity-80" data-testid={`job-${job.id}`}>
+                      <CardContent className="p-5 md:p-6">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <h3 className="font-heading font-bold text-lg truncate group-hover:text-primary transition-colors">{job.title}</h3>
                               <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 text-xs bg-white/50 dark:bg-black/50 backdrop-blur shadow-sm">
                                 {STATUS_LABELS[job.status] || job.status}
@@ -142,6 +207,18 @@ export default function MyJobs() {
                     </Card>
                   </Link>
                 ))}
+                {closedJobs.length > 3 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full rounded-xl text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowClosed(prev => !prev)}
+                  >
+                    {showClosed
+                      ? "Show fewer past jobs"
+                      : `Show all ${closedJobs.length} past jobs`}
+                  </Button>
+                )}
               </div>
             )}
           </div>

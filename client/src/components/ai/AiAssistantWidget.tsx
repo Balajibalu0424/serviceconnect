@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
 type WidgetMode = "home" | "post_job" | "support_ticket";
-type CollectionStage = "chat" | "confirming" | "creating" | "done";
+type CollectionStage = "chat" | "preview" | "confirming" | "creating" | "done";
 
 interface Message {
   role: "user" | "assistant";
@@ -340,6 +340,52 @@ export default function AiAssistantWidget() {
                   <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">Creating your job draft...</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">AI is enhancing your description for best results</p>
                 </div>
+              ) : collectionStage === "preview" && draftData ? (
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <FileEdit className="w-3.5 h-3.5" /> Job Summary — Review before creating
+                    </p>
+                    <div className="space-y-2.5">
+                      <div>
+                        <p className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">Title</p>
+                        <p className="text-sm font-semibold text-foreground">{draftData.title}</p>
+                      </div>
+                      {draftData.locationText && (
+                        <div>
+                          <p className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">Location</p>
+                          <p className="text-sm text-foreground">{draftData.locationText}{draftData.locationEircode ? ` (${draftData.locationEircode})` : ""}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">Urgency</p>
+                        <p className="text-sm text-foreground capitalize">{(draftData.urgency || "Normal").toLowerCase()}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">Description preview</p>
+                        <p className="text-sm text-foreground/80 line-clamp-3 leading-relaxed">{draftData.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">AI will enhance your description for clarity and completeness before posting.</p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      className="flex-1 gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm"
+                      onClick={createJobDraft}
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Create Draft
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 rounded-xl"
+                      onClick={() => setCollectionStage("chat")}
+                    >
+                      Keep editing
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <>
                   <div
@@ -393,7 +439,7 @@ export default function AiAssistantWidget() {
                         {draftData.locationTown && ` \u00b7 ${draftData.locationTown}`}
                         {draftData.urgency === "URGENT" && " \u00b7 Urgent"}
                       </p>
-                      <Button size="sm" className="w-full text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={createJobDraft}>
+                      <Button size="sm" className="w-full text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={() => setCollectionStage("preview")}>
                         <Sparkles className="w-3.5 h-3.5" /> Create AI-Enhanced Draft
                       </Button>
                     </div>

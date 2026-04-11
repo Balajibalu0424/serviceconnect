@@ -4,7 +4,7 @@ import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Users, MessageSquare, Briefcase, Euro, Clock, Tag, ChevronDown, ChevronUp, Archive, Hash, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
+import { Users, MessageSquare, Briefcase, Euro, Clock, Tag, ChevronDown, ChevronUp, Archive, Hash, CheckCircle2, XCircle, AlertCircle, MapPin } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -72,6 +72,9 @@ export default function ProLeads() {
                   <Badge variant="outline" className="text-xs px-1.5 py-0">Job: {q.job.status}</Badge>
                 )}
               </div>
+              {q.status === "PENDING" && q.job?.description && (
+                <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5 pl-5">{q.job.description}</p>
+              )}
 
               {/* Amount */}
               <div className="flex items-center gap-4">
@@ -85,6 +88,13 @@ export default function ProLeads() {
                   </span>
                 )}
               </div>
+              {q.job?.locationText && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <MapPin className="w-3 h-3" />
+                  {q.job.locationText}
+                  {q.job?.locationEircode && <span className="font-mono bg-muted px-1 rounded ml-1">{q.job.locationEircode}</span>}
+                </div>
+              )}
 
               {q.message && (
                 <p className="text-xs text-muted-foreground line-clamp-2 italic">"{q.message}"</p>
@@ -164,6 +174,17 @@ export default function ProLeads() {
                 </div>
               </>
             )}
+            {accepted.length + rejected.length > 0 && (
+              <>
+                <div className="w-px bg-border" />
+                <div className="text-center">
+                  <p className="text-xl font-bold text-primary">
+                    {Math.round((accepted.length / (accepted.length + rejected.length)) * 100)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">Win rate</p>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -178,6 +199,9 @@ export default function ProLeads() {
             <p className="text-sm mt-1">Unlock jobs from your matchbooked list to start quoting</p>
             <Link href="/pro/matchbooked">
               <Button variant="outline" size="sm" className="mt-3">View Matchbooked</Button>
+            </Link>
+            <Link href="/pro/feed">
+              <Button variant="default" size="sm" className="mt-2 rounded-xl">Browse Job Feed</Button>
             </Link>
           </div>
         ) : (
@@ -194,6 +218,11 @@ export default function ProLeads() {
               )}
               {accepted.map(q => renderQuoteCard(q))}
 
+              {rejected.length > 0 && (
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 pt-2">
+                  Rejected ({rejected.length})
+                </p>
+              )}
               {rejected.map(q => renderQuoteCard(q))}
             </div>
 

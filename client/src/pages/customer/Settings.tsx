@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { User, Lock, Phone, Mail, Camera } from "lucide-react";
+import { User, Lock, Phone, Mail, Camera, CheckCircle2, XCircle, Bell } from "lucide-react";
 
 export default function Settings() {
   const { user, refreshUser } = useAuth();
@@ -250,6 +250,31 @@ export default function Settings() {
                   required
                   data-testid="input-new-password"
                 />
+                {/* Password strength bar */}
+                {newPassword && (
+                  <div className="mt-1.5 space-y-1">
+                    <div className="flex gap-1">
+                      {[1,2,3,4].map((i) => {
+                        const strength = [
+                          newPassword.length >= 8,
+                          /[A-Z]/.test(newPassword),
+                          /[0-9]/.test(newPassword),
+                          /[^A-Za-z0-9]/.test(newPassword)
+                        ].filter(Boolean).length;
+                        const filled = i <= strength;
+                        const colors = ["bg-red-400", "bg-orange-400", "bg-yellow-400", "bg-green-500"];
+                        return (
+                          <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${filled ? colors[strength - 1] : "bg-muted"}`} />
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {[newPassword.length >= 8, /[A-Z]/.test(newPassword), /[0-9]/.test(newPassword), /[^A-Za-z0-9]/.test(newPassword)].filter(Boolean).length <= 1 ? "Weak" :
+                       [newPassword.length >= 8, /[A-Z]/.test(newPassword), /[0-9]/.test(newPassword), /[^A-Za-z0-9]/.test(newPassword)].filter(Boolean).length === 2 ? "Fair" :
+                       [newPassword.length >= 8, /[A-Z]/.test(newPassword), /[0-9]/.test(newPassword), /[^A-Za-z0-9]/.test(newPassword)].filter(Boolean).length === 3 ? "Good" : "Strong"} password
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="confirmPassword">Confirm new password</Label>
@@ -262,8 +287,16 @@ export default function Settings() {
                   required
                   data-testid="input-confirm-password"
                 />
+                {confirmPassword && (
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${newPassword === confirmPassword ? "text-green-600" : "text-red-500"}`}>
+                    {newPassword === confirmPassword
+                      ? <><CheckCircle2 className="w-3 h-3" /> Passwords match</>
+                      : <><XCircle className="w-3 h-3" /> Passwords do not match</>
+                    }
+                  </p>
+                )}
               </div>
-              <Button type="submit" variant="outline" disabled={pwLoading} className="rounded-xl px-6 h-11 w-full sm:w-auto hover:bg-primary/5 hover:text-primary transition-colors" data-testid="button-update-password">
+              <Button type="submit" variant="outline" disabled={pwLoading || (!!confirmPassword && newPassword !== confirmPassword)} className="rounded-xl px-6 h-11 w-full sm:w-auto hover:bg-primary/5 hover:text-primary transition-colors" data-testid="button-update-password">
                 {pwLoading ? "Updating..." : "Update password"}
               </Button>
             </form>
@@ -290,6 +323,40 @@ export default function Settings() {
                 <span className="font-semibold text-primary">{(user as any).creditBalance} credits</span>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Notification preferences placeholder */}
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-primary/70" /> Notifications
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-5 pb-4 space-y-3">
+            <p className="text-sm text-muted-foreground">In-app notifications are enabled for all important activity on your account.</p>
+            <div className="flex items-center justify-between py-2 px-3 bg-muted/20 rounded-xl border border-border/30">
+              <div>
+                <p className="text-sm font-medium">New quotes</p>
+                <p className="text-xs text-muted-foreground">When a professional submits a quote on your job</p>
+              </div>
+              <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" title="Enabled" />
+            </div>
+            <div className="flex items-center justify-between py-2 px-3 bg-muted/20 rounded-xl border border-border/30">
+              <div>
+                <p className="text-sm font-medium">Booking updates</p>
+                <p className="text-xs text-muted-foreground">When your booking status changes</p>
+              </div>
+              <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" title="Enabled" />
+            </div>
+            <div className="flex items-center justify-between py-2 px-3 bg-muted/20 rounded-xl border border-border/30">
+              <div>
+                <p className="text-sm font-medium">Messages</p>
+                <p className="text-xs text-muted-foreground">When a professional sends you a message</p>
+              </div>
+              <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" title="Enabled" />
+            </div>
+            <p className="text-xs text-muted-foreground">Email notification preferences coming soon.</p>
           </CardContent>
         </Card>
       </div>
