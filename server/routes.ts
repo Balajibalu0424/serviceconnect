@@ -740,11 +740,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [myUnlock] = await db.select().from(jobUnlocks)
         .where(and(eq(jobUnlocks.jobId, row.job.id), eq(jobUnlocks.professionalId, proId)));
 
-      // Attach customer phone to unlock record if pro has phone-unlocked this job
+      // Attach customer phone and conversationId to unlock record
       let unlockWithPhone: any = myUnlock || null;
-      if (myUnlock?.phoneUnlocked) {
-        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
-        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      if (myUnlock) {
+        if (myUnlock.phoneUnlocked) {
+          const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
+          unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+        }
+        // Include conversationId so Chat button can deep-link to the right thread
+        const [conv] = await db.select({ id: conversations.id }).from(conversations)
+          .where(eq(conversations.jobId, row.job.id))
+          .orderBy(desc(conversations.createdAt)).limit(1);
+        unlockWithPhone = { ...unlockWithPhone, conversationId: conv?.id ?? null };
       }
 
       return {
@@ -773,9 +780,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [myUnlock] = await db.select().from(jobUnlocks)
         .where(and(eq(jobUnlocks.jobId, row.job!.id), eq(jobUnlocks.professionalId, proId)));
       let unlockWithPhone: any = myUnlock || null;
-      if (myUnlock?.phoneUnlocked) {
-        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job!.customerId));
-        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      if (myUnlock) {
+        if (myUnlock.phoneUnlocked) {
+          const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job!.customerId));
+          unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+        }
+        // Always include conversationId so the client can navigate directly to the chat
+        const [conv] = await db.select({ id: conversations.id }).from(conversations)
+          .where(eq(conversations.jobId, row.job!.id))
+          .orderBy(desc(conversations.createdAt)).limit(1);
+        unlockWithPhone = { ...unlockWithPhone, conversationId: conv?.id ?? null };
       }
       return { ...row, unlock: unlockWithPhone };
     }));
@@ -1031,11 +1045,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         `A professional has unlocked your job: ${job.title}`, { jobId });
 
       // Return customer phone for STANDARD unlocks so the pro sees it immediately
+      // Also return conversationId so the client can navigate directly to the chat
       const responseData: any = { success: true };
       if (tier === "STANDARD") {
         const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
         responseData.customerPhone = customerUser?.phone ?? null;
       }
+      const [newConv] = await db.select({ id: conversations.id }).from(conversations)
+        .where(and(eq(conversations.jobId, jobId)))
+        .orderBy(desc(conversations.createdAt)).limit(1);
+      responseData.conversationId = newConv?.id ?? null;
 
       return res.status(201).json(responseData);
     } catch (e: any) {
@@ -1083,7 +1102,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-      return res.json({ success: true, customerPhone: customerUser?.phone ?? null });
+      // Also return conversationId so the client can navigate directly to the chat
+      const [existingConv] = await db.select({ id: conversations.id }).from(conversations)
+        .where(eq(conversations.jobId, jobId))
+        .orderBy(desc(conversations.createdAt)).limit(1);
+      return res.json({ success: true, customerPhone: customerUser?.phone ?? null, conversationId: existingConv?.id ?? null });
     } catch (e: any) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }

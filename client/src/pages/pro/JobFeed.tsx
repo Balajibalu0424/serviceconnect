@@ -448,7 +448,7 @@ export default function ProJobFeed() {
                             </Button>
                           )}
                           <Button size="sm" variant="default" className="gap-1.5 h-8 text-xs ml-auto rounded-lg shadow-sm"
-                            onClick={() => setLocation("/pro/chat")} data-testid={`button-chat-${job.id}`}>
+                            onClick={() => setLocation(job.unlock?.conversationId ? `/pro/chat?conversationId=${job.unlock.conversationId}` : "/pro/chat")} data-testid={`button-chat-${job.id}`}>
                             <MessageCircle className="w-3.5 h-3.5" /> Chat
                           </Button>
                         </div>

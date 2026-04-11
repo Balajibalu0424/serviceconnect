@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
   const { toast } = useToast();
   const { user, refreshUser } = useAuth();
   const qc = useQueryClient();
+  const [, setLocation] = useLocation();
 
   const unlock = useMutation({
     mutationFn: async (tier: "FREE" | "STANDARD") => {
@@ -33,6 +35,10 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
         toast({ title: "Unlocked!", description: "Chat conversation ready." });
       }
       onClose();
+      // Navigate directly to the new conversation
+      if (data.conversationId) {
+        setLocation(`/pro/chat?conversationId=${data.conversationId}`);
+      }
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -92,6 +98,7 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
 export default function ProMatchbooked() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [, setLocation] = useLocation();
   const [unlockJob, setUnlockJob] = useState<any | null>(null);
 
   const { data: matchbooked = [], isLoading } = useQuery<any[]>({
@@ -106,10 +113,14 @@ export default function ProMatchbooked() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["/api/jobs/matchbooked"] });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       toast({
         title: "Upgraded to Standard",
         description: data.customerPhone ? `Customer's phone: ${data.customerPhone}` : "Phone number unlocked — visible on the card.",
       });
+      if (data.conversationId) {
+        setLocation(`/pro/chat?conversationId=${data.conversationId}`);
+      }
     },
     onError: (e: any) => toast({ title: "Upgrade failed", description: e.message, variant: "destructive" }),
   });
@@ -208,9 +219,9 @@ export default function ProMatchbooked() {
                           <Phone className="w-3.5 h-3.5" /> {row.unlock.customerPhone}
                         </div>
                       )}
-                      {isUnlocked && row.unlock?.conversationId && (
+                      {isUnlocked && (
                         <Button size="sm" variant="default" className="rounded-xl h-10 px-6 w-full md:w-auto" asChild>
-                          <a href={`/#/pro/chat`}>Open chat</a>
+                          <a href={row.unlock?.conversationId ? `/#/pro/chat?conversationId=${row.unlock.conversationId}` : "/#/pro/chat"}>Open chat</a>
                         </Button>
                       )}
                       <Button size="sm" variant="ghost" className="text-muted-foreground rounded-xl h-10 px-4 w-full md:w-auto hover:bg-destructive/10 hover:text-destructive transition-colors"
