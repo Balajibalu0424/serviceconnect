@@ -303,10 +303,14 @@ export default function ProJobFeed() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["/api/jobs/feed"] });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       toast({
         title: "Upgraded to Standard",
         description: data.customerPhone ? `Customer's phone: ${data.customerPhone}` : "Phone number unlocked.",
       });
+      if (data.conversationId) {
+        setLocation(data.conversationId ? `/pro/chat?conversationId=${data.conversationId}` : "/pro/chat");
+      }
     },
     onError: (e: any) => toast({ title: "Upgrade failed", description: e.message, variant: "destructive" })
   });
