@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ListChecks, CheckCircle2, XCircle, MessageCircle, User, MapPin, Clock, Euro, Hash, CalendarCheck, ArrowRight } from "lucide-react";
+import { ListChecks, CheckCircle2, XCircle, MessageCircle, User, MapPin, Clock, Euro, Hash, CalendarCheck, ArrowRight, Star } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -169,14 +169,27 @@ export default function Bookings() {
                 </>
               )}
               {b.status === "COMPLETED" && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="gap-1.5 rounded-xl h-9 px-3 text-xs flex-1 md:flex-auto"
-                  onClick={() => navigate(`/jobs/${b.jobId}`)}
-                >
-                  <ArrowRight className="w-3.5 h-3.5" /> View Job
-                </Button>
+                <>
+                  {!b.hasReview && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="gap-1.5 rounded-xl h-9 px-3 text-xs flex-1 md:flex-auto bg-amber-500 hover:bg-amber-600 text-white shadow-sm"
+                      onClick={() => navigate(`/jobs/${b.jobId}`)}
+                      data-testid={`button-review-${b.id}`}
+                    >
+                      <Star className="w-3.5 h-3.5" /> Leave a Review
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="gap-1.5 rounded-xl h-9 px-3 text-xs flex-1 md:flex-auto"
+                    onClick={() => navigate(`/jobs/${b.jobId}`)}
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" /> View Job
+                  </Button>
+                </>
               )}
             </div>
           </div>

@@ -889,10 +889,189 @@ Loading state improved from a basic spinner to three skeleton cards (animated pu
 
 ### Recommended Next Priorities (after Session 5)
 
-1. **New job fan-out notifications**: when job status → LIVE, find professionals with matching `serviceCategories` and create `NEW_JOB_AVAILABLE` notifications
+1. **New job fan-out notifications**: when job status → LIVE, find professionals with matching `serviceCategories` and create `NEW_JOB_AVAILABLE` notifications ✅ Done in Session 6
 2. **Quote `/api/quotes?jobId=` filter**: reduce over-fetching by adding a server-side filter param
 3. **Pro profile completeness score**: percentage bar guiding pros through missing fields
 4. **Email/SMS OTP provider integration**: replace demo `123456` with Twilio or similar
 5. **Email notification digest**: daily/weekly summary of unread notifications via SendGrid
 6. **Admin notification broadcast**: admin panel UI to send system-wide or role-targeted notifications
 7. **Booking timeline view**: visual step-by-step progress indicator in booking details (Confirmed → In Progress → Completed)
+
+---
+
+## Session 6 — Final Enhancement Pass (Retest → Gap Audit → Fix)
+
+**Date:** 2026-04-11  
+**Scope:** Retest deployed app, gap audit against previous report, then implement verified fixes  
+**Build status:** ✅ Clean — 2,714 modules, 0 TypeScript errors
+
+---
+
+### Live Retest Findings
+
+Tested the deployed app at `https://codebasefull.vercel.app` across all major customer and professional flows.
+
+**Customer side — what worked:**
+- Login, dashboard, job pipeline, stats cards all functional
+- MyJobs three-way split (drafts/live/closed) working
+- JobDetail with quote sort controls, summary bar working
+- Bookings page with cancel/complete mutations working
+- Chat routing, notifications page with filter groups working
+- Settings password strength bar and match indicator working
+
+**Customer side — real bugs/gaps found:**
+1. `q.estimatedDays` in quote cards always undefined — field is `estimatedDuration` (silent display bug)
+2. `q.professional` always null in customer quote cards — GET /api/quotes never returned pro user data
+3. "Leave a Review" on completed bookings missing from Bookings page
+4. Review CTA on JobDetail was a plain ghost button — not prominent enough
+
+**Professional side — what worked:**
+- Dashboard, job feed with urgency filters, leads, bookings, notifications all functional
+- Profile editor with experience/website/service areas working
+
+**Professional side — real gaps found:**
+5. No cancel booking button in pro Bookings dialog
+6. "Quote sent" badge missing from job feed cards
+7. No `?highlight=jobId` support in job feed (notifications couldn't deep-link to specific job)
+
+**Notification system — gaps found:**
+8. `NEW_JOB_AVAILABLE` type had no icon, no filter group entry, no deep-link handler
+9. `BOOKING_IN_PROGRESS` type had no icon, no filter group, no deep-link
+10. `URGENT_JOB` deep-link was `/pro/feed` without `?highlight=jobId`
+11. `QUOTE_ACCEPTED` deep-link for pro went to `/pro/leads` — should go to chat when `conversationId` available
+12. `BOOKING_CREATED` had its own case in switch but not `BOOKING_CREATED` — was accidentally caught by `BOOKING_IN_PROGRESS` block from previous session (now fixed)
+
+**Backend gaps confirmed:**
+13. `POST /api/jobs/:id/publish` had NO fan-out notification to matching professionals
+14. `POST /api/bookings/:id/in-progress` had no notification to customer
+15. `POST /api/quotes/:id/accept` notifications did not include `conversationId` in data
+16. `GET /api/quotes` did not return professional user data for customer role
+17. `GET /api/bookings` did not return `hasReview` flag
+18. `GET /api/jobs/feed` did not return `myQuote` field for each job
+
+---
+
+### Gap Audit vs Previous Report
+
+| Claimed in Report | Real State | Fix Applied |
+|---|---|---|
+| Professional notifications complete | Missing `NEW_JOB_AVAILABLE` + `BOOKING_IN_PROGRESS` icons/links | ✅ Fixed |
+| Quote cards show professional info | `q.professional` always null | ✅ Fixed (A4) |
+| Deep-links work for all types | URGENT_JOB/NEW_JOB_AVAILABLE had no `jobId` param | ✅ Fixed |
+| Bookings have all actions | Pro Bookings missing cancel button | ✅ Fixed |
+| Customer Bookings has review CTA | No "Leave a Review" on completed | ✅ Fixed |
+| Notification fan-out when job published | Only urgent jobs triggered fan-out | ✅ Fixed (A1) |
+| `estimatedDuration` shows in quotes | Was referencing wrong field `estimatedDays` | ✅ Fixed (F1) |
+
+---
+
+### Customer-Side Improvements (Session 6)
+
+#### `customer/Notifications.tsx`
+- Added `NEW_JOB_AVAILABLE` icon (Briefcase, blue) and `BOOKING_IN_PROGRESS` icon (CalendarCheck, amber)
+- Fixed `URGENT_JOB` deep-link: now `/pro/feed?highlight={jobId}` (was `/pro/feed` with no param)
+- Added `NEW_JOB_AVAILABLE` case: routes to `/pro/feed?highlight={jobId}` for pros
+- Added `BOOKING_IN_PROGRESS` case: routes customer to `/bookings`, pro to `/pro/bookings`
+- Fixed `QUOTE_ACCEPTED` pro deep-link: now routes to chat thread when `conversationId` available
+- Fixed `BOOKING_CREATED` pro deep-link: routes to chat thread or `/pro/bookings`
+- Added `NEW_JOB_AVAILABLE` to "Job Updates" filter group
+- Added `BOOKING_IN_PROGRESS` to "Bookings" filter group
+
+#### `customer/JobDetail.tsx`
+- **Bug fix:** `q.estimatedDays` → `q.estimatedDuration` (field was always undefined before)
+- Added professional rating display in quote cards: star + numeric avg + review count
+- Promoted review CTA from plain ghost button to a full `Card` with emerald styling and clear messaging
+
+#### `customer/Bookings.tsx`
+- Added `Star` icon import
+- Added "Leave a Review" amber button on COMPLETED bookings (conditional on `!b.hasReview`)
+- Button navigates to JobDetail page where review form is available
+
+#### `customer/Dashboard.tsx`
+- Added `pendingQuoteProsByJob` map: tracks pro first names per job for pending quotes
+- Pipeline cards now show "from Jane, Mark" sub-line under the quote count badge
+
+---
+
+### Professional-Side Improvements (Session 6)
+
+#### `pro/Bookings.tsx`
+- Added `XCircle` icon import and `Textarea` import
+- Added `showCancelConfirm` + `cancelReason` state
+- Added `cancelBooking` mutation (POST `/api/bookings/:id/cancel`)
+- Added "Cancel Booking" button in dialog (visible for CONFIRMED/IN_PROGRESS bookings)
+- Added inline cancel confirmation UI with optional reason textarea
+
+#### `pro/JobFeed.tsx`
+- Added `useEffect` import
+- Added `highlightJobId` derived from `?highlight=` query param
+- Added scroll-to-card `useEffect`: scrolls to highlighted job 300ms after component renders
+- Added ring highlight on job card when `highlightJobId === job.id`
+- Added "Quote sent" emerald badge on job cards where `job.myQuote` exists
+
+#### `pro/Leads.tsx`
+- Added "View Feed" ghost button for PENDING quotes on live/active jobs
+- Button links to `/pro/feed` so pro can see the broader context
+
+---
+
+### Backend / API Improvements (Session 6)
+
+#### `server/routes.ts`
+
+**A1 — `NEW_JOB_AVAILABLE` fan-out on publish:**
+- `POST /api/jobs/:id/publish`: after setting job to LIVE, queries all professionals with matching `serviceCategories` (up to 50), sends `NEW_JOB_AVAILABLE` or `URGENT_JOB` notification using `Promise.allSettled` (non-blocking)
+
+**A2 — `BOOKING_IN_PROGRESS` notification:**
+- `POST /api/bookings/:id/in-progress`: now sends `BOOKING_IN_PROGRESS` notification to customer after marking booking in-progress
+
+**A3 — `conversationId` in quote acceptance notifications:**
+- `POST /api/quotes/:id/accept`: looks up the job's conversation before firing notifications; `QUOTE_ACCEPTED` and `BOOKING_CREATED` notifications now include `conversationId` in their data payload — enabling direct chat deep-links
+
+**A4 — Professional enrichment in GET /api/quotes:**
+- All quotes now include `professional: { id, firstName, lastName, avatarUrl, ratingAvg, totalReviews }` — fixes the silent `q.professional === null` bug in customer quote cards
+
+**A5 — `hasReview` in GET /api/bookings:**
+- Each booking now includes `hasReview: boolean` — checks if customer has already submitted a review for this booking, preventing duplicate review CTAs
+
+**A6 — `myQuote` in GET /api/jobs/feed:**
+- Each feed job now includes `myQuote: { id, status } | null` — allows the "Quote sent" badge to show for jobs where the pro already submitted a quote
+
+---
+
+### Files Changed (Session 6)
+
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | A1-A6: 6 backend improvements |
+| `client/src/pages/customer/Notifications.tsx` | B1-B6: 6 deep-link/icon/filter fixes |
+| `client/src/pages/customer/JobDetail.tsx` | F1-F3: estimatedDays bug, pro rating, review CTA card |
+| `client/src/pages/customer/Bookings.tsx` | H1: Leave Review button on completed |
+| `client/src/pages/pro/Bookings.tsx` | D1: Cancel booking button + mutation |
+| `client/src/pages/pro/JobFeed.tsx` | E2-E3: Quote sent badge + highlight deep-link |
+| `client/src/pages/customer/Dashboard.tsx` | G1: Pro names under quote badge in pipeline |
+| `client/src/pages/pro/Leads.tsx` | C1: View Feed link on pending quotes |
+
+---
+
+### Remaining Limitations (after Session 6)
+
+1. **Quote over-fetching**: `GET /api/quotes` returns all quotes and enriches each with 4 DB queries (N+1). For high-volume accounts this could be slow. A `?jobId=` filter param would help.
+2. **Job feed fan-out**: `POST /api/jobs` (direct creation, not publish) does not yet fan-out `NEW_JOB_AVAILABLE` — only publish does. Most jobs go through publish so this is low impact.
+3. **OTP remains demo-only** (`123456`) — real SMS/email provider not integrated.
+4. **Email notifications**: All notifications are in-app only; no email digest exists yet.
+5. **Pro profile completeness score**: Not yet implemented as a visual indicator.
+6. **Booking timeline view**: No visual step-by-step indicator for booking progression.
+7. **Notification preferences**: Settings page shows hardcoded "always enabled" types — no real toggle mutations.
+
+---
+
+### Recommended Next Priorities (after Session 6)
+
+1. **Quote API filter**: add `GET /api/quotes?jobId=X` server param to avoid over-fetching
+2. **Booking timeline component**: visual step indicator in both customer and pro booking detail views (Confirmed → In Progress → Completed)
+3. **Pro profile completeness score**: show % bar in ProfileEditor and dashboard nudge
+4. **Email/SMS OTP provider**: integrate Twilio or similar to replace demo `123456`
+5. **Email notification digest**: daily/weekly via SendGrid for unread notifications
+6. **Fan-out on direct job creation**: extend `NEW_JOB_AVAILABLE` fan-out to `POST /api/jobs` (not just publish)
+7. **Notification preference toggles**: wire Settings notification card to real DB preference storage

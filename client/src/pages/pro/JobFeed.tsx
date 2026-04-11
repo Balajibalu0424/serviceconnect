@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
@@ -248,10 +248,16 @@ const PAGE_SIZE = 20;
 
 export default function ProJobFeed() {
   const qc = useQueryClient();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState("my");
   const [urgencyFilter, setUrgencyFilter] = useState<string>("all");
+
+  // Support ?highlight=jobId deep-link from notifications
+  const highlightJobId = (() => {
+    const search = location.includes("?") ? location.split("?")[1] : "";
+    return new URLSearchParams(search).get("highlight") || null;
+  })();
   const [unlockJob, setUnlockJob] = useState<any | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -336,6 +342,17 @@ export default function ProJobFeed() {
   const displayJobs = urgencyFilter === "all"
     ? filteredJobs
     : filteredJobs.filter(j => j.urgency === urgencyFilter || (j.aiIsUrgent && urgencyFilter === "URGENT"));
+
+  // Scroll to highlighted job when navigating from notification deep-link
+  useEffect(() => {
+    if (highlightJobId && displayJobs.length > 0) {
+      const timer = setTimeout(() => {
+        const el = document.querySelector(`[data-testid="feed-job-${highlightJobId}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightJobId, displayJobs.length]);
 
   const handleCategoryChange = (value: string) => {
     setCategoryFilter(value); setPage(1); setHasMore(true); setLoadedPages({}); setUrgencyFilter("all");
@@ -423,7 +440,8 @@ export default function ProJobFeed() {
                   key={job.id}
                   className={cn(
                     "transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] bg-white/60 dark:bg-black/40 backdrop-blur-xl border-white/40 dark:border-white/10 rounded-2xl overflow-hidden group",
-                    job.isBoosted && "border-amber-300/60 ring-1 ring-amber-200/40 bg-gradient-to-br from-amber-50/50 to-white/60 dark:from-amber-950/20 dark:to-black/40"
+                    job.isBoosted && "border-amber-300/60 ring-1 ring-amber-200/40 bg-gradient-to-br from-amber-50/50 to-white/60 dark:from-amber-950/20 dark:to-black/40",
+                    highlightJobId === job.id && "ring-2 ring-primary/60 shadow-[0_0_20px_rgba(var(--primary),0.15)]"
                   )}
                   data-testid={`feed-job-${job.id}`}
                 >
@@ -436,6 +454,11 @@ export default function ProJobFeed() {
                           {job.aiIsUrgent && (
                             <Badge className="text-xs font-semibold bg-gradient-to-r from-red-500 to-red-600 text-white border-none shadow-sm shadow-red-500/20 px-2 py-0.5 gap-1">
                               <Flame className="w-3 h-3" /> Urgent
+                            </Badge>
+                          )}
+                          {job.myQuote && (
+                            <Badge className="text-xs bg-emerald-100 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900 gap-1">
+                              <CheckCircle className="w-3 h-3" /> Quote sent
                             </Badge>
                           )}
                           <Badge variant={URGENCY_COLORS[job.urgency] as any} className="text-xs bg-white/50 dark:bg-black/50 backdrop-blur">{job.urgency}</Badge>

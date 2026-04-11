@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ListChecks, MessageCircle, MapPin, User, CheckCircle2, Clock, Euro, Hash, CalendarCheck, ArrowRight } from "lucide-react";
+import { ListChecks, MessageCircle, MapPin, User, CheckCircle2, Clock, Euro, Hash, CalendarCheck, ArrowRight, XCircle } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -24,6 +25,8 @@ const STATUS_COLORS: Record<string, string> = {
 export default function ProBookings() {
   const { data: bookings = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
@@ -57,6 +60,24 @@ export default function ProBookings() {
     },
     onError: (error: Error) => {
       toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    }
+  });
+
+  const cancelBooking = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      const res = await apiRequest("POST", `/api/bookings/${id}/cancel`, { reason });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Booking cancelled", description: "The customer has been notified." });
+      setSelectedBooking(null);
+      setCancelReason("");
+      setShowCancelConfirm(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
     }
   });
 
@@ -296,7 +317,39 @@ export default function ProBookings() {
                   {markComplete.isPending ? "Completing…" : "Mark Complete"}
                 </Button>
               )}
+              {(selectedBooking.status === "CONFIRMED" || selectedBooking.status === "IN_PROGRESS") && !showCancelConfirm && (
+                <Button
+                  variant="outline"
+                  className="gap-2 text-destructive border-destructive/20 hover:bg-destructive/10"
+                  onClick={() => setShowCancelConfirm(true)}
+                >
+                  <XCircle className="w-4 h-4" /> Cancel Booking
+                </Button>
+              )}
             </div>
+            {showCancelConfirm && (
+              <div className="mt-2 flex flex-col gap-2 border border-destructive/30 rounded-xl p-3 bg-destructive/5">
+                <p className="text-sm font-medium text-destructive">Cancel this booking? The customer will be notified.</p>
+                <Textarea
+                  placeholder="Reason (optional)…"
+                  value={cancelReason}
+                  onChange={e => setCancelReason(e.target.value)}
+                  rows={2}
+                  className="text-sm"
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button size="sm" variant="ghost" onClick={() => setShowCancelConfirm(false)}>Back</Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => cancelBooking.mutate({ id: selectedBooking.id, reason: cancelReason })}
+                    disabled={cancelBooking.isPending}
+                  >
+                    {cancelBooking.isPending ? "Cancelling…" : "Confirm Cancel"}
+                  </Button>
+                </div>
+              </div>
+            )}
           </DialogContent>
         )}
       </Dialog>

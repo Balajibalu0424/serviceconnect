@@ -39,6 +39,8 @@ const NOTIFICATION_ICONS: Record<string, { icon: any; color: string; bg: string 
   JOB_FLAGGED: { icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
   MESSAGE_FLAGGED: { icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
   URGENT_JOB: { icon: Zap, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+  NEW_JOB_AVAILABLE: { icon: Briefcase, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+  BOOKING_IN_PROGRESS: { icon: CalendarCheck, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10" },
   QUOTE_ACCEPTED: { icon: ThumbsUp, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
   JOB_UNLOCK: { icon: ShieldCheck, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
   TICKET_REPLY: { icon: MessageSquare, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
@@ -71,7 +73,13 @@ function getNotificationLink(n: any, userRole: string): string | null {
     case "JOB_QUOTE":
       return data.jobId ? `/jobs/${data.jobId}` : null;
     case "QUOTE_ACCEPTED":
-      return isProRole ? "/pro/leads" : (data.jobId ? `/jobs/${data.jobId}` : null);
+      return isProRole
+        ? (data.conversationId ? `/pro/chat?conversationId=${data.conversationId}` : "/pro/bookings")
+        : (data.jobId ? `/jobs/${data.jobId}` : null);
+    case "BOOKING_CREATED":
+      return isProRole
+        ? (data.conversationId ? `/pro/chat?conversationId=${data.conversationId}` : "/pro/bookings")
+        : "/bookings";
     case "JOB_UPDATE":
     case "JOB_MATCHED":
     case "JOB_COMPLETED":
@@ -80,7 +88,13 @@ function getNotificationLink(n: any, userRole: string): string | null {
     case "JOB_FLAGGED":
       return data.jobId ? (isProRole ? "/pro/feed" : `/jobs/${data.jobId}`) : null;
     case "URGENT_JOB":
-      return isProRole ? "/pro/feed" : null;
+      return isProRole
+        ? (data.jobId ? `/pro/feed?highlight=${data.jobId}` : "/pro/feed")
+        : null;
+    case "NEW_JOB_AVAILABLE":
+      return isProRole
+        ? (data.jobId ? `/pro/feed?highlight=${data.jobId}` : "/pro/feed")
+        : null;
     case "JOB_UNLOCK":
       return data.jobId ? (isProRole ? "/pro/feed" : `/jobs/${data.jobId}`) : null;
     case "NEW_MESSAGE":
@@ -109,7 +123,7 @@ function getNotificationLink(n: any, userRole: string): string | null {
       return isProRole ? "/pro/leads" : null;
     case "REVIEW_POSTED":
       return isProRole ? "/pro/profile" : "/bookings";
-    case "BOOKING_CREATED":
+    case "BOOKING_IN_PROGRESS":
     case "BOOKING_COMPLETED":
     case "BOOKING_CANCELLED":
       return isProRole ? "/pro/bookings" : "/bookings";
@@ -171,8 +185,8 @@ export default function Notifications() {
     // Match both exact type and similar types (e.g. JOB_QUOTE and NEW_QUOTE)
     if (filter === "JOB_QUOTE") return ["JOB_QUOTE", "NEW_QUOTE", "QUOTE_ACCEPTED", "QUOTE_REJECTED"].includes(n.type);
     if (filter === "NEW_MESSAGE") return ["NEW_MESSAGE", "MESSAGE_FLAGGED"].includes(n.type);
-    if (filter === "JOB_UPDATE") return ["JOB_UPDATE", "JOB_MATCHED", "JOB_COMPLETED", "JOB_BOOSTED", "AFTERCARE", "JOB_UNLOCK", "URGENT_JOB", "AFTERCARE_2D", "AFTERCARE_5D", "AFTERCARE_REMINDER", "JOB_AUTO_CLOSED"].includes(n.type);
-    if (filter === "BOOKING") return ["BOOKING_CREATED", "BOOKING_COMPLETED", "BOOKING_CANCELLED"].includes(n.type);
+    if (filter === "JOB_UPDATE") return ["JOB_UPDATE", "JOB_MATCHED", "JOB_COMPLETED", "JOB_BOOSTED", "AFTERCARE", "JOB_UNLOCK", "URGENT_JOB", "NEW_JOB_AVAILABLE", "AFTERCARE_2D", "AFTERCARE_5D", "AFTERCARE_REMINDER", "JOB_AUTO_CLOSED"].includes(n.type);
+    if (filter === "BOOKING") return ["BOOKING_CREATED", "BOOKING_IN_PROGRESS", "BOOKING_COMPLETED", "BOOKING_CANCELLED"].includes(n.type);
     return n.type === filter;
   });
 

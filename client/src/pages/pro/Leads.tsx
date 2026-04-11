@@ -133,6 +133,13 @@ export default function ProLeads() {
                   </Button>
                 </Link>
               )}
+              {q.status === "PENDING" && q.job?.status && ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(q.job.status) && (
+                <Link href="/pro/feed">
+                  <Button variant="ghost" size="sm" className="text-xs h-7 px-2.5 rounded-xl gap-1 text-muted-foreground hover:text-foreground">
+                    <Briefcase className="w-3 h-3" /> View Feed
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
         </CardContent>

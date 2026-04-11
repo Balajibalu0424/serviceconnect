@@ -754,13 +754,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         unlockWithPhone = { ...unlockWithPhone, conversationId: conv?.id ?? null };
       }
 
+      // Check if this pro already sent a quote for this job
+      const [myQuote] = await db.select({ id: quotes.id, status: quotes.status })
+        .from(quotes)
+        .where(and(eq(quotes.jobId, row.job.id), eq(quotes.professionalId, proId)));
+
       return {
         ...row.job,
         category: row.category,
         customer: row.customer,
         matchbookCount: matchbookCount[0].c,
         isMatchbooked: !!myMatchbook,
-        unlock: unlockWithPhone
+        unlock: unlockWithPhone,
+        myQuote: myQuote ? { id: myQuote.id, status: myQuote.status } : null
       };
     }));
 
@@ -923,6 +929,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         aiUrgencyKeywords: urgencyResult.detectedKeywords,
         updatedAt: new Date(),
       }).where(eq(jobs.id, req.params.id as string)).returning();
+
+      // Fan-out: notify matching professionals about this new job
+      try {
+        const matchingPros = await db.select({ id: users.id })
+          .from(users)
+          .innerJoin(professionalProfiles, eq(professionalProfiles.userId, users.id))
+          .where(and(
+            eq(users.role, "PROFESSIONAL"),
+            eq(users.status, "ACTIVE"),
+            sql`${professionalProfiles.serviceCategories}::jsonb ? ${updated.categoryId}`
+          ));
+        const notifType = updated.aiIsUrgent ? "URGENT_JOB" : "NEW_JOB_AVAILABLE";
+        const notifTitle = updated.aiIsUrgent ? "🚨 Urgent job near you" : "New job in your area";
+        const notifMsg = `${updated.title} — be first to quote.`;
+        await Promise.allSettled(
+          matchingPros.slice(0, 50).map(pro =>
+            createNotification(pro.id, notifType, notifTitle, notifMsg, { jobId: updated.id, categoryId: updated.categoryId })
+          )
+        );
+      } catch (_fanoutErr) { /* notification failure must not block publish response */ }
+
       return res.json(updated);
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -1293,9 +1320,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const rawQuotes = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
 
-      // Enrich with job + category + conversation
+      // Enrich with job + category + conversation + professional info (for customer-facing quote cards)
       const enriched = await Promise.all(rawQuotes.map(async (q) => {
-        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId, referenceCode: jobs.referenceCode })
+        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId, referenceCode: jobs.referenceCode, locationText: jobs.locationText, locationEircode: jobs.locationEircode })
           .from(jobs).where(eq(jobs.id, q.jobId));
         const [cat] = job?.categoryId
           ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId))
@@ -1303,7 +1330,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const [conv] = await db.select({ id: conversations.id }).from(conversations)
           .where(and(eq(conversations.jobId, q.jobId)))
           .limit(1);
-        return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null };
+        // Enrich with professional user info + rating for customer-facing quote display
+        const [proUser] = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+          .from(users).where(eq(users.id, q.professionalId));
+        const [proProfile] = await db.select({ ratingAvg: professionalProfiles.ratingAvg, totalReviews: professionalProfiles.totalReviews })
+          .from(professionalProfiles).where(eq(professionalProfiles.userId, q.professionalId));
+        const professional = proUser ? {
+          ...proUser,
+          ratingAvg: proProfile?.ratingAvg ?? null,
+          totalReviews: proProfile?.totalReviews ?? 0,
+        } : null;
+        return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null, professional };
       }));
 
       // For professionals: separate active quotes from archived (closed/completed jobs)
@@ -1349,11 +1386,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ));
       });
 
+      // Look up the conversation for this job so notifications can deep-link to chat
+      const [jobConv] = await db.select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.jobId, quote.jobId))
+        .orderBy(desc(conversations.createdAt))
+        .limit(1);
+      const convId = jobConv?.id ?? null;
+
       await createNotification(quote.professionalId, "QUOTE_ACCEPTED", "Your quote was accepted!",
-        "The customer has accepted your quote.", { quoteId: quote.id, jobId: quote.jobId });
+        "The customer has accepted your quote.",
+        { quoteId: quote.id, jobId: quote.jobId, bookingId: createdBookingId, conversationId: convId });
       await createNotification(quote.professionalId, "BOOKING_CREATED", "Booking confirmed!",
         "A booking has been created. You can now arrange to begin work.",
-        { bookingId: createdBookingId, jobId: quote.jobId });
+        { bookingId: createdBookingId, jobId: quote.jobId, conversationId: convId });
 
       return res.json({ success: true });
     } catch (e: any) {
@@ -1384,7 +1430,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     
     const rawBookings = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
     
-    // Enrich bookings with nested Job, User, and Conversation data
+    // Enrich bookings with nested Job, User, Conversation data, and review status
     const enrichedBookings = await Promise.all(rawBookings.map(async (b) => {
       const [job] = await db.select().from(jobs).where(eq(jobs.id, b.jobId));
       const [customer] = await db.select().from(users).where(eq(users.id, b.customerId));
@@ -1392,10 +1438,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Find the conversation linked to this job so chat buttons can deep-link
       const [conv] = await db.select({ id: conversations.id }).from(conversations)
         .where(eq(conversations.jobId, b.jobId)).limit(1);
+      // Check if the customer has already reviewed this booking
+      const [existingReview] = await db.select({ id: reviews.id }).from(reviews)
+        .where(and(eq(reviews.bookingId, b.id), eq(reviews.reviewerId, b.customerId)));
       return {
         ...b,
         job,
         conversationId: conv?.id || null,
+        hasReview: !!existingReview,
         customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl, phone: customer.phone } : null,
         professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: null } : null
       };
@@ -1412,6 +1462,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     await db.update(bookings).set({ status: "IN_PROGRESS", updatedAt: new Date() })
       .where(eq(bookings.id, req.params.id as string));
+    // Notify customer that work has started
+    await createNotification(
+      booking.customerId,
+      "BOOKING_IN_PROGRESS",
+      "Work has started",
+      "Your professional has marked your booking as in progress.",
+      { bookingId: booking.id, jobId: booking.jobId }
+    );
     return res.json({ success: true });
   });
 

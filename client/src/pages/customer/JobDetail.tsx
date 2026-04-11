@@ -491,19 +491,28 @@ export default function JobDetail() {
                           } className={cn("text-xs uppercase tracking-wider", q.status === "ACCEPTED" && "bg-green-500 hover:bg-green-600 shadow-sm shadow-green-500/20")}>{q.status}</Badge>
                         </div>
                         {q.professional && (
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center uppercase">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <div className="w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center uppercase shrink-0">
                               {q.professional.firstName?.[0]}{q.professional.lastName?.[0]}
                             </div>
                             <span className="text-sm font-medium">{q.professional.firstName} {q.professional.lastName}</span>
+                            {q.professional.ratingAvg && Number(q.professional.ratingAvg) > 0 && (
+                              <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                                <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                                <span className="font-medium">{Number(q.professional.ratingAvg).toFixed(1)}</span>
+                                {q.professional.totalReviews > 0 && (
+                                  <span className="text-muted-foreground">({q.professional.totalReviews})</span>
+                                )}
+                              </span>
+                            )}
                             {q.status === "ACCEPTED" && <Badge className="bg-green-500 text-white text-xs border-0 ml-auto">Accepted</Badge>}
                           </div>
                         )}
                         {q.message && <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-sm text-foreground/90 mt-2 mb-3 leading-relaxed">{q.message}</div>}
                         <div className="flex items-center gap-x-4 gap-y-2 mt-2 flex-wrap text-sm text-muted-foreground">
-                          {q.estimatedDays && (
+                          {q.estimatedDuration && (
                             <span className="flex items-center gap-1.5 bg-muted/40 px-2 py-1 rounded-md">
-                              <Clock className="w-3.5 h-3.5" /> Est. {q.estimatedDays} day{q.estimatedDays !== 1 ? "s" : ""}
+                              <Clock className="w-3.5 h-3.5" /> Est. {q.estimatedDuration}
                             </span>
                           )}
                           {q.professionalId && (
@@ -551,11 +560,22 @@ export default function JobDetail() {
           </CardContent>
         </Card>
 
-        {/* Leave a review */}
+        {/* Leave a review — prominent card CTA */}
         {isCompleted && !showReview && (
-          <Button variant="outline" className="gap-2 w-full" onClick={() => setShowReview(true)} data-testid="button-leave-review">
-            <Star className="w-4 h-4 text-yellow-500" /> Review this professional
-          </Button>
+          <Card className="border-emerald-400/50 bg-emerald-50/50 dark:bg-emerald-950/20">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="font-semibold text-sm text-emerald-800 dark:text-emerald-300">Job complete — how did it go?</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Your feedback helps others find great professionals.</p>
+                </div>
+                <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 shadow-sm shrink-0 text-white"
+                  onClick={() => setShowReview(true)} data-testid="button-leave-review">
+                  <Star className="w-3.5 h-3.5" /> Leave a Review
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
         {showReview && (
           <Card>

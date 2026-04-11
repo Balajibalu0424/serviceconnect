@@ -174,6 +174,15 @@ export default function CustomerDashboard() {
     if (q.jobId) pendingQuotesByJob[q.jobId] = (pendingQuotesByJob[q.jobId] || 0) + 1;
   });
 
+  // Pro first names per job for pending quotes (shows who quoted in pipeline)
+  const pendingQuoteProsByJob: Record<string, string[]> = {};
+  pendingQuotes.forEach((q: any) => {
+    if (q.jobId && q.professional?.firstName) {
+      if (!pendingQuoteProsByJob[q.jobId]) pendingQuoteProsByJob[q.jobId] = [];
+      pendingQuoteProsByJob[q.jobId].push(q.professional.firstName);
+    }
+  });
+
   const activeJobs = (jobs as any[]).filter(j => ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(j.status));
   const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
   const aftercareJobs = (jobs as any[]).filter(j => ["AFTERCARE_2D", "AFTERCARE_5D"].includes(j.status));
@@ -391,15 +400,23 @@ export default function CustomerDashboard() {
                             {formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {pendingQuotesByJob[job.id] > 0 && (
-                            <Badge variant="outline" className="text-[11px] border-blue-300 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 py-1 font-semibold shrink-0">
-                              {pendingQuotesByJob[job.id]} quote{pendingQuotesByJob[job.id] > 1 ? "s" : ""}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div className="flex items-center gap-2">
+                            {pendingQuotesByJob[job.id] > 0 && (
+                              <Badge variant="outline" className="text-[11px] border-blue-300 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 py-1 font-semibold shrink-0">
+                                {pendingQuotesByJob[job.id]} quote{pendingQuotesByJob[job.id] > 1 ? "s" : ""}
+                              </Badge>
+                            )}
+                            <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 py-1 text-[11px] font-semibold w-fit">
+                              {STATUS_LABELS[job.status] || job.status}
                             </Badge>
+                          </div>
+                          {pendingQuotesByJob[job.id] > 0 && pendingQuoteProsByJob[job.id]?.length > 0 && (
+                            <p className="text-[10px] text-muted-foreground leading-tight text-right">
+                              from {pendingQuoteProsByJob[job.id].slice(0, 2).join(", ")}
+                              {pendingQuoteProsByJob[job.id].length > 2 && ` +${pendingQuoteProsByJob[job.id].length - 2}`}
+                            </p>
                           )}
-                          <Badge variant={STATUS_COLORS[job.status] as any} className="shrink-0 py-1 text-[11px] font-semibold w-fit">
-                            {STATUS_LABELS[job.status] || job.status}
-                          </Badge>
                         </div>
                       </div>
                     </Link>
