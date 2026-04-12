@@ -13,6 +13,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
 import { cn } from "@/lib/utils";
+import { BookingTimeline } from "@/components/bookings/BookingTimeline";
 
 const STATUS_COLORS: Record<string, string> = {
   CONFIRMED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -87,7 +88,7 @@ export default function Bookings() {
       className="transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] bg-white/60 dark:bg-black/40 backdrop-blur-xl border-white/40 dark:border-white/10 rounded-2xl overflow-hidden group"
     >
       <CardContent className="p-5 md:p-6">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <Link href={`/jobs/${b.jobId}`}>
@@ -100,6 +101,9 @@ export default function Bookings() {
                   <Hash className="w-3 h-3" />{b.job.referenceCode}
                 </span>
               )}
+            </div>
+            <div className="mb-3">
+              <BookingTimeline booking={b} compact />
             </div>
             {b.professional && (
               <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
@@ -129,10 +133,7 @@ export default function Bookings() {
               )}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-3 shrink-0 w-full md:w-auto">
-            <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider", STATUS_COLORS[b.status] || "bg-muted text-muted-foreground")}>
-              {b.status.replace("_", " ")}
-            </span>
+          <div className="flex flex-col items-end gap-3 shrink-0 w-full md:w-auto mt-auto">
             <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
               {(b.conversationId || b.professionalId) && (
                 <Button

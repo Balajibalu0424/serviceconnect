@@ -348,7 +348,7 @@ function validateProfessionalProfileDraft(
     .map((val) => resolveCategoryId(val, categories))
     .filter((c): c is CategoryOption => c !== undefined);
   // Deduplicate by ID
-  const uniqueResolved = [...new Map(resolvedCategories.map((c) => [c.id, c])).values()];
+  const uniqueResolved = Array.from(new Map(resolvedCategories.map((c) => [c.id, c])).values());
   const rawCategoryIds = uniqueResolved.map((c) => c.id);
   const categoryLabels = uniqueResolved.map((c) => c.name);
 

@@ -12,6 +12,7 @@ import {
   Bell, AlertTriangle, Wrench
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { ProfileCompleteness } from "@/components/pro/ProfileCompleteness";
 
 export default function ProDashboard() {
   const { user } = useAuth();
@@ -39,8 +40,8 @@ export default function ProDashboard() {
     <DashboardLayout>
       <div className="p-4 md:p-8 space-y-8 max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div className="space-y-1.5">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="space-y-1.5 flex-1">
             <h1 className="text-3xl md:text-4xl font-bold tracking-tight font-outfit text-foreground">
               Welcome back, <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-indigo-600 dark:from-primary dark:to-indigo-400">{user?.firstName}</span>!
             </h1>
@@ -48,11 +49,18 @@ export default function ProDashboard() {
               Your professional command center. Find leads, manage bookings, and grow your business.
             </p>
           </div>
-          <Link href="/pro/feed">
-            <Button className="gap-2 shadow-lg shadow-primary/20 rounded-xl px-6" size="lg">
-              <Briefcase className="w-5 h-5" /> Browse Job Feed
-            </Button>
-          </Link>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 shrink-0">
+            {profile && user && (
+              <div className="w-full sm:w-64 bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-border/50 p-4 rounded-2xl shadow-sm">
+                <ProfileCompleteness user={user} profile={profile} compact />
+              </div>
+            )}
+            <Link href="/pro/feed">
+              <Button className="gap-2 shadow-lg shadow-primary/20 rounded-xl px-6 h-full min-h-[4rem]" size="lg">
+                <Briefcase className="w-5 h-5" /> Browse Job Feed
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Category setup banner */}

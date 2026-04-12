@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { User, Lock, Phone, Mail, Camera, CheckCircle2, XCircle, Bell } from "lucide-react";
@@ -23,6 +24,21 @@ export default function Settings() {
   const [phone, setPhone] = useState((user as any)?.phone || "");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [profileLoading, setProfileLoading] = useState(false);
+  
+  // Notification Preferences state
+  const defaultPrefs = { email: true, sms: true, push: true };
+  const userPrefs = (user as any)?.notificationPreferences || defaultPrefs;
+  const [notificationPreferences, setNotificationPreferences] = useState(userPrefs);
+
+  useEffect(() => {
+    if (user) {
+      setFirstName(user.firstName || "");
+      setLastName(user.lastName || "");
+      setPhone((user as any).phone || "");
+      setAvatarUrl(user.avatarUrl || "");
+      setNotificationPreferences((user as any).notificationPreferences || defaultPrefs);
+    }
+  }, [user]);
 
   // Password state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -49,6 +65,7 @@ export default function Settings() {
       const payload: Record<string, unknown> = {
         phone,
         avatarUrl: avatarUrl || undefined,
+        notificationPreferences,
       };
       // Professionals can edit their name; customers cannot (server enforces this too)
       if (!isCustomer) {
@@ -88,6 +105,22 @@ export default function Settings() {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
       setPwLoading(false); }
+  };
+
+  const updatePreference = async (key: keyof typeof notificationPreferences, checked: boolean) => {
+    const newPrefs = { ...notificationPreferences, [key]: checked };
+    setNotificationPreferences(newPrefs);
+    
+    // Auto-save notification preference immediately
+    try {
+      const res = await apiRequest("PATCH", "/api/auth/profile", { notificationPreferences: newPrefs });
+      if (!res.ok) throw new Error((await res.json()).error);
+      await refreshUser();
+      toast({ title: "Preferences updated" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+      setNotificationPreferences(notificationPreferences); // revert on error
+    }
   };
 
   return (
@@ -303,7 +336,7 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Account Info — no internal IDs shown to customers */}
+        {/* Account Info */}
         <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
           <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
             <CardTitle className="text-base font-heading font-semibold text-foreground/80">Account</CardTitle>
@@ -326,7 +359,7 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Notification preferences placeholder */}
+        {/* Notification preferences */}
         <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
           <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
             <CardTitle className="text-base font-heading font-semibold text-foreground/80 flex items-center gap-2">
@@ -334,29 +367,42 @@ export default function Settings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-5 pb-4 space-y-3">
-            <p className="text-sm text-muted-foreground">In-app notifications are enabled for all important activity on your account.</p>
-            <div className="flex items-center justify-between py-2 px-3 bg-muted/20 rounded-xl border border-border/30">
-              <div>
-                <p className="text-sm font-medium">New quotes</p>
-                <p className="text-xs text-muted-foreground">When a professional submits a quote on your job</p>
+            <p className="text-sm text-muted-foreground mb-4">Choose how you want to be notified about activity on your account. Settings are saved automatically.</p>
+            
+            <div className="flex items-center justify-between py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
+              <div className="space-y-0.5">
+                <Label className="text-base">Email Notifications</Label>
+                <p className="text-xs text-muted-foreground">Receive quotes, receipts, and important updates via email</p>
               </div>
-              <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" title="Enabled" />
+              <Switch 
+                checked={notificationPreferences.email} 
+                onCheckedChange={(checked) => updatePreference("email", checked)} 
+              />
             </div>
-            <div className="flex items-center justify-between py-2 px-3 bg-muted/20 rounded-xl border border-border/30">
-              <div>
-                <p className="text-sm font-medium">Booking updates</p>
-                <p className="text-xs text-muted-foreground">When your booking status changes</p>
+
+            <div className="flex items-center justify-between py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
+              <div className="space-y-0.5">
+                <Label className="text-base">SMS Notification</Label>
+                <p className="text-xs text-muted-foreground">Get text messages for time-sensitive booking alerts</p>
               </div>
-              <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" title="Enabled" />
+              <Switch 
+                checked={notificationPreferences.sms} 
+                onCheckedChange={(checked) => updatePreference("sms", checked)} 
+              />
             </div>
-            <div className="flex items-center justify-between py-2 px-3 bg-muted/20 rounded-xl border border-border/30">
-              <div>
-                <p className="text-sm font-medium">Messages</p>
-                <p className="text-xs text-muted-foreground">When a professional sends you a message</p>
+
+            <div className="flex items-center justify-between py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
+              <div className="space-y-0.5">
+                <Label className="text-base">Push Notifications</Label>
+                <p className="text-xs text-muted-foreground">Deliver notifications to your device natively</p>
               </div>
-              <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" title="Enabled" />
+              <Switch 
+                checked={notificationPreferences.push} 
+                onCheckedChange={(checked) => updatePreference("push", checked)} 
+              />
             </div>
-            <p className="text-xs text-muted-foreground">Email notification preferences coming soon.</p>
+            
+            <p className="text-xs text-muted-foreground mt-4 italic">In-app notifications (the bell icon) will always remain enabled for important account activity.</p>
           </CardContent>
         </Card>
       </div>

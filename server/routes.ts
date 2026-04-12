@@ -311,6 +311,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       onboardingCompleted: user.onboardingCompleted,
       creditBalance: user.creditBalance,
       createdAt: user.createdAt,
+      notificationPreferences: (user as any).notificationPreferences || { email: true, sms: true, push: true },
     };
     return res.json({ ...safeUser, profile });
   });
@@ -718,20 +719,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     // Otherwise, auto-filter to the professional's registered service categories.
     if (categoryId) {
       conditions.push(eq(jobs.categoryId, categoryId));
-    } else if (scope !== "all") {
-      // Fetch the requesting professional's service categories
-      const [profile] = await db.select({ serviceCategories: professionalProfiles.serviceCategories })
+    }
+
+    if (scope !== "all") {
+      // Fetch the requesting professional's service categories and location settings
+      const [profile] = await db.select({ 
+        serviceCategories: professionalProfiles.serviceCategories,
+        lat: professionalProfiles.lat,
+        lng: professionalProfiles.lng,
+        radiusKm: professionalProfiles.radiusKm,
+        serviceAreas: professionalProfiles.serviceAreas
+      })
         .from(professionalProfiles)
         .where(eq(professionalProfiles.userId, req.user!.userId));
 
       const proCats: string[] = profile?.serviceCategories ?? [];
 
-      if (proCats.length > 0) {
-        // Only show jobs matching the pro's registered categories
-        conditions.push(inArray(jobs.categoryId, proCats));
-      } else {
-        // Defensive: pro has no categories — return empty result with a hint
-        return res.json({ jobs: [], noCategories: true });
+      if (!categoryId) {
+        if (proCats.length > 0) {
+          // Only show jobs matching the pro's registered categories
+          conditions.push(inArray(jobs.categoryId, proCats));
+        } else {
+          // Defensive: pro has no categories — return empty result with a hint
+          return res.json({ jobs: [], noCategories: true });
+        }
+      }
+
+      // Location matching logic
+      if (profile?.lat && profile?.lng) {
+        // Haversine formula (distance in km)
+        const radius = profile.radiusKm || 25;
+        const lat = Number(profile.lat);
+        const lng = Number(profile.lng);
+        
+        // If the job has lat/lng, we use exact math.
+        // Or if job has no lat/lng, we allow it (graceful degradation) unless strictly filtered.
+        // Actually, let's filter if job has lat/lng, OR fallback to substring matching on locationTown
+        conditions.push(
+          sql`
+            (${jobs.lat} IS NULL) OR 
+            (
+              6371 * acos(
+                cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) * 
+                cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) + 
+                sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+              ) <= ${radius}
+            )
+          `
+        );
+      } else if (profile?.serviceAreas && profile.serviceAreas.length > 0) {
+        // Fallback: If Pro has no lat/lng but has text regions, try ilike on towns
+        const areaConditions = profile.serviceAreas.map(area => 
+          sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`
+        );
+        conditions.push(or(...areaConditions));
       }
     }
 
@@ -1329,43 +1370,86 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/quotes", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const [userRow] = await db.select().from(users).where(eq(users.id, userId));
+      const filterJobId = req.query.jobId as string | undefined;
+
+      const [userRow] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, userId));
       if (!userRow) return res.status(404).json({ error: "User not found" });
 
       let conditions: any[] = [];
       if (userRow.role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
       else conditions.push(eq(quotes.professionalId, userId));
 
-      const rawQuotes = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
+      // Optional single-job filtering — used by JobDetail so it doesn't fetch all quotes
+      if (filterJobId) conditions.push(eq(quotes.jobId, filterJobId));
 
-      // Enrich with job + category + conversation + professional info (for customer-facing quote cards)
-      const enriched = await Promise.all(rawQuotes.map(async (q) => {
-        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId, referenceCode: jobs.referenceCode, locationText: jobs.locationText, locationEircode: jobs.locationEircode })
-          .from(jobs).where(eq(jobs.id, q.jobId));
-        const [cat] = job?.categoryId
-          ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId))
-          : [null];
-        const [conv] = await db.select({ id: conversations.id }).from(conversations)
-          .where(and(eq(conversations.jobId, q.jobId)))
-          .limit(1);
-        // Enrich with professional user info + rating for customer-facing quote display
-        const [proUser] = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
-          .from(users).where(eq(users.id, q.professionalId));
-        const [proProfile] = await db.select({ ratingAvg: professionalProfiles.ratingAvg, totalReviews: professionalProfiles.totalReviews })
-          .from(professionalProfiles).where(eq(professionalProfiles.userId, q.professionalId));
-        const professional = proUser ? {
-          ...proUser,
-          ratingAvg: proProfile?.ratingAvg ?? null,
-          totalReviews: proProfile?.totalReviews ?? 0,
-        } : null;
-        return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null, professional };
+      // ─── Single pass: quotes + jobs + categories via JOIN (eliminates per-quote job/cat queries) ───
+      const rows = await db.select({
+        quote: quotes,
+        jobId:           jobs.id,
+        jobTitle:        jobs.title,
+        jobStatus:       jobs.status,
+        jobRefCode:      jobs.referenceCode,
+        jobLocationText: jobs.locationText,
+        jobLocationEirc: jobs.locationEircode,
+        catName:         serviceCategories.name,
+      })
+        .from(quotes)
+        .leftJoin(jobs, eq(quotes.jobId, jobs.id))
+        .leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id))
+        .where(and(...conditions))
+        .orderBy(desc(quotes.createdAt));
+
+      if (rows.length === 0) {
+        if (userRow.role === "PROFESSIONAL") return res.json({ quotes: [], archived: [] });
+        return res.json([]);
+      }
+
+      // ─── Batch fetch conversations for all unique jobIds in one query ────────────────────────────
+      const uniqueJobIds = Array.from(new Set(rows.map(r => r.jobId).filter(Boolean))) as string[];
+      const convRows = uniqueJobIds.length > 0
+        ? await db.select({ id: conversations.id, jobId: conversations.jobId })
+            .from(conversations)
+            .where(inArray(conversations.jobId, uniqueJobIds))
+        : [];
+      // Keep only one conversation per job (latest wins, order by id desc approximation)
+      const jobToConvId: Record<string, string> = {};
+      for (const c of convRows) { if (c.jobId) jobToConvId[c.jobId] = c.id; }
+
+      // ─── For customer-facing: batch fetch professional info ──────────────────────────────────────
+      let proInfoMap: Record<string, { id: string; firstName: string; lastName: string; avatarUrl: string | null; ratingAvg: string | null; totalReviews: number }> = {};
+      if (userRow.role === "CUSTOMER") {
+        const uniqueProIds = Array.from(new Set(rows.map(r => r.quote.professionalId).filter(Boolean)));
+        if (uniqueProIds.length > 0) {
+          const proUsers = await db.select({
+            id: users.id, firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl,
+            ratingAvg: professionalProfiles.ratingAvg, totalReviews: professionalProfiles.totalReviews,
+          })
+            .from(users)
+            .leftJoin(professionalProfiles, eq(professionalProfiles.userId, users.id))
+            .where(inArray(users.id, uniqueProIds));
+          for (const p of proUsers) {
+            proInfoMap[p.id] = { id: p.id, firstName: p.firstName, lastName: p.lastName, avatarUrl: p.avatarUrl, ratingAvg: p.ratingAvg, totalReviews: p.totalReviews ?? 0 };
+          }
+        }
+      }
+
+      // ─── Assemble enriched response ──────────────────────────────────────────────────────────────
+      const enriched = rows.map(r => ({
+        ...r.quote,
+        job: r.jobId ? {
+          id: r.jobId, title: r.jobTitle, status: r.jobStatus,
+          referenceCode: r.jobRefCode, locationText: r.jobLocationText, locationEircode: r.jobLocationEirc,
+        } : null,
+        category: r.catName ? { name: r.catName } : null,
+        conversationId: r.jobId ? (jobToConvId[r.jobId] ?? null) : null,
+        professional: userRow.role === "CUSTOMER" ? (proInfoMap[r.quote.professionalId] ?? null) : undefined,
       }));
 
       // For professionals: separate active quotes from archived (closed/completed jobs)
       if (userRow.role === "PROFESSIONAL") {
         const activeStatuses = ["LIVE", "IN_DISCUSSION", "MATCHED", "BOOSTED"];
-        const active = enriched.filter(q => q.job && activeStatuses.includes(q.job.status));
-        const archived = enriched.filter(q => !q.job || !activeStatuses.includes(q.job.status));
+        const active = enriched.filter(q => q.job && activeStatuses.includes(q.job.status as string));
+        const archived = enriched.filter(q => !q.job || !activeStatuses.includes(q.job.status as string));
         return res.json({ quotes: active, archived });
       }
 
@@ -1374,6 +1458,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(500).json({ error: e.message });
     }
   });
+
 
   app.post("/api/quotes/:id/accept", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
@@ -3468,7 +3553,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const userId = req.user!.userId;
       const userRole = req.user!.role;
-      const { firstName, lastName, phone, avatarUrl } = req.body;
+      const { firstName, lastName, phone, avatarUrl, notificationPreferences } = req.body;
 
       // Customers cannot change their name after initial setup — admin override only
       if (userRole === "CUSTOMER" && (firstName !== undefined || lastName !== undefined)) {
@@ -3484,6 +3569,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (phone !== undefined) updateData.phone = phone || null;
       if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl || null;
+      if (notificationPreferences !== undefined) updateData.notificationPreferences = notificationPreferences;
 
       const [updated] = await db
         .update(users)
@@ -3504,6 +3590,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         avatarUrl: updated.avatarUrl,
         phoneVerified: (updated as any).phoneVerified ?? false,
         emailVerified: updated.emailVerified,
+        notificationPreferences: (updated as any).notificationPreferences || { email: true, sms: true, push: true },
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

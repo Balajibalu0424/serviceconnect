@@ -44,11 +44,13 @@ export default function JobDetail() {
   const [quoteSortBy, setQuoteSortBy] = useState<"amount" | "date">("amount");
 
   const { data: job, isLoading } = useQuery<any>({ queryKey: [`/api/jobs/${params?.id}`], enabled: !!params?.id });
-  const { data: allQuotes = [] } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
+  const { data: fetchedQuotes = [] } = useQuery<any[]>({
+    queryKey: [`/api/quotes?jobId=${params?.id}`],
+    enabled: !!params?.id
+  });
   const { data: allBookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
 
-  const quotesArray = Array.isArray(allQuotes) ? allQuotes : [];
-  const jobQuotes = quotesArray.filter((q: any) => q.jobId === params?.id);
+  const jobQuotes = Array.isArray(fetchedQuotes) ? fetchedQuotes : [];
   const acceptedQuote = jobQuotes.find((q: any) => q.status === "ACCEPTED");
 
   const sortedJobQuotes = [...jobQuotes].sort((a: any, b: any) => {
@@ -67,6 +69,7 @@ export default function JobDetail() {
       return res.json();
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/quotes?jobId=${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/quotes"] });
       qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/bookings"] });
@@ -85,6 +88,7 @@ export default function JobDetail() {
       return res.json();
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/quotes?jobId=${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/quotes"] });
       toast({ title: "Quote rejected" });
     },

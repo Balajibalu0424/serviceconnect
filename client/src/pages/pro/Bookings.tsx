@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
+import { BookingTimeline } from "@/components/bookings/BookingTimeline";
 
 const STATUS_COLORS: Record<string, string> = {
   CONFIRMED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -110,7 +111,7 @@ export default function ProBookings() {
       onClick={() => setSelectedBooking(b)}
     >
       <CardContent className="p-5 md:p-6">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <p className="font-heading font-bold text-lg group-hover:text-primary transition-colors">
@@ -121,6 +122,9 @@ export default function ProBookings() {
                   <Hash className="w-3 h-3" />{b.job.referenceCode}
                 </span>
               )}
+            </div>
+            <div className="mb-3">
+              <BookingTimeline booking={b} compact />
             </div>
             <div className="flex items-center gap-2 mt-1">
               <User className="w-3.5 h-3.5 text-muted-foreground" />
@@ -150,11 +154,8 @@ export default function ProBookings() {
               )}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2 shrink-0 w-full md:w-auto">
-            <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider", STATUS_COLORS[b.status] || "bg-muted text-muted-foreground")}>
-              {b.status.replace("_", " ")}
-            </span>
-            <Button variant="ghost" size="sm" className="gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-xs">
+          <div className="flex flex-col items-end gap-2 shrink-0 w-full md:w-auto h-full justify-between">
+            <Button variant="ghost" size="sm" className="gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-xs mt-auto">
               View Details <ArrowRight className="w-3 h-3" />
             </Button>
           </div>
@@ -216,25 +217,23 @@ export default function ProBookings() {
 
       <Dialog open={!!selectedBooking} onOpenChange={(open) => !open && setSelectedBooking(null)}>
         {selectedBooking && (
-          <DialogContent className="max-w-md bg-white/90 dark:bg-black/90 backdrop-blur-2xl border-white/20">
+          <DialogContent className="max-w-md bg-white/90 dark:bg-black/90 backdrop-blur-2xl border-white/20 max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-heading text-xl">{selectedBooking.job?.title || "Booking Details"}</DialogTitle>
-              <DialogDescription>
-                Created {formatDistanceToNow(new Date(selectedBooking.createdAt), { addSuffix: true })}
+              <DialogDescription className="flex items-center gap-1.5 mt-1">
+                {selectedBooking.job?.referenceCode && (
+                  <span className="font-mono bg-muted/50 text-foreground px-1.5 py-0.5 rounded text-xs">
+                    <Hash className="w-3 h-3 inline mr-0.5 relative -top-[1px]" />{selectedBooking.job.referenceCode}
+                  </span>
+                )}
+                <span>Created {formatDistanceToNow(new Date(selectedBooking.createdAt), { addSuffix: true })}</span>
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-5 py-2">
-              {/* Status */}
-              <div className="flex items-center gap-2">
-                <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider", STATUS_COLORS[selectedBooking.status] || "bg-muted text-muted-foreground")}>
-                  {selectedBooking.status.replace("_", " ")}
-                </span>
-                {selectedBooking.job?.referenceCode && (
-                  <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                    <Hash className="w-3 h-3" />{selectedBooking.job.referenceCode}
-                  </span>
-                )}
+            <div className="space-y-6 py-2">
+              {/* Timeline Status */}
+              <div className="bg-muted/10 rounded-xl p-4 border border-border/40">
+                <BookingTimeline booking={selectedBooking} />
               </div>
 
               {/* Customer */}

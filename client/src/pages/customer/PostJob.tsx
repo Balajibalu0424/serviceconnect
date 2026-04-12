@@ -663,7 +663,7 @@ export default function PostJob() {
               <Button variant="outline" className="gap-2" onClick={() => setStep(1)}>
                 <ArrowLeft className="w-4 h-4" /> Edit
               </Button>
-              <Button className="flex-1 gap-2" onClick={handleAccountSubmit} disabled={loading} data-testid="button-submit">
+              <Button className="flex-1 gap-2" onClick={() => handleAccountSubmit()} disabled={loading} data-testid="button-submit">
                 {loading ? "Processing..." : isLoggedIn ? "Post Job" : "Create Account & Post"} <ArrowRight className="w-4 h-4" />
               </Button>
             </div>

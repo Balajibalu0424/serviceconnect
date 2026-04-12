@@ -1249,3 +1249,67 @@ Deployed via `git push origin main` → Vercel auto-deploy (● Ready, ~1 min bu
 | Email notifications | ⚠️ Not present | In-app only; no transactional email |
 
 **Overall**: The platform is **launch-ready for a controlled beta / private launch**. Core marketplace flows (customer → post job → quotes → accept → booking → complete → review → repeat) are fully functional end-to-end. The remaining gaps are all in payment processing and transactional email, which are non-blockers for a closed beta with manual oversight.
+
+---
+
+## Session 7 — Post-Deploy Verification
+
+**Date:** 2026-04-12  
+**Commit:** `184c502` → `origin/main`  
+**Deployment URL:** https://codebasefull.vercel.app  
+**Test accounts used:** `alice@test.com` (Customer), `pro1@test.com` (Professional)
+
+### Verification Checklist & Results
+
+| # | Area | Check | Result |
+|---|------|--------|--------|
+| A | Actions Required count | Count shows only PENDING quotes — no accepted/rejected counted | ✅ PASS |
+| A | Actions Required count | Count updates after navigating back to dashboard | ✅ PASS |
+| B | Review form UX | Stars pre-selected at 5/5 on open | ✅ PASS |
+| B | Review form UX | Amber hint "Default rating is 5 stars — tap to change" shown until star tapped | ✅ PASS |
+| B | Review form UX | Submit without comment shows red inline error, not silent block | ✅ PASS |
+| B | Review form UX | Emoji rating labels update per star (Excellent ✨ / Terrible 😞 etc.) | ✅ PASS |
+| B | Review form UX | "Leave a Review" CTA disappears after successful submission | ✅ PASS |
+| C | Duplicate notifications | Multiple messages sent → only 1 unread NEW_MESSAGE notification per conversation | ✅ PASS |
+| C | Duplicate notifications | QUOTE_ACCEPTED + BOOKING_CREATED no longer fires as two separate entries | ✅ PASS (legacy rows existed from pre-deploy; new events emit single notification) |
+| D | UI polish | Inline validation with red border and error text on review form | ✅ PASS |
+| D | UI polish | Loading/saving states display correctly ("Submitting…", "Signing in…") | ✅ PASS |
+| D | UI polish | Bookings empty state renders correctly with CTA | ✅ PASS |
+
+### Screenshot Evidence
+
+**Review Form — Initial State (5/5 pre-selected, amber hint visible):**
+Stars default to 5/5 on open. Amber micro-hint reads "Default rating is 5 stars — tap to change". Textarea shows helpful placeholder. Submit button is enabled but validates on click.
+
+**Review Form — Validation Error (empty comment, Submit clicked):**
+Red border appears on textarea. Inline red error text: "Please write a comment before submitting." Form does not close.
+
+**Review Form — Rating Change:**
+After tapping 1-star, emoji label updates to "Terrible 😞 — 1/5". Label turns yellow/amber. Amber hint disappears (rating now intentional).
+
+**Post-Submission State:**
+"Leaking kitchen tap repair" job page shows NO "Leave a Review" CTA after successful submission. Only "View Booking" and "Open Chat" remain.
+
+**Customer Dashboard — Actions Required:**
+Shows "3 quotes waiting for your decision" and "4 unread notifications" — both accurate counts reflecting only PENDING quotes.
+
+**Professional Dashboard — Actions Required:**
+Shows "8 quotes awaiting customer response" and "1 active booking in progress" correctly scoped to their own submissions.
+
+### Remaining Issues
+
+| Severity | Issue | Notes |
+|----------|-------|-------|
+| Info | Pre-deploy legacy notifications | Pro1 has older "QUOTE_ACCEPTED" + "BOOKING_CREATED" pairs from events before the fix was deployed. These are read-only historical records and will not increase. New events (post-deploy) emit only the single combined notification. |
+| Info | Quote count (customer Actions Required) shows 3 | These are genuinely PENDING quotes from alice's live jobs — correct behaviour. No false positives observed. |
+
+### Summary
+
+All four Session 7 fixes are **verified in production**:
+
+1. ✅ **Stale count** — Dashboard refreshes quote count on every mount and window focus. Count reflects only PENDING quotes.
+2. ✅ **Review form UX** — Stars pre-selected, clear hint, emoji labels, inline errors, CTA removes on success.
+3. ✅ **Duplicate NEW_MESSAGE notifications** — Upsert logic confirmed working; 3 messages sent → 1 notification visible.
+4. ✅ **QUOTE_ACCEPTED + BOOKING_CREATED duplicate** — Consolidated to single combined notification for all new events.
+
+**Platform stability assessment:** All four targeted reconciliation items are resolved. No regressions observed. Platform remains beta-launch-ready.

@@ -12,9 +12,10 @@ import { Separator } from "@/components/ui/separator";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { Star, Briefcase, TrendingUp, CheckCircle2, Wrench, ExternalLink } from "lucide-react";
+import { Star, Briefcase, TrendingUp, CheckCircle2, Wrench, ExternalLink, MapPin } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ReviewReplyForm } from "@/components/reviews/ReviewReplyForm";
+import { ProfileCompleteness } from "@/components/pro/ProfileCompleteness";
 
 export default function ProProfileEditor() {
   const { user, refreshUser } = useAuth();
@@ -31,6 +32,10 @@ export default function ProProfileEditor() {
     bio: "",
     website: "",
     serviceAreas: "",
+    credentials: "",
+    radiusKm: "25",
+    lat: "",
+    lng: "",
   });
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
@@ -44,6 +49,10 @@ export default function ProProfileEditor() {
         bio: profile.bio || "",
         website: profile.website || "",
         serviceAreas: profile.serviceAreas || "",
+        credentials: profile.credentials || "",
+        radiusKm: profile.radiusKm != null ? String(profile.radiusKm) : "25",
+        lat: profile.lat || "",
+        lng: profile.lng || "",
       });
       // Pre-populate selected categories (stored as UUID array)
       setSelectedCategories(profile.serviceCategories || []);
@@ -60,6 +69,10 @@ export default function ProProfileEditor() {
         website: form.website || undefined,
         serviceAreas: form.serviceAreas || undefined,
         serviceCategories: selectedCategories,
+        credentials: form.credentials || null,
+        radiusKm: form.radiusKm ? parseInt(form.radiusKm) : 25,
+        lat: form.lat ? parseFloat(form.lat) : null,
+        lng: form.lng ? parseFloat(form.lng) : null,
       });
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
@@ -111,6 +124,10 @@ export default function ProProfileEditor() {
           <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">My Profile</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage your professional presence and details</p>
         </div>
+
+        {profile && user && (
+          <ProfileCompleteness user={user} profile={profile} />
+        )}
 
         {/* Header card */}
         <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
@@ -230,6 +247,54 @@ export default function ProProfileEditor() {
                     data-testid="input-service-areas"
                   />
                   <p className="text-xs text-muted-foreground mt-1">Comma-separated list of counties, cities, or areas you serve</p>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <Label className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5" /> Base Lat</Label>
+                    <Input
+                      type="number"
+                      step="0.000001"
+                      placeholder="e.g. 53.3498"
+                      value={form.lat}
+                      onChange={e => setForm(f => ({ ...f, lat: e.target.value }))}
+                      data-testid="input-lat"
+                    />
+                  </div>
+                  <div>
+                    <Label>Base Lng</Label>
+                    <Input
+                      type="number"
+                      step="0.000001"
+                      placeholder="e.g. -6.2603"
+                      value={form.lng}
+                      onChange={e => setForm(f => ({ ...f, lng: e.target.value }))}
+                      data-testid="input-lng"
+                    />
+                  </div>
+                  <div>
+                    <Label>Max Radius (km)</Label>
+                    <Input
+                      type="number" min="1"
+                      placeholder="e.g. 25"
+                      value={form.radiusKm}
+                      onChange={e => setForm(f => ({ ...f, radiusKm: e.target.value }))}
+                      data-testid="input-radius"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground -mt-3">Lat/Lng and Radius are used for matching jobs in your feed. Note: A proper geocoder will automate lat/lng fetching later.</p>
+
+                <div>
+                  <Label>Credentials, Certifications, or Licenses</Label>
+                  <Textarea
+                    placeholder="e.g. RGI Registered, Safe Pass, Plumbers Union ID..."
+                    value={form.credentials}
+                    onChange={e => setForm(f => ({ ...f, credentials: e.target.value }))}
+                    rows={2}
+                    data-testid="input-credentials"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Adding your credentials significantly improves your profile completeness score.</p>
                 </div>
                 <Button onClick={() => updateProfile.mutate()} disabled={updateProfile.isPending} className="rounded-xl px-6 h-11 w-full sm:w-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all mt-2" data-testid="button-save-business">
                   {updateProfile.isPending ? "Saving..." : "Save Business Info"}

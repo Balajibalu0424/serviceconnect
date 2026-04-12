@@ -43525,6 +43525,7 @@ var users = pgTable("users", {
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   firstJobId: varchar("first_job_id"),
   creditBalance: integer("credit_balance").notNull().default(0),
+  notificationPreferences: json("notification_preferences").$type().default({ email: true, sms: true, push: true }),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
   deletedAt: timestamp("deleted_at")
@@ -46846,7 +46847,7 @@ You need to collect the following information conversationally:
 2. Location
 3. Urgency (Low, Normal, High, Urgent)
 4. Budget (optional, but good to ask)
-5. The most appropriate category from this list (return the exact ID value):
+5. The most appropriate category from this list (use the exact ID in extractedData.categoryId, but NEVER mention the ID in your reply):
 ${catList}
 ${!isLoggedIn ? `6. First Name
 7. Last Name
@@ -46855,6 +46856,8 @@ ${!isLoggedIn ? `6. First Name
 (Since the user is not logged in, ask for their name and contact info so we can set up their account.)` : ""}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional. You do NOT have to ask about budget or phone number if they provide everything else, but you must ask for Name and Email if they are not logged in.
+
+IMPORTANT: The "reply" field is shown directly to the user. NEVER include UUIDs, category IDs, or technical identifiers in the reply. Only use human-readable category names (e.g. "Electrical", "Plumbing") in the reply.
 
 CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have enough info to post the job (at minimum: description, location, and category).
 
@@ -46879,15 +46882,17 @@ Return ONLY valid JSON in this format:
 }`;
   const proPrompt = `You are ServiceConnect's AI onboarding assistant. Your goal is to help a PROFESSIONAL sign up to the platform.
 You need to collect the following information conversationally:
-1. What services they offer (map to category IDs from the list below \u2014 return the exact ID values)
+1. What services they offer (map to category IDs from the list below \u2014 return the exact ID values in extractedData.categoryIds, but NEVER mention IDs in your reply)
 2. Their base location and service areas they cover
 3. Years of experience
 4. A short bio/description of their business (at least 30 words \u2014 describe what they do, their experience, and what makes them good)
-Here are the available service categories (use the exact ID values in categoryIds):
+Here are the available service categories (use the exact ID values in categoryIds, but only use the human-readable names in your reply):
 ${catList}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
 When a professional describes their trade (e.g. "I'm a plumber"), immediately match it to the best category ID(s) from the list above.
+
+IMPORTANT: The "reply" field is shown directly to the user. NEVER include UUIDs, category IDs, or technical identifiers in the reply. Only use human-readable category names (e.g. "Electrical", "Plumbing") in the reply.
 
 CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have at minimum: services/categories, location, and a bio of at least 30 words.
 
@@ -52819,7 +52824,7 @@ function resolveCategoryId(value, categories) {
 function validateProfessionalProfileDraft(input, categories) {
   const rawInputIds = input?.categoryIds?.filter(Boolean) ?? [];
   const resolvedCategories = rawInputIds.map((val) => resolveCategoryId(val, categories)).filter((c) => c !== void 0);
-  const uniqueResolved = [...new Map(resolvedCategories.map((c) => [c.id, c])).values()];
+  const uniqueResolved = Array.from(new Map(resolvedCategories.map((c) => [c.id, c])).values());
   const rawCategoryIds = uniqueResolved.map((c) => c.id);
   const categoryLabels = uniqueResolved.map((c) => c.name);
   const location = String(input?.location ?? "").trim();
@@ -53341,6 +53346,19 @@ async function createNotification(userIdOrRole, type, title, message, data = {})
       }
       return;
     }
+    const dataAny = data;
+    const jobId = dataAny?.jobId;
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1e3);
+    const dupConditions = [
+      eq(notifications.userId, userIdOrRole),
+      eq(notifications.type, type),
+      gte(notifications.createdAt, fiveMinutesAgo)
+    ];
+    if (jobId) {
+      dupConditions.push(sql`${notifications.data}->>'jobId' = ${String(jobId)}`);
+    }
+    const recentDup = await db.select({ id: notifications.id }).from(notifications).where(and(...dupConditions)).limit(1);
+    if (recentDup.length > 0) return;
     await db.insert(notifications).values({ userId: userIdOrRole, type, title, message, data });
     try {
       await pusher.trigger(`private-user-${userIdOrRole}`, "new_notification", { type, title, message, data });
@@ -53526,7 +53544,8 @@ async function registerRoutes(httpServer, app2) {
       phoneVerified: user.phoneVerified ?? false,
       onboardingCompleted: user.onboardingCompleted,
       creditBalance: user.creditBalance,
-      createdAt: user.createdAt
+      createdAt: user.createdAt,
+      notificationPreferences: user.notificationPreferences || { email: true, sms: true, push: true }
     };
     return res.json({ ...safeUser, profile });
   });
@@ -53589,19 +53608,109 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.post("/api/ai/onboarding-chat", async (req, res) => {
-    return res.status(410).json({
-      error: "This onboarding endpoint has been replaced. Use /api/onboarding/sessions instead."
-    });
+    try {
+      const { messages: messages2, mode = "CUSTOMER", isLoggedIn = true } = req.body;
+      if (!Array.isArray(messages2) || messages2.length === 0) {
+        return res.status(400).json({ error: "messages must be a non-empty array" });
+      }
+      const cats = await db.select({ id: serviceCategories.id, name: serviceCategories.name, slug: serviceCategories.slug }).from(serviceCategories).where(eq(serviceCategories.isActive, true));
+      const result = await handleOnboardingChat(messages2, mode, cats, isLoggedIn);
+      return res.json(result);
+    } catch (err) {
+      console.error("[onboarding-chat]", err);
+      return res.status(500).json({ error: err.message || "AI service unavailable" });
+    }
   });
   app2.post("/api/onboarding/customer", async (req, res) => {
-    return res.status(410).json({
-      error: "Customer onboarding now runs through the role-aware onboarding flow at /register."
-    });
+    try {
+      const {
+        firstName,
+        lastName,
+        email,
+        password,
+        phone,
+        title,
+        description,
+        categoryId,
+        locationText,
+        urgency = "NORMAL",
+        budgetMin,
+        budgetMax,
+        preferredDate
+      } = req.body;
+      if (!firstName || !lastName || !email || !password) {
+        return res.status(400).json({ error: "First name, last name, email and password are required" });
+      }
+      if (!title || !description) {
+        return res.status(400).json({ error: "Job title and description are required" });
+      }
+      const normalizedEmail = email.trim().toLowerCase();
+      const [existing] = await db.select().from(users).where(eq(users.email, normalizedEmail));
+      if (existing) {
+        return res.status(409).json({ error: "An account with this email already exists. Please log in." });
+      }
+      const passwordHash = await hashPassword(password);
+      const [newUser] = await db.insert(users).values({
+        email: normalizedEmail,
+        passwordHash,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phone: phone?.trim() || null,
+        role: "CUSTOMER",
+        status: "ACTIVE",
+        emailVerified: false,
+        onboardingCompleted: false,
+        creditBalance: 0
+      }).returning();
+      const referenceCode = "SC-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const [newJob] = await db.insert(jobs).values({
+        customerId: newUser.id,
+        categoryId: categoryId || null,
+        title: title.trim(),
+        description: description.trim(),
+        locationText: locationText?.trim() || null,
+        urgency,
+        budgetMin: budgetMin ? String(budgetMin) : null,
+        budgetMax: budgetMax ? String(budgetMax) : null,
+        preferredDate: preferredDate || null,
+        status: "DRAFT",
+        referenceCode
+      }).returning();
+      await issueVerificationChallenge({ userId: newUser.id, channel: "EMAIL", target: normalizedEmail, purpose: "ONBOARDING" });
+      const { accessToken, refreshToken } = generateTokens(newUser.id, newUser.role);
+      await db.insert(userSessions).values({
+        userId: newUser.id,
+        refreshTokenHash: Buffer.from(refreshToken).toString("base64"),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3),
+        ipAddress: req.ip || null
+      });
+      return res.status(201).json({ accessToken, refreshToken, jobId: newJob.id });
+    } catch (err) {
+      console.error("[onboarding/customer]", err);
+      return res.status(500).json({ error: err.message || "Failed to create account" });
+    }
   });
   app2.post("/api/onboarding/customer/verify", requireAuth, async (req, res) => {
-    return res.status(410).json({
-      error: `Customer onboarding verification has moved into the onboarding session flow. Demo OTP remains ${DEMO_OTP_CODE}.`
-    });
+    try {
+      const { otp } = req.body;
+      if (!otp) return res.status(400).json({ error: "OTP is required" });
+      const userId = req.user.userId;
+      const isValid2 = await verifyVerificationChallenge({ userId, channel: "EMAIL", code: otp });
+      if (!isValid2) {
+        return res.status(400).json({ error: `Invalid or expired code. Demo code: ${DEMO_OTP_CODE}` });
+      }
+      await db.update(users).set({ emailVerified: true, onboardingCompleted: true }).where(eq(users.id, userId));
+      const [fullUser] = await db.select().from(users).where(eq(users.id, userId));
+      const [draftJob] = await db.select().from(jobs).where(and(eq(jobs.customerId, userId), eq(jobs.status, "DRAFT"))).orderBy(desc(jobs.createdAt)).limit(1);
+      if (draftJob) {
+        await db.update(jobs).set({ status: "LIVE" }).where(eq(jobs.id, draftJob.id));
+        await createNotification("admin", "JOB_POSTED", "New Job Posted", `${fullUser?.firstName || "Customer"} posted a new job: ${draftJob.title}`);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      console.error("[onboarding/customer/verify]", err);
+      return res.status(500).json({ error: err.message || "Verification failed" });
+    }
   });
   app2.get("/api/categories", async (_req, res) => {
     const cats = await db.select().from(serviceCategories).where(eq(serviceCategories.isActive, true)).orderBy(asc(serviceCategories.sortOrder));
@@ -53751,13 +53860,44 @@ async function registerRoutes(httpServer, app2) {
     ];
     if (categoryId) {
       conditions.push(eq(jobs.categoryId, categoryId));
-    } else if (scope !== "all") {
-      const [profile] = await db.select({ serviceCategories: professionalProfiles.serviceCategories }).from(professionalProfiles).where(eq(professionalProfiles.userId, req.user.userId));
+    }
+    if (scope !== "all") {
+      const [profile] = await db.select({
+        serviceCategories: professionalProfiles.serviceCategories,
+        lat: professionalProfiles.lat,
+        lng: professionalProfiles.lng,
+        radiusKm: professionalProfiles.radiusKm,
+        serviceAreas: professionalProfiles.serviceAreas
+      }).from(professionalProfiles).where(eq(professionalProfiles.userId, req.user.userId));
       const proCats = profile?.serviceCategories ?? [];
-      if (proCats.length > 0) {
-        conditions.push(inArray(jobs.categoryId, proCats));
-      } else {
-        return res.json({ jobs: [], noCategories: true });
+      if (!categoryId) {
+        if (proCats.length > 0) {
+          conditions.push(inArray(jobs.categoryId, proCats));
+        } else {
+          return res.json({ jobs: [], noCategories: true });
+        }
+      }
+      if (profile?.lat && profile?.lng) {
+        const radius = profile.radiusKm || 25;
+        const lat = Number(profile.lat);
+        const lng = Number(profile.lng);
+        conditions.push(
+          sql`
+            (${jobs.lat} IS NULL) OR 
+            (
+              6371 * acos(
+                cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) * 
+                cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) + 
+                sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+              ) <= ${radius}
+            )
+          `
+        );
+      } else if (profile?.serviceAreas && profile.serviceAreas.length > 0) {
+        const areaConditions = profile.serviceAreas.map(
+          (area) => sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`
+        );
+        conditions.push(or(...areaConditions));
       }
     }
     const liveJobs = await db.select({
@@ -53771,17 +53911,23 @@ async function registerRoutes(httpServer, app2) {
       const [myMatchbook] = await db.select().from(jobMatchbooks).where(and(eq(jobMatchbooks.jobId, row.job.id), eq(jobMatchbooks.professionalId, proId), isNull(jobMatchbooks.removedAt)));
       const [myUnlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, row.job.id), eq(jobUnlocks.professionalId, proId)));
       let unlockWithPhone = myUnlock || null;
-      if (myUnlock?.phoneUnlocked) {
-        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
-        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      if (myUnlock) {
+        if (myUnlock.phoneUnlocked) {
+          const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
+          unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+        }
+        const [conv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, row.job.id)).orderBy(desc(conversations.createdAt)).limit(1);
+        unlockWithPhone = { ...unlockWithPhone, conversationId: conv?.id ?? null };
       }
+      const [myQuote] = await db.select({ id: quotes.id, status: quotes.status }).from(quotes).where(and(eq(quotes.jobId, row.job.id), eq(quotes.professionalId, proId)));
       return {
         ...row.job,
         category: row.category,
         customer: row.customer,
         matchbookCount: matchbookCount[0].c,
         isMatchbooked: !!myMatchbook,
-        unlock: unlockWithPhone
+        unlock: unlockWithPhone,
+        myQuote: myQuote ? { id: myQuote.id, status: myQuote.status } : null
       };
     }));
     return res.json(result);
@@ -53792,9 +53938,13 @@ async function registerRoutes(httpServer, app2) {
     const result = await Promise.all(matchbooked.map(async (row) => {
       const [myUnlock] = await db.select().from(jobUnlocks).where(and(eq(jobUnlocks.jobId, row.job.id), eq(jobUnlocks.professionalId, proId)));
       let unlockWithPhone = myUnlock || null;
-      if (myUnlock?.phoneUnlocked) {
-        const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
-        unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+      if (myUnlock) {
+        if (myUnlock.phoneUnlocked) {
+          const [customerFull] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, row.job.customerId));
+          unlockWithPhone = { ...myUnlock, customerPhone: customerFull?.phone ?? null };
+        }
+        const [conv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, row.job.id)).orderBy(desc(conversations.createdAt)).limit(1);
+        unlockWithPhone = { ...unlockWithPhone, conversationId: conv?.id ?? null };
       }
       return { ...row, unlock: unlockWithPhone };
     }));
@@ -53904,6 +54054,22 @@ async function registerRoutes(httpServer, app2) {
         aiUrgencyKeywords: urgencyResult.detectedKeywords,
         updatedAt: /* @__PURE__ */ new Date()
       }).where(eq(jobs.id, req.params.id)).returning();
+      try {
+        const matchingPros = await db.select({ id: users.id }).from(users).innerJoin(professionalProfiles, eq(professionalProfiles.userId, users.id)).where(and(
+          eq(users.role, "PROFESSIONAL"),
+          eq(users.status, "ACTIVE"),
+          sql`${professionalProfiles.serviceCategories}::jsonb ? ${updated.categoryId}`
+        ));
+        const notifType = updated.aiIsUrgent ? "URGENT_JOB" : "NEW_JOB_AVAILABLE";
+        const notifTitle = updated.aiIsUrgent ? "\u{1F6A8} Urgent job near you" : "New job in your area";
+        const notifMsg = `${updated.title} \u2014 be first to quote.`;
+        await Promise.allSettled(
+          matchingPros.slice(0, 50).map(
+            (pro) => createNotification(pro.id, notifType, notifTitle, notifMsg, { jobId: updated.id, categoryId: updated.categoryId })
+          )
+        );
+      } catch (_fanoutErr) {
+      }
       return res.json(updated);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -54015,6 +54181,8 @@ async function registerRoutes(httpServer, app2) {
         const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
         responseData.customerPhone = customerUser?.phone ?? null;
       }
+      const [newConv] = await db.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.jobId, jobId))).orderBy(desc(conversations.createdAt)).limit(1);
+      responseData.conversationId = newConv?.id ?? null;
       return res.status(201).json(responseData);
     } catch (e) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
@@ -54057,7 +54225,8 @@ async function registerRoutes(httpServer, app2) {
         }
       });
       const [customerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, job.customerId));
-      return res.json({ success: true, customerPhone: customerUser?.phone ?? null });
+      const [existingConv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, jobId)).orderBy(desc(conversations.createdAt)).limit(1);
+      return res.json({ success: true, customerPhone: customerUser?.phone ?? null, conversationId: existingConv?.id ?? null });
     } catch (e) {
       return res.status(e.message === "Insufficient credits" ? 402 : 500).json({ error: e.message });
     }
@@ -54207,17 +54376,63 @@ async function registerRoutes(httpServer, app2) {
   app2.get("/api/quotes", requireAuth, async (req, res) => {
     try {
       const userId = req.user.userId;
-      const [userRow] = await db.select().from(users).where(eq(users.id, userId));
+      const filterJobId = req.query.jobId;
+      const [userRow] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, userId));
       if (!userRow) return res.status(404).json({ error: "User not found" });
       let conditions = [];
       if (userRow.role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
       else conditions.push(eq(quotes.professionalId, userId));
-      const rawQuotes = await db.select().from(quotes).where(and(...conditions)).orderBy(desc(quotes.createdAt));
-      const enriched = await Promise.all(rawQuotes.map(async (q) => {
-        const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status, categoryId: jobs.categoryId, referenceCode: jobs.referenceCode }).from(jobs).where(eq(jobs.id, q.jobId));
-        const [cat] = job?.categoryId ? await db.select({ name: serviceCategories.name }).from(serviceCategories).where(eq(serviceCategories.id, job.categoryId)) : [null];
-        const [conv] = await db.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.jobId, q.jobId))).limit(1);
-        return { ...q, job: job || null, category: cat || null, conversationId: conv?.id || null };
+      if (filterJobId) conditions.push(eq(quotes.jobId, filterJobId));
+      const rows = await db.select({
+        quote: quotes,
+        jobId: jobs.id,
+        jobTitle: jobs.title,
+        jobStatus: jobs.status,
+        jobRefCode: jobs.referenceCode,
+        jobLocationText: jobs.locationText,
+        jobLocationEirc: jobs.locationEircode,
+        catName: serviceCategories.name
+      }).from(quotes).leftJoin(jobs, eq(quotes.jobId, jobs.id)).leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id)).where(and(...conditions)).orderBy(desc(quotes.createdAt));
+      if (rows.length === 0) {
+        if (userRow.role === "PROFESSIONAL") return res.json({ quotes: [], archived: [] });
+        return res.json([]);
+      }
+      const uniqueJobIds = Array.from(new Set(rows.map((r) => r.jobId).filter(Boolean)));
+      const convRows = uniqueJobIds.length > 0 ? await db.select({ id: conversations.id, jobId: conversations.jobId }).from(conversations).where(inArray(conversations.jobId, uniqueJobIds)) : [];
+      const jobToConvId = {};
+      for (const c of convRows) {
+        if (c.jobId) jobToConvId[c.jobId] = c.id;
+      }
+      let proInfoMap = {};
+      if (userRow.role === "CUSTOMER") {
+        const uniqueProIds = Array.from(new Set(rows.map((r) => r.quote.professionalId).filter(Boolean)));
+        if (uniqueProIds.length > 0) {
+          const proUsers = await db.select({
+            id: users.id,
+            firstName: users.firstName,
+            lastName: users.lastName,
+            avatarUrl: users.avatarUrl,
+            ratingAvg: professionalProfiles.ratingAvg,
+            totalReviews: professionalProfiles.totalReviews
+          }).from(users).leftJoin(professionalProfiles, eq(professionalProfiles.userId, users.id)).where(inArray(users.id, uniqueProIds));
+          for (const p of proUsers) {
+            proInfoMap[p.id] = { id: p.id, firstName: p.firstName, lastName: p.lastName, avatarUrl: p.avatarUrl, ratingAvg: p.ratingAvg, totalReviews: p.totalReviews ?? 0 };
+          }
+        }
+      }
+      const enriched = rows.map((r) => ({
+        ...r.quote,
+        job: r.jobId ? {
+          id: r.jobId,
+          title: r.jobTitle,
+          status: r.jobStatus,
+          referenceCode: r.jobRefCode,
+          locationText: r.jobLocationText,
+          locationEircode: r.jobLocationEirc
+        } : null,
+        category: r.catName ? { name: r.catName } : null,
+        conversationId: r.jobId ? jobToConvId[r.jobId] ?? null : null,
+        professional: userRow.role === "CUSTOMER" ? proInfoMap[r.quote.professionalId] ?? null : void 0
       }));
       if (userRow.role === "PROFESSIONAL") {
         const activeStatuses = ["LIVE", "IN_DISCUSSION", "MATCHED", "BOOSTED"];
@@ -54235,6 +54450,7 @@ async function registerRoutes(httpServer, app2) {
       const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id));
       if (!quote) return res.status(404).json({ error: "Quote not found" });
       if (quote.customerId !== req.user.userId) return res.status(403).json({ error: "Forbidden" });
+      let createdBookingId = "";
       await db.transaction(async (tx) => {
         await tx.update(quotes).set({ status: "ACCEPTED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(quotes.id, quote.id));
         const [booking] = await tx.insert(bookings).values({
@@ -54245,6 +54461,7 @@ async function registerRoutes(httpServer, app2) {
           totalAmount: quote.amount,
           status: "CONFIRMED"
         }).returning();
+        createdBookingId = booking.id;
         await tx.update(jobs).set({ status: "MATCHED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, quote.jobId));
         await tx.update(quotes).set({ status: "REJECTED", updatedAt: /* @__PURE__ */ new Date() }).where(and(
           eq(quotes.jobId, quote.jobId),
@@ -54252,12 +54469,14 @@ async function registerRoutes(httpServer, app2) {
           ne(quotes.id, quote.id)
         ));
       });
+      const [jobConv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, quote.jobId)).orderBy(desc(conversations.createdAt)).limit(1);
+      const convId = jobConv?.id ?? null;
       await createNotification(
         quote.professionalId,
         "QUOTE_ACCEPTED",
-        "Your quote was accepted!",
-        "The customer has accepted your quote.",
-        { quoteId: quote.id, jobId: quote.jobId }
+        "Quote accepted \u2014 booking confirmed! \u{1F389}",
+        `The customer accepted your quote. A booking has been created \u2014 you can now arrange to begin work.`,
+        { quoteId: quote.id, jobId: quote.jobId, bookingId: createdBookingId, conversationId: convId }
       );
       return res.json({ success: true });
     } catch (e) {
@@ -54269,6 +54488,13 @@ async function registerRoutes(httpServer, app2) {
     if (!quote) return res.status(404).json({ error: "Quote not found" });
     if (quote.customerId !== req.user.userId) return res.status(403).json({ error: "Forbidden" });
     await db.update(quotes).set({ status: "REJECTED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(quotes.id, quote.id));
+    await createNotification(
+      quote.professionalId,
+      "QUOTE_REJECTED",
+      "Your quote was not accepted",
+      "The customer has declined your quote for this job. Keep trying \u2014 other jobs are waiting!",
+      { quoteId: quote.id, jobId: quote.jobId }
+    );
     return res.json({ success: true });
   });
   app2.get("/api/bookings", requireAuth, async (req, res) => {
@@ -54281,10 +54507,12 @@ async function registerRoutes(httpServer, app2) {
       const [customer] = await db.select().from(users).where(eq(users.id, b.customerId));
       const [professional] = await db.select().from(users).where(eq(users.id, b.professionalId));
       const [conv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, b.jobId)).limit(1);
+      const [existingReview] = await db.select({ id: reviews.id }).from(reviews).where(and(eq(reviews.bookingId, b.id), eq(reviews.reviewerId, b.customerId)));
       return {
         ...b,
         job,
         conversationId: conv?.id || null,
+        hasReview: !!existingReview,
         customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, avatarUrl: customer.avatarUrl, phone: customer.phone } : null,
         professional: professional ? { id: professional.id, firstName: professional.firstName, lastName: professional.lastName, businessName: null } : null
       };
@@ -54298,6 +54526,13 @@ async function registerRoutes(httpServer, app2) {
       return res.status(403).json({ error: "Forbidden. Only the assigned professional can mark this in progress." });
     }
     await db.update(bookings).set({ status: "IN_PROGRESS", updatedAt: /* @__PURE__ */ new Date() }).where(eq(bookings.id, req.params.id));
+    await createNotification(
+      booking.customerId,
+      "BOOKING_IN_PROGRESS",
+      "Work has started",
+      "Your professional has marked your booking as in progress.",
+      { bookingId: booking.id, jobId: booking.jobId }
+    );
     return res.json({ success: true });
   });
   app2.get("/api/bookings/:id", requireAuth, async (req, res) => {
@@ -54318,6 +54553,25 @@ async function registerRoutes(httpServer, app2) {
     await db.update(bookings).set({ status: "COMPLETED", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq(bookings.id, req.params.id));
     await db.update(jobs).set({ status: "COMPLETED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, booking.jobId));
     await db.update(conversations).set({ status: "ARCHIVED" }).where(eq(conversations.jobId, booking.jobId));
+    const callerId = req.user.userId;
+    if (callerId !== booking.professionalId) {
+      await createNotification(
+        booking.professionalId,
+        "BOOKING_COMPLETED",
+        "Booking marked complete",
+        "The job has been marked as complete. Encourage the customer to leave a review!",
+        { bookingId: booking.id, jobId: booking.jobId }
+      );
+    }
+    if (callerId !== booking.customerId) {
+      await createNotification(
+        booking.customerId,
+        "BOOKING_COMPLETED",
+        "Your booking is complete",
+        "The job has been completed. Share your experience by leaving a review.",
+        { bookingId: booking.id, jobId: booking.jobId }
+      );
+    }
     return res.json({ success: true });
   });
   app2.post("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
@@ -54329,6 +54583,26 @@ async function registerRoutes(httpServer, app2) {
       cancellationReason: reason || null,
       updatedAt: /* @__PURE__ */ new Date()
     }).where(eq(bookings.id, req.params.id));
+    const cancellerIdBooking = req.user.userId;
+    const reasonSuffix = reason ? `: "${reason}"` : ".";
+    if (cancellerIdBooking !== booking.professionalId) {
+      await createNotification(
+        booking.professionalId,
+        "BOOKING_CANCELLED",
+        "Booking cancelled",
+        `A booking has been cancelled${reasonSuffix}`,
+        { bookingId: booking.id, jobId: booking.jobId }
+      );
+    }
+    if (cancellerIdBooking !== booking.customerId) {
+      await createNotification(
+        booking.customerId,
+        "BOOKING_CANCELLED",
+        "Booking cancelled",
+        `Your booking has been cancelled${reasonSuffix}`,
+        { bookingId: booking.id, jobId: booking.jobId }
+      );
+    }
     return res.json({ success: true });
   });
   app2.post("/api/bookings/:id/review", requireAuth, async (req, res) => {
@@ -54371,6 +54645,13 @@ async function registerRoutes(httpServer, app2) {
           updatedAt: /* @__PURE__ */ new Date()
         }).where(eq(professionalProfiles.userId, booking.professionalId));
       }
+      await createNotification(
+        revieweeId,
+        "REVIEW_POSTED",
+        "You received a new review",
+        `A customer rated you ${rating} star${rating !== 1 ? "s" : ""}.`,
+        { reviewId: review.id, bookingId: booking.id, jobId: booking.jobId }
+      );
       return res.status(201).json(review);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -54656,7 +54937,27 @@ async function registerRoutes(httpServer, app2) {
       );
       const otherParticipants = await db.select({ userId: conversationParticipants.userId }).from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, convId), ne(conversationParticipants.userId, userId)));
       for (const p of otherParticipants) {
-        await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });
+        const [existingUnread] = await db.select({ id: notifications.id }).from(notifications).where(and(
+          eq(notifications.userId, p.userId),
+          eq(notifications.type, "NEW_MESSAGE"),
+          eq(notifications.isRead, false),
+          sql`(notifications.data->>'conversationId') = ${convId}`
+        )).limit(1);
+        if (existingUnread) {
+          await db.update(notifications).set({
+            message: processedContent.slice(0, 100),
+            createdAt: /* @__PURE__ */ new Date()
+          }).where(eq(notifications.id, existingUnread.id));
+          pusher.trigger(`private-user-${p.userId}`, "new_notification", {
+            type: "NEW_MESSAGE",
+            title: "New message",
+            message: processedContent.slice(0, 100),
+            data: { conversationId: convId }
+          }).catch(() => {
+          });
+        } else {
+          await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });
+        }
       }
       return res.status(201).json(msg);
     } catch (e) {
@@ -55399,8 +55700,29 @@ async function registerRoutes(httpServer, app2) {
       const [reviewer] = await db.select({ firstName: users.firstName }).from(users).where(eq(users.id, r.reviewerId));
       return { ...r, reviewerFirstName: reviewer?.firstName || "Customer" };
     }));
+    let resolvedCategoryNames = [];
+    if (profile?.serviceCategories && profile.serviceCategories.length > 0) {
+      const catIds = profile.serviceCategories.filter(
+        (c) => c.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+      );
+      const plainNames = profile.serviceCategories.filter(
+        (c) => !c.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+      );
+      if (catIds.length > 0) {
+        const catRows = await db.select({ id: serviceCategories.id, name: serviceCategories.name }).from(serviceCategories).where(inArray(serviceCategories.id, catIds));
+        const catMap = new Map(catRows.map((c) => [c.id, c.name]));
+        resolvedCategoryNames = [
+          ...catIds.map((id) => catMap.get(id) || id),
+          ...plainNames
+        ];
+      } else {
+        resolvedCategoryNames = plainNames;
+      }
+    }
     const safeProfile = profile ? {
       ...profile,
+      // Resolve category IDs to names for public display
+      serviceCategories: resolvedCategoryNames.length > 0 ? resolvedCategoryNames : profile.serviceCategories,
       // Strip sensitive verification docs from public view
       verificationDocumentUrl: void 0,
       verificationReviewNote: void 0
@@ -55936,7 +56258,7 @@ async function registerRoutes(httpServer, app2) {
     try {
       const userId = req.user.userId;
       const userRole = req.user.role;
-      const { firstName, lastName, phone, avatarUrl } = req.body;
+      const { firstName, lastName, phone, avatarUrl, notificationPreferences } = req.body;
       if (userRole === "CUSTOMER" && (firstName !== void 0 || lastName !== void 0)) {
         return res.status(403).json({
           error: "Your name cannot be changed. If you need a correction, please contact support."
@@ -55949,6 +56271,7 @@ async function registerRoutes(httpServer, app2) {
       }
       if (phone !== void 0) updateData.phone = phone || null;
       if (avatarUrl !== void 0) updateData.avatarUrl = avatarUrl || null;
+      if (notificationPreferences !== void 0) updateData.notificationPreferences = notificationPreferences;
       const [updated] = await db.update(users).set(updateData).where(eq(users.id, userId)).returning();
       const isCustomer = updated.role === "CUSTOMER";
       return res.json({
@@ -55961,7 +56284,8 @@ async function registerRoutes(httpServer, app2) {
         creditBalance: updated.creditBalance,
         avatarUrl: updated.avatarUrl,
         phoneVerified: updated.phoneVerified ?? false,
-        emailVerified: updated.emailVerified
+        emailVerified: updated.emailVerified,
+        notificationPreferences: updated.notificationPreferences || { email: true, sms: true, push: true }
       });
     } catch (err) {
       return res.status(500).json({ error: err.message });

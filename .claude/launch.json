@@ -4,7 +4,7 @@
     {
       "name": "serviceconnect",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["tsx", "server/index.ts"],
+      "runtimeArgs": ["tsx", "codebase_full/server/index.ts"],
       "port": 5000
     }
   ]

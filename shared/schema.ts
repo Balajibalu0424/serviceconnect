@@ -67,6 +67,11 @@ export const users = pgTable("users", {
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   firstJobId: varchar("first_job_id"),
   creditBalance: integer("credit_balance").notNull().default(0),
+  notificationPreferences: json("notification_preferences").$type<{
+    email: boolean;
+    sms: boolean;
+    push: boolean;
+  }>().default({ email: true, sms: true, push: true }),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
   deletedAt: timestamp("deleted_at"),
