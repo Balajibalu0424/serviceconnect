@@ -1412,12 +1412,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .limit(1);
       const convId = jobConv?.id ?? null;
 
-      await createNotification(quote.professionalId, "QUOTE_ACCEPTED", "Your quote was accepted!",
-        "The customer has accepted your quote.",
+      // Send ONE combined notification to the professional (previously two notifications were
+      // sent for the same event — QUOTE_ACCEPTED + BOOKING_CREATED — causing duplicate entries).
+      // Deep-link data includes both bookingId and conversationId for full navigation options.
+      await createNotification(quote.professionalId, "QUOTE_ACCEPTED", "Quote accepted — booking confirmed! \uD83C\uDF89",
+        `The customer accepted your quote. A booking has been created — you can now arrange to begin work.`,
         { quoteId: quote.id, jobId: quote.jobId, bookingId: createdBookingId, conversationId: convId });
-      await createNotification(quote.professionalId, "BOOKING_CREATED", "Booking confirmed!",
-        "A booking has been created. You can now arrange to begin work.",
-        { bookingId: createdBookingId, jobId: quote.jobId, conversationId: convId });
 
       return res.json({ success: true });
     } catch (e: any) {
@@ -1969,13 +1969,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         console.error("Pusher trigger error (message):", err)
       );
 
-      // Notify other participants
+      // Notify other participants — deduplicated per conversation.
+      // If an unread NEW_MESSAGE notification for this conversation already exists,
+      // update it in-place (update message + timestamp) instead of inserting a duplicate.
+      // This prevents notification spam when many messages are sent before the other party reads.
       const otherParticipants = await db.select({ userId: conversationParticipants.userId })
         .from(conversationParticipants)
         .where(and(eq(conversationParticipants.conversationId, convId), ne(conversationParticipants.userId, userId)));
 
       for (const p of otherParticipants) {
-        await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });
+        const [existingUnread] = await db.select({ id: notifications.id })
+          .from(notifications)
+          .where(and(
+            eq(notifications.userId, p.userId),
+            eq(notifications.type, "NEW_MESSAGE"),
+            eq(notifications.isRead, false),
+            sql`(notifications.data->>'conversationId') = ${convId}`
+          ))
+          .limit(1);
+
+        if (existingUnread) {
+          // Update the existing unread notification instead of creating a duplicate
+          await db.update(notifications)
+            .set({
+              message: processedContent.slice(0, 100),
+              createdAt: new Date(),
+            })
+            .where(eq(notifications.id, existingUnread.id));
+          // Still push real-time event so badge counter is accurate
+          pusher.trigger(`private-user-${p.userId}`, "new_notification", {
+            type: "NEW_MESSAGE", title: "New message",
+            message: processedContent.slice(0, 100), data: { conversationId: convId }
+          }).catch(() => {});
+        } else {
+          await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });
+        }
       }
 
       return res.status(201).json(msg);

@@ -35,6 +35,8 @@ export default function JobDetail() {
   const [boostOffer, setBoostOffer] = useState<{ fee: number; discountPct: number } | null>(null);
   const [showDeclineBoostConfirm, setShowDeclineBoostConfirm] = useState(false);
   const [reviewData, setReviewData] = useState({ rating: 5, comment: "" });
+  const [ratingTouched, setRatingTouched] = useState(false);
+  const [reviewSubmitError, setReviewSubmitError] = useState("");
   const [showReview, setShowReview] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({ title: "", description: "", locationText: "", locationTown: "", locationEircode: "", budgetMin: "", budgetMax: "", urgency: "NORMAL" });
@@ -184,21 +186,28 @@ export default function JobDetail() {
 
   const submitReview = useMutation({
     mutationFn: async () => {
-      // Use the already-loaded allBookings instead of re-fetching, and don't
-      // require acceptedQuote (cache may be stale for COMPLETED jobs)
+      // Validate before submitting
+      if (!reviewData.comment.trim()) throw new Error("Please write a comment before submitting");
+      // Use the already-loaded allBookings instead of re-fetching
       const booking = (allBookings as any[]).find((b: any) => b.jobId === params?.id);
       if (!booking) throw new Error("No booking found for this job");
-      if (!reviewData.comment.trim()) throw new Error("Please add a comment before submitting");
       const res = await apiRequest("POST", `/api/bookings/${booking.id}/review`, reviewData);
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
     onSuccess: () => {
       setShowReview(false);
+      setRatingTouched(false);
+      setReviewSubmitError("");
+      setReviewData({ rating: 5, comment: "" });
       qc.invalidateQueries({ queryKey: ["/api/bookings"] });
-      toast({ title: "Review submitted!", description: "Thank you for your feedback." });
+      qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
+      toast({ title: "Review submitted! ⭐", description: "Thank you for your feedback. Your review has been posted." });
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      setReviewSubmitError(e.message);
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
   });
 
   const enhanceDescription = async () => {
@@ -582,32 +591,65 @@ export default function JobDetail() {
           </Card>
         )}
         {showReview && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">How was your experience?</CardTitle>
+          <Card className="border-emerald-300/60 bg-white/60 dark:bg-black/40 backdrop-blur-xl">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                How was your experience?
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div>
-                <p className="text-sm mb-1 font-medium">Rating</p>
-                <div className="flex items-center gap-1">
+                <p className="text-sm mb-2 font-medium text-foreground">Your rating <span className="text-muted-foreground font-normal">(tap a star)</span></p>
+                <div className="flex items-center gap-1.5">
                   {[1, 2, 3, 4, 5].map(n => (
-                    <button key={n} type="button" onClick={() => setReviewData(r => ({ ...r, rating: n }))}
-                      className="focus:outline-none hover:scale-110 transition-transform">
-                      <Star className={cn("w-7 h-7", n <= reviewData.rating ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground/40")} />
+                    <button key={n} type="button" onClick={() => { setReviewData(r => ({ ...r, rating: n })); setRatingTouched(true); setReviewSubmitError(""); }}
+                      className="focus:outline-none hover:scale-125 transition-transform active:scale-95">
+                      <Star className={cn("w-8 h-8", n <= reviewData.rating ? "text-yellow-400 fill-yellow-400 drop-shadow-sm" : "text-muted-foreground/30")} />
                     </button>
                   ))}
-                  <span className="ml-2 text-sm text-muted-foreground">
-                    {reviewData.rating === 5 ? "Excellent" : reviewData.rating === 4 ? "Good" : reviewData.rating === 3 ? "Average" : reviewData.rating === 2 ? "Poor" : "Terrible"}
-                    {" "}({reviewData.rating}/5)
+                  <span className={cn("ml-2 text-sm font-medium", ratingTouched ? "text-yellow-600 dark:text-yellow-400" : "text-muted-foreground")}>
+                    {reviewData.rating === 5 ? "Excellent ✨" : reviewData.rating === 4 ? "Good 👍" : reviewData.rating === 3 ? "Average 😐" : reviewData.rating === 2 ? "Poor 👎" : "Terrible 😞"}
+                    {" "}— {reviewData.rating}/5
                   </span>
                 </div>
+                {!ratingTouched && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
+                    <Star className="w-3 h-3" /> Default rating is 5 stars — tap to change
+                  </p>
+                )}
               </div>
-              <Textarea placeholder="Share your experience (required)..." value={reviewData.comment} onChange={e => setReviewData(r => ({ ...r, comment: e.target.value }))} rows={3} />
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => submitReview.mutate()} disabled={submitReview.isPending || !reviewData.comment.trim()} data-testid="button-submit-review">
+              <div>
+                <Textarea
+                  placeholder="Share your experience — what went well? Would you hire again? (required)"
+                  value={reviewData.comment}
+                  onChange={e => { setReviewData(r => ({ ...r, comment: e.target.value })); setReviewSubmitError(""); }}
+                  rows={3}
+                  className={cn(reviewSubmitError && !reviewData.comment.trim() ? "border-destructive focus-visible:ring-destructive" : "")}
+                />
+                {reviewSubmitError && (
+                  <p className="text-xs text-destructive mt-1">{reviewSubmitError}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  size="sm"
+                  className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => {
+                    if (!reviewData.comment.trim()) {
+                      setReviewSubmitError("Please write a comment before submitting.");
+                      return;
+                    }
+                    setReviewSubmitError("");
+                    submitReview.mutate();
+                  }}
+                  disabled={submitReview.isPending}
+                  data-testid="button-submit-review"
+                >
+                  <Star className="w-3.5 h-3.5" />
                   {submitReview.isPending ? "Submitting…" : "Submit Review"}
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setShowReview(false)}>Cancel</Button>
+                <Button size="sm" variant="outline" onClick={() => { setShowReview(false); setRatingTouched(false); setReviewSubmitError(""); }}>Cancel</Button>
               </div>
             </CardContent>
           </Card>

@@ -164,9 +164,18 @@ export default function CustomerDashboard() {
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
   const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
-  // staleTime:0 ensures the count is always fresh after accepting/rejecting a quote
-  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"], staleTime: 0 });
+  // staleTime:0 + refetchOnWindowFocus ensures count is always fresh after accepting/rejecting
+  // quotes on other pages (e.g., JobDetail) and returning to the dashboard.
+  const { data: quotesRaw } = useQuery<any>({
+    queryKey: ["/api/quotes"],
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+  });
   const allQuotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : [];
+  // Only count quotes in a truly actionable state — PENDING only.
+  // Accepted, rejected, withdrawn, expired quotes must not inflate this count.
   const pendingQuotes = allQuotes.filter((q: any) => q.status === "PENDING");
 
   // Quote count per job (pending only)
