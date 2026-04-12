@@ -184,11 +184,11 @@ export default function JobDetail() {
 
   const submitReview = useMutation({
     mutationFn: async () => {
-      if (!acceptedQuote) throw new Error("No accepted quote");
-      const booking = await apiRequest("GET", `/api/bookings`).then(r => r.json()).then((bs: any[]) =>
-        bs.find(b => b.jobId === params?.id)
-      );
-      if (!booking) throw new Error("No booking found");
+      // Use the already-loaded allBookings instead of re-fetching, and don't
+      // require acceptedQuote (cache may be stale for COMPLETED jobs)
+      const booking = (allBookings as any[]).find((b: any) => b.jobId === params?.id);
+      if (!booking) throw new Error("No booking found for this job");
+      if (!reviewData.comment.trim()) throw new Error("Please add a comment before submitting");
       const res = await apiRequest("POST", `/api/bookings/${booking.id}/review`, reviewData);
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
@@ -588,18 +588,25 @@ export default function JobDetail() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
-                <p className="text-sm mb-2">Rating</p>
-                <div className="flex gap-1">
+                <p className="text-sm mb-1 font-medium">Rating</p>
+                <div className="flex items-center gap-1">
                   {[1, 2, 3, 4, 5].map(n => (
-                    <button key={n} onClick={() => setReviewData(r => ({ ...r, rating: n }))}>
-                      <Star className={cn("w-6 h-6", n <= reviewData.rating ? "text-yellow-400 fill-yellow-400" : "text-muted")} />
+                    <button key={n} type="button" onClick={() => setReviewData(r => ({ ...r, rating: n }))}
+                      className="focus:outline-none hover:scale-110 transition-transform">
+                      <Star className={cn("w-7 h-7", n <= reviewData.rating ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground/40")} />
                     </button>
                   ))}
+                  <span className="ml-2 text-sm text-muted-foreground">
+                    {reviewData.rating === 5 ? "Excellent" : reviewData.rating === 4 ? "Good" : reviewData.rating === 3 ? "Average" : reviewData.rating === 2 ? "Poor" : "Terrible"}
+                    {" "}({reviewData.rating}/5)
+                  </span>
                 </div>
               </div>
-              <Textarea placeholder="Share your experience..." value={reviewData.comment} onChange={e => setReviewData(r => ({ ...r, comment: e.target.value }))} rows={3} />
+              <Textarea placeholder="Share your experience (required)..." value={reviewData.comment} onChange={e => setReviewData(r => ({ ...r, comment: e.target.value }))} rows={3} />
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => submitReview.mutate()} disabled={submitReview.isPending} data-testid="button-submit-review">Submit</Button>
+                <Button size="sm" onClick={() => submitReview.mutate()} disabled={submitReview.isPending || !reviewData.comment.trim()} data-testid="button-submit-review">
+                  {submitReview.isPending ? "Submitting…" : "Submit Review"}
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => setShowReview(false)}>Cancel</Button>
               </div>
             </CardContent>

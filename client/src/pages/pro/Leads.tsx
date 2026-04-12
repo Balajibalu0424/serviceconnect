@@ -200,16 +200,20 @@ export default function ProLeads() {
             {[1, 2, 3].map(i => <div key={i} className="h-28 rounded-2xl bg-muted animate-pulse" />)}
           </div>
         ) : allQuotes.length === 0 && archivedQuotes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-            <Users className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p className="font-medium">No leads yet</p>
-            <p className="text-sm mt-1">Unlock jobs from your matchbooked list to start quoting</p>
-            <Link href="/pro/matchbooked">
-              <Button variant="outline" size="sm" className="mt-3">View Matchbooked</Button>
-            </Link>
-            <Link href="/pro/feed">
-              <Button variant="default" size="sm" className="mt-2 rounded-xl">Browse Job Feed</Button>
-            </Link>
+          <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
+            <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
+              <Users className="w-8 h-8 opacity-40" />
+            </div>
+            <p className="font-heading font-medium text-lg text-foreground">No active leads</p>
+            <p className="text-sm mt-1 max-w-xs mx-auto">Unlock jobs from your matchbooked list to start quoting customers</p>
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
+              <Link href="/pro/matchbooked">
+                <Button variant="outline" size="sm" className="gap-1.5 rounded-xl">View Matchbooked</Button>
+              </Link>
+              <Link href="/pro/feed">
+                <Button variant="default" size="sm" className="gap-1.5 rounded-xl">Browse Job Feed</Button>
+              </Link>
+            </div>
           </div>
         ) : (
           <>

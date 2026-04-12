@@ -69,9 +69,27 @@ async function createNotification(userIdOrRole: string, type: string, title: str
       return;
     }
 
-    // Otherwise, single user
+    // Otherwise, single user — deduplicate within a 5-minute window
+    // Same user + same type + same jobId (when present) = skip to prevent double-fire from scheduler restarts
+    const dataAny = data as any;
+    const jobId = dataAny?.jobId;
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const dupConditions: any[] = [
+      eq(notifications.userId, userIdOrRole),
+      eq(notifications.type, type),
+      gte(notifications.createdAt, fiveMinutesAgo),
+    ];
+    if (jobId) {
+      dupConditions.push(sql`${notifications.data}->>'jobId' = ${String(jobId)}`);
+    }
+    const recentDup = await db.select({ id: notifications.id })
+      .from(notifications)
+      .where(and(...dupConditions))
+      .limit(1);
+    if (recentDup.length > 0) return; // duplicate within window — skip silently
+
     await db.insert(notifications).values({ userId: userIdOrRole, type, title, message, data });
-    
+
     // Real-time push via Pusher
     try {
       await pusher.trigger(`private-user-${userIdOrRole}`, "new_notification", { type, title, message, data });

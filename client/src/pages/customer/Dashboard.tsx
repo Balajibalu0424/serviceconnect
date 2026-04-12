@@ -164,7 +164,8 @@ export default function CustomerDashboard() {
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
   const { data: notifData } = useQuery<any>({ queryKey: ["/api/notifications"] });
   const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
-  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"] });
+  // staleTime:0 ensures the count is always fresh after accepting/rejecting a quote
+  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"], staleTime: 0 });
   const allQuotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : [];
   const pendingQuotes = allQuotes.filter((q: any) => q.status === "PENDING");
 

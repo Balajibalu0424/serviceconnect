@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ListChecks, CheckCircle2, XCircle, MessageCircle, User, MapPin, Clock, Euro, Hash, CalendarCheck, ArrowRight, Star } from "lucide-react";
+import { ListChecks, CheckCircle2, XCircle, MessageCircle, User, MapPin, Clock, Euro, Hash, CalendarCheck, ArrowRight, Star, PlusCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -215,6 +215,11 @@ export default function Bookings() {
             </div>
             <p className="font-heading font-medium text-lg text-foreground">No bookings yet</p>
             <p className="text-sm mt-1 max-w-sm mx-auto">When you accept a quote from a professional, it will appear here as a booking.</p>
+            <Link href="/post-job">
+              <Button className="mt-6 gap-2 shadow-sm rounded-xl" size="sm">
+                <PlusCircle className="w-4 h-4" /> Post your first job
+              </Button>
+            </Link>
           </div>
         ) : (
           <div className="space-y-6">
