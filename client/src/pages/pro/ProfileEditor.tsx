@@ -203,11 +203,12 @@ export default function ProProfileEditor() {
                   <Textarea
                     placeholder="Tell customers about your experience, certifications, and the type of work you specialize in..."
                     value={form.bio}
-                    onChange={e => setForm(f => ({ ...f, bio: e.target.value }))}
+                    onChange={e => setForm(f => ({ ...f, bio: e.target.value.slice(0, 500) }))}
                     rows={4}
+                    maxLength={500}
                     data-testid="input-bio"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">{form.bio.length}/500 characters</p>
+                  <p className={`text-xs mt-1 ${form.bio.length >= 480 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>{form.bio.length}/500 characters</p>
                 </div>
                 <div>
                   <Label>Website</Label>

@@ -24,7 +24,7 @@ export default function ProDashboard() {
   const { data: profile } = useQuery<any>({ queryKey: ["/api/pro/profile"] });
 
   const quotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : (quotesRaw?.quotes || []);
-  const activeBookings = (bookings as any[]).filter(b => b.status === "ACTIVE" || b.status === "CONFIRMED");
+  const activeBookings = (bookings as any[]).filter(b => b.status === "ACTIVE" || b.status === "CONFIRMED" || b.status === "IN_PROGRESS");
   const completedBookings = (bookings as any[]).filter(b => b.status === "COMPLETED");
   const pendingQuotes = quotes.filter(q => q.status === "PENDING");
   const unreadNotifCount = notifData?.unreadCount || 0;
@@ -56,7 +56,7 @@ export default function ProDashboard() {
         </div>
 
         {/* Category setup banner */}
-        {(!profile?.serviceCategories?.length || profile?.serviceCategories?.length === 0) && (
+        {!profile?.serviceCategories?.length && (
           <div className="bg-amber-50/80 dark:bg-amber-950/20 backdrop-blur-xl border border-amber-200/60 dark:border-amber-500/20 rounded-2xl p-5 md:p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 border border-amber-500/20">

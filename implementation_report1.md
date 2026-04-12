@@ -1075,3 +1075,177 @@ Tested the deployed app at `https://codebasefull.vercel.app` across all major cu
 5. **Email notification digest**: daily/weekly via SendGrid for unread notifications
 6. **Fan-out on direct job creation**: extend `NEW_JOB_AVAILABLE` fan-out to `POST /api/jobs` (not just publish)
 7. **Notification preference toggles**: wire Settings notification card to real DB preference storage
+
+---
+
+## Session 7 — Final QA / Production Readiness Pass
+
+**Date:** 2026-04-12
+**Scope:** Full live browser E2E testing → regression detection → targeted bug fixes → redeploy → final verification
+**Build status:** ✅ Clean — 0 TypeScript errors, 5.64s build
+
+---
+
+### Stage 1 — Live Browser E2E Testing Results
+
+Tested the deployed app at `https://codebasefull.vercel.app` across all critical flows using real accounts (`alice@test.com` / `pro1@test.com` / `admin@serviceconnect.ie`).
+
+**Customer flows verified (PASS):**
+- Login and redirect to `/dashboard` ✅
+- Dashboard: Actions Required banner with quote count, job pipeline, active bookings section ✅
+- MyJobs: Three-way split (Draft / Active / Closed) with quote count badges ✅
+- Bookings: "Leave a Review" shown only on completed bookings without existing review (`!hasReview`) ✅
+- Notifications: 49 notifications, filter groups working, mark-all-read confirmed via API ✅
+- Chat: Active vs "Past Jobs" separation working correctly ✅
+
+**Professional flows verified (PASS):**
+- Login and redirect to `/pro/dashboard` ✅
+- Dashboard: Stats (Matchbooked, Pending Quotes, Notifications), Actions Required banner, credit balance card ✅
+- Notifications: 25 unread, BOOKING_COMPLETED/QUOTE_ACCEPTED/URGENT_JOB types all rendering with correct icons ✅
+- Job Feed: "Quote sent" badge on already-quoted jobs, urgency filter pills, category filter ✅
+- Leads: Pending/Accepted/Rejected sections, win rate stat, View Feed link ✅
+- Bookings: 1 IN_PROGRESS (Lawn Mowing), 7 COMPLETED — "View Details" on all ✅
+- Profile Editor: Service categories 1 selected, rating/reviews displayed, bio character counter ✅
+- Credits: 31 credits, transaction history, buy packages ✅
+- Chat: Active conversations (17) + Past Jobs section (5 archived) ✅
+
+**Admin flows verified (PASS — API level):**
+- `/api/admin/dashboard`: stats (39 users, 43 jobs, 8 active, 10 bookings, 4 open tickets) ✅
+- `/api/admin/jobs`: 43 jobs, pagination working ✅
+- `/api/admin/jobs/:id/detail`: full job detail with customer, quotes, bookings ✅
+- `/api/admin/users`: 20 users per page, all roles present ✅
+- `/api/admin/conversations`: 28 conversations with jobStatus ✅
+
+**Backend API smoke tests (PASS):**
+- Review submission: `POST /api/bookings/:id/review` creates review, updates pro rating, sends REVIEW_POSTED notification ✅
+- Mark notification read: `POST /api/notifications/:id/read` + `POST /api/notifications/read-all` ✅
+- Support ticket creation: `POST /api/support/tickets` creates ticket with admin notification ✅
+- Spin wheel: eligible=true, streak tracked correctly ✅
+
+---
+
+### Stage 2 — Regressions and Gaps Found
+
+| # | Severity | Location | Issue |
+|---|----------|----------|-------|
+| 1 | HIGH | `pro/Dashboard.tsx:27` | `activeBookings` filter excludes `IN_PROGRESS` status — dashboard shows 0 active bookings despite 1 IN_PROGRESS booking existing |
+| 2 | MEDIUM | `customer/JobDetail.tsx` | Review CTA ("Leave a Review" card) always shows on completed jobs regardless of whether customer already submitted a review — leads to confusing 409 error if re-submitted |
+| 3 | MEDIUM | `pro/ProfileEditor.tsx` | Bio textarea allows typing past 500 characters — `maxLength` attribute missing; counter shows correct count but no enforcement |
+| 4 | LOW | `pro/Dashboard.tsx:59` | Redundant double condition `(!x?.length || x?.length === 0)` — semantically equivalent, unnecessarily verbose |
+
+---
+
+### Stage 3 — Fixes Applied
+
+#### Fix 1: Pro Dashboard — `activeBookings` missing `IN_PROGRESS`
+**File:** `client/src/pages/pro/Dashboard.tsx`
+**Change:** Added `|| b.status === "IN_PROGRESS"` to the `activeBookings` filter
+```typescript
+// Before
+const activeBookings = bookings.filter(b => b.status === "ACTIVE" || b.status === "CONFIRMED");
+// After
+const activeBookings = bookings.filter(b => b.status === "ACTIVE" || b.status === "CONFIRMED" || b.status === "IN_PROGRESS");
+```
+**Impact:** Pro dashboard "Active Bookings" stat card and Actions Required banner now correctly reflect IN_PROGRESS bookings. Without this, a pro with an IN_PROGRESS booking saw 0 and had no visible prompt to action.
+
+#### Fix 2: Customer JobDetail — Review CTA guards against already-reviewed
+**File:** `client/src/pages/customer/JobDetail.tsx`
+**Changes:**
+- Added `const { data: allBookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });`
+- Derived `jobBooking` and `hasReview` from the bookings query
+- Changed review CTA condition from `isCompleted && !showReview` → `isCompleted && !showReview && !hasReview`
+- `submitReview` mutation's `onSuccess` now also invalidates `/api/bookings` cache so `hasReview` updates immediately
+```typescript
+const jobBooking = (allBookings as any[]).find((b: any) => b.jobId === params?.id);
+const hasReview = jobBooking?.hasReview ?? false;
+// ...
+{isCompleted && !showReview && !hasReview && (  // CTA hidden after review submitted
+```
+**Impact:** Customers no longer see a confusing "Leave a Review" CTA on jobs they already reviewed. After submitting a review, the CTA disappears immediately (cache invalidated).
+
+#### Fix 3: Pro ProfileEditor — Bio textarea enforces 500 char limit
+**File:** `client/src/pages/pro/ProfileEditor.tsx`
+**Changes:**
+- Added `maxLength={500}` attribute to the bio textarea
+- Added `.slice(0, 500)` in the `onChange` handler to prevent paste-over
+- Counter text turns amber when nearing limit (≥480 characters)
+```typescript
+onChange={e => setForm(f => ({ ...f, bio: e.target.value.slice(0, 500) }))}
+maxLength={500}
+// Counter:
+<p className={`text-xs mt-1 ${form.bio.length >= 480 ? "text-amber-600..." : "text-muted-foreground"}`}>
+```
+**Impact:** Bio input now reliably enforces the 500-char limit matching the backend validation. Users get visual feedback as they approach the limit.
+
+#### Fix 4: Pro Dashboard — Simplified redundant condition
+**File:** `client/src/pages/pro/Dashboard.tsx`
+**Change:** `(!profile?.serviceCategories?.length || profile?.serviceCategories?.length === 0)` → `!profile?.serviceCategories?.length`
+**Impact:** Minor code clarity improvement; no functional change.
+
+---
+
+### Stage 4 — Files Changed (Session 7)
+
+| File | Change |
+|------|--------|
+| `client/src/pages/pro/Dashboard.tsx` | Fix activeBookings filter to include IN_PROGRESS; simplify redundant condition |
+| `client/src/pages/customer/JobDetail.tsx` | Add bookings query, derive hasReview, guard review CTA, invalidate bookings on review submit |
+| `client/src/pages/pro/ProfileEditor.tsx` | Enforce bio 500-char limit with maxLength + slice; amber counter near limit |
+
+---
+
+### Stage 5 — Final Deployed Verification (after fixes)
+
+Deployed via `git push origin main` → Vercel auto-deploy (● Ready, ~1 min build).
+
+**Verified on `https://codebasefull.vercel.app`:**
+
+| Check | Result |
+|-------|--------|
+| Build | ✅ Clean — 0 TypeScript errors, 5.64s |
+| Customer login → dashboard | ✅ |
+| Customer dashboard — Actions Required banner | ✅ (3 quotes, unread notifs) |
+| Customer bookings — Leave a Review (conditional) | ✅ (shows only when !hasReview) |
+| Customer JobDetail — review CTA hidden when reviewed | ✅ (hasReview from bookings query) |
+| Professional dashboard — Active Bookings count | ✅ (now counts IN_PROGRESS) |
+| Professional notifications — full list | ✅ (25 unread, all icons/types correct) |
+| Professional job feed — Quote sent badge | ✅ |
+| Professional bookings — cancel/complete buttons | ✅ |
+| Professional profile bio — 500 char limit | ✅ (maxLength enforced) |
+| Admin APIs — jobs, users, conversations | ✅ |
+| Cross-role: review submission → pro rating updated | ✅ |
+| Cross-role: booking in-progress → customer notified | ✅ |
+| Support ticket creation | ✅ |
+| Spin wheel eligibility | ✅ |
+
+---
+
+### Remaining Limitations (after Session 7 — truly unchanged)
+
+1. **OTP delivery**: Demo-only (`123456`). Real Twilio/email provider not integrated.
+2. **Email notifications**: All notifications are in-app only; no email digest.
+3. **Quote API over-fetching**: `GET /api/quotes` returns all quotes (N+1 enrichment). A `?jobId=` filter would help for high-volume accounts.
+4. **Fan-out on direct job creation**: `POST /api/jobs` (rare, non-publish path) does not fan-out `NEW_JOB_AVAILABLE`. The publish path (main flow) does.
+5. **Booking timeline view**: No visual step-by-step indicator (Confirmed → In Progress → Completed) yet.
+6. **Notification preference toggles**: Settings card shows hardcoded "always enabled" — no real DB-backed toggles.
+7. **Pro profile completeness score**: No percentage bar or completeness nudge.
+8. **Credits payment**: Dummy payment flow (no real Stripe integration). Card validation is client-side only.
+
+---
+
+### Launch-Readiness Assessment
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Customer core flows | ✅ Production-ready | Login, post job, review quotes, accept, bookings, chat, notifications |
+| Professional core flows | ✅ Production-ready | Dashboard, feed, leads, quotes, bookings, profile, credits, notifications |
+| Cross-role propagation | ✅ Production-ready | Quote accept → booking, in-progress → customer notified, review → pro notified |
+| Notification system | ✅ Production-ready | 30+ types, icons, deep-links, filter groups, mark-read |
+| Admin panel | ✅ Functional | Jobs, users, conversations, metrics — all API-verified |
+| Chat system | ✅ Production-ready | Active/past separation, ARCHIVED status, message history |
+| AI job intake | ✅ Functional | Preview stage, extraction, enhancement |
+| Payment / credits | ⚠️ Demo-only | Dummy card flow; real Stripe not wired |
+| OTP verification | ⚠️ Demo-only | `123456` hardcoded for dev/demo |
+| Email notifications | ⚠️ Not present | In-app only; no transactional email |
+
+**Overall**: The platform is **launch-ready for a controlled beta / private launch**. Core marketplace flows (customer → post job → quotes → accept → booking → complete → review → repeat) are fully functional end-to-end. The remaining gaps are all in payment processing and transactional email, which are non-blockers for a closed beta with manual oversight.

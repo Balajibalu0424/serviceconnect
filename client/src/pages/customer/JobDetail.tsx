@@ -43,6 +43,7 @@ export default function JobDetail() {
 
   const { data: job, isLoading } = useQuery<any>({ queryKey: [`/api/jobs/${params?.id}`], enabled: !!params?.id });
   const { data: allQuotes = [] } = useQuery<any[]>({ queryKey: ["/api/quotes"] });
+  const { data: allBookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
 
   const quotesArray = Array.isArray(allQuotes) ? allQuotes : [];
   const jobQuotes = quotesArray.filter((q: any) => q.jobId === params?.id);
@@ -54,6 +55,8 @@ export default function JobDetail() {
   });
   const lowestQuote = jobQuotes.length ? Math.min(...jobQuotes.map((q: any) => Number(q.amount))) : null;
   const pendingQuotesCount = jobQuotes.filter((q: any) => q.status === "PENDING").length;
+  const jobBooking = (allBookings as any[]).find((b: any) => b.jobId === params?.id);
+  const hasReview = jobBooking?.hasReview ?? false;
 
   const acceptQuote = useMutation({
     mutationFn: async (quoteId: string) => {
@@ -192,7 +195,8 @@ export default function JobDetail() {
     },
     onSuccess: () => {
       setShowReview(false);
-      toast({ title: "Review submitted!" });
+      qc.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Review submitted!", description: "Thank you for your feedback." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -561,7 +565,7 @@ export default function JobDetail() {
         </Card>
 
         {/* Leave a review — prominent card CTA */}
-        {isCompleted && !showReview && (
+        {isCompleted && !showReview && !hasReview && (
           <Card className="border-emerald-400/50 bg-emerald-50/50 dark:bg-emerald-950/20">
             <CardContent className="pt-4 pb-4">
               <div className="flex items-center justify-between gap-3 flex-wrap">
