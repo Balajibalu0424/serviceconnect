@@ -70,6 +70,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!socket) return;
     const handleNewNotif = () => {
+      // Play a soft notification "pop" using Web Audio API
+      try {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContext) {
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          
+          osc.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          
+          // Classic notification bubble sound: start high, drop fast
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(1200, ctx.currentTime); 
+          osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.1);
+          
+          gainNode.gain.setValueAtTime(0, ctx.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+          
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+        }
+      } catch (e) {
+        // Silently ignore if browser blocks audio before user interaction
+      }
+
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
     };
     socket.on("new_notification", handleNewNotif);
