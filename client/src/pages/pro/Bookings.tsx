@@ -57,7 +57,7 @@ export default function ProBookings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       toast({ title: "Booking completed! 🎉", description: "The job has been marked as complete. Encourage the customer to leave a review." });
-      setSelectedBooking((prev: any) => prev ? { ...prev, status: "COMPLETED" } : null);
+      setSelectedBooking((prev: any) => prev ? { ...prev, status: "COMPLETED", completedAt: new Date().toISOString() } : null);
     },
     onError: (error: Error) => {
       toast({ title: "Update failed", description: error.message, variant: "destructive" });

@@ -166,32 +166,27 @@ export default function CustomerDashboard() {
   const { data: conversations = [] } = useQuery<any[]>({ queryKey: ["/api/chat/conversations"] });
   // staleTime:0 + refetchOnWindowFocus ensures count is always fresh after accepting/rejecting
   // quotes on other pages (e.g., JobDetail) and returning to the dashboard.
-  const { data: quotesRaw } = useQuery<any>({
-    queryKey: ["/api/quotes"],
+  const { data: quoteSummaryData } = useQuery<any>({
+    queryKey: ["/api/quotes?summary=jobCounts"],
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: true,
     refetchOnMount: "always",
   });
-  const allQuotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : [];
+  const quoteSummaryByJob = quoteSummaryData?.byJob || {};
   // Only count quotes in a truly actionable state — PENDING only.
   // Accepted, rejected, withdrawn, expired quotes must not inflate this count.
-  const pendingQuotes = allQuotes.filter((q: any) => q.status === "PENDING");
+  const pendingQuotes = Object.values(quoteSummaryByJob).reduce((total: number, summary: any) => total + (summary.pending || 0), 0);
 
   // Quote count per job (pending only)
-  const pendingQuotesByJob: Record<string, number> = {};
-  pendingQuotes.forEach((q: any) => {
-    if (q.jobId) pendingQuotesByJob[q.jobId] = (pendingQuotesByJob[q.jobId] || 0) + 1;
-  });
+  const pendingQuotesByJob: Record<string, number> = Object.fromEntries(
+    Object.entries(quoteSummaryByJob).map(([jobId, summary]: [string, any]) => [jobId, summary.pending || 0])
+  );
 
   // Pro first names per job for pending quotes (shows who quoted in pipeline)
-  const pendingQuoteProsByJob: Record<string, string[]> = {};
-  pendingQuotes.forEach((q: any) => {
-    if (q.jobId && q.professional?.firstName) {
-      if (!pendingQuoteProsByJob[q.jobId]) pendingQuoteProsByJob[q.jobId] = [];
-      pendingQuoteProsByJob[q.jobId].push(q.professional.firstName);
-    }
-  });
+  const pendingQuoteProsByJob: Record<string, string[]> = Object.fromEntries(
+    Object.entries(quoteSummaryByJob).map(([jobId, summary]: [string, any]) => [jobId, summary.pendingProfessionalFirstNames || []])
+  );
 
   const activeJobs = (jobs as any[]).filter(j => ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(j.status));
   const draftJobs = (jobs as any[]).filter(j => j.status === "DRAFT");
@@ -320,14 +315,14 @@ export default function CustomerDashboard() {
         </div>
 
         {/* Actions Required — only shown when there's something to do */}
-        {(pendingQuotes.length > 0 || (notifData?.unreadCount || 0) > 0) && (
+        {(pendingQuotes > 0 || (notifData?.unreadCount || 0) > 0) && (
           <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-indigo-200/60 dark:border-indigo-800/40 rounded-2xl shadow-sm overflow-hidden">
             <div className="px-5 py-3 border-b border-border/40 bg-indigo-50/60 dark:bg-indigo-950/20 flex items-center gap-2">
               <Bell className="w-4 h-4 text-indigo-500" />
               <p className="text-sm font-semibold text-indigo-900 dark:text-indigo-100">Actions Required</p>
             </div>
             <div className="divide-y divide-border/30">
-              {pendingQuotes.length > 0 && (
+              {pendingQuotes > 0 && (
                 <Link href="/my-jobs">
                   <div className="flex items-center justify-between px-5 py-3.5 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-colors cursor-pointer group">
                     <div className="flex items-center gap-3">
@@ -336,7 +331,7 @@ export default function CustomerDashboard() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-foreground">
-                          {pendingQuotes.length} quote{pendingQuotes.length > 1 ? "s" : ""} waiting for your decision
+                          {pendingQuotes} quote{pendingQuotes > 1 ? "s" : ""} waiting for your decision
                         </p>
                         <p className="text-xs text-muted-foreground">Review and accept or decline</p>
                       </div>

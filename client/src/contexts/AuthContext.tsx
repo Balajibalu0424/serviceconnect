@@ -15,6 +15,8 @@ interface AuthUser {
   phoneVerified?: boolean;
   firstJobId?: string | null;
   avatarUrl?: string;
+  bio?: string | null;
+  notificationPreferences?: any;
   profile?: any;
   createdAt?: string | Date;
 }

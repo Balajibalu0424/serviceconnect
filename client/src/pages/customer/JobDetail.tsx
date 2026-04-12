@@ -48,7 +48,10 @@ export default function JobDetail() {
     queryKey: [`/api/quotes?jobId=${params?.id}`],
     enabled: !!params?.id
   });
-  const { data: allBookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
+  const { data: jobBookings = [] } = useQuery<any[]>({
+    queryKey: [`/api/bookings?jobId=${params?.id}`],
+    enabled: !!params?.id,
+  });
 
   const jobQuotes = Array.isArray(fetchedQuotes) ? fetchedQuotes : [];
   const acceptedQuote = jobQuotes.find((q: any) => q.status === "ACCEPTED");
@@ -59,7 +62,7 @@ export default function JobDetail() {
   });
   const lowestQuote = jobQuotes.length ? Math.min(...jobQuotes.map((q: any) => Number(q.amount))) : null;
   const pendingQuotesCount = jobQuotes.filter((q: any) => q.status === "PENDING").length;
-  const jobBooking = (allBookings as any[]).find((b: any) => b.jobId === params?.id);
+  const jobBooking = (jobBookings as any[])[0];
   const hasReview = jobBooking?.hasReview ?? false;
 
   const acceptQuote = useMutation({
@@ -71,7 +74,9 @@ export default function JobDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [`/api/quotes?jobId=${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/quotes"] });
+      qc.invalidateQueries({ queryKey: ["/api/quotes?summary=jobCounts"] });
       qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
+      qc.invalidateQueries({ queryKey: [`/api/bookings?jobId=${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/bookings"] });
       toast({
         title: "Quote accepted!",
@@ -90,6 +95,7 @@ export default function JobDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [`/api/quotes?jobId=${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/quotes"] });
+      qc.invalidateQueries({ queryKey: ["/api/quotes?summary=jobCounts"] });
       toast({ title: "Quote rejected" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -193,7 +199,7 @@ export default function JobDetail() {
       // Validate before submitting
       if (!reviewData.comment.trim()) throw new Error("Please write a comment before submitting");
       // Use the already-loaded allBookings instead of re-fetching
-      const booking = (allBookings as any[]).find((b: any) => b.jobId === params?.id);
+      const booking = (jobBookings as any[]).find((b: any) => b.jobId === params?.id);
       if (!booking) throw new Error("No booking found for this job");
       const res = await apiRequest("POST", `/api/bookings/${booking.id}/review`, reviewData);
       if (!res.ok) throw new Error((await res.json()).error);
@@ -204,6 +210,7 @@ export default function JobDetail() {
       setRatingTouched(false);
       setReviewSubmitError("");
       setReviewData({ rating: 5, comment: "" });
+      qc.invalidateQueries({ queryKey: [`/api/bookings?jobId=${params?.id}`] });
       qc.invalidateQueries({ queryKey: ["/api/bookings"] });
       qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
       toast({ title: "Review submitted! ⭐", description: "Thank you for your feedback. Your review has been posted." });
@@ -490,22 +497,35 @@ export default function JobDetail() {
               </div>
             ) : (
               <div className="space-y-4">
-                {sortedJobQuotes.map((q: any) => (
+                {sortedJobQuotes.map((q: any) => {
+                  const displayStatus = q.booking?.status && q.booking.status !== "CONFIRMED" ? q.booking.status : q.status;
+                  const isAccepted = displayStatus === "ACCEPTED";
+                  const isRejected = displayStatus === "REJECTED";
+                  const isCompleted = displayStatus === "COMPLETED";
+                  const isCancelled = displayStatus === "CANCELLED";
+
+                  return (
                   <div key={q.id} data-testid={`quote-${q.id}`}
                     className={cn(
                       "p-5 md:p-6 rounded-2xl transition-all duration-300 border backdrop-blur-sm",
-                      q.status === "ACCEPTED" ? "border-green-500/50 bg-green-50/50 dark:bg-green-950/20 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
+                      isAccepted
+                        ? "border-green-500/50 bg-green-50/50 dark:bg-green-950/20 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
                         : "border-border/50 bg-white/40 dark:bg-white/5 hover:bg-white/60 dark:hover:bg-white/10 hover:shadow-md",
-                      q.status === "REJECTED" && "border-destructive/20 bg-destructive/5 opacity-70 grayscale-[50%]"
+                      isRejected && "border-destructive/20 bg-destructive/5 opacity-70 grayscale-[50%]",
+                      isCompleted && "border-emerald-300/50 bg-emerald-50/40 dark:bg-emerald-950/10",
+                      isCancelled && "border-destructive/20 bg-destructive/5 opacity-80"
                     )}>
                     <div className="flex flex-col md:flex-row md:items-start justify-between gap-5">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-3">
                           <p className="font-heading font-bold text-2xl tracking-tight text-foreground">{"\u20AC"}{q.amount}</p>
                           <Badge variant={
-                            q.status === "ACCEPTED" ? "default" :
-                            q.status === "REJECTED" ? "destructive" : "outline"
-                          } className={cn("text-xs uppercase tracking-wider", q.status === "ACCEPTED" && "bg-green-500 hover:bg-green-600 shadow-sm shadow-green-500/20")}>{q.status}</Badge>
+                            isAccepted ? "default" :
+                            isRejected || isCancelled ? "destructive" :
+                            isCompleted ? "secondary" : "outline"
+                          } className={cn("text-xs uppercase tracking-wider", isAccepted && "bg-green-500 hover:bg-green-600 shadow-sm shadow-green-500/20")}>
+                            {displayStatus.replace("_", " ")}
+                          </Badge>
                         </div>
                         {q.professional && (
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -522,7 +542,7 @@ export default function JobDetail() {
                                 )}
                               </span>
                             )}
-                            {q.status === "ACCEPTED" && <Badge className="bg-green-500 text-white text-xs border-0 ml-auto">Accepted</Badge>}
+                            {isAccepted && <Badge className="bg-green-500 text-white text-xs border-0 ml-auto">Accepted</Badge>}
                           </div>
                         )}
                         {q.message && <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-sm text-foreground/90 mt-2 mb-3 leading-relaxed">{q.message}</div>}
@@ -554,7 +574,7 @@ export default function JobDetail() {
                           </Button>
                         </div>
                       )}
-                      {q.status === "ACCEPTED" && (
+                      {isAccepted && q.booking && (
                         <div className="flex flex-row md:flex-col gap-2 shrink-0 w-full md:w-auto mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 border-green-200 dark:border-green-900">
                           <Button size="sm" variant="outline" className="gap-2 rounded-xl h-10 flex-1 md:flex-auto border-green-300 bg-green-50 hover:bg-green-100 text-green-700 w-full"
                             onClick={() => navigate("/bookings")}
@@ -571,7 +591,7 @@ export default function JobDetail() {
                       )}
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
           </CardContent>

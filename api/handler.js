@@ -43449,6 +43449,39 @@ var createInsertSchema = (entity, refine) => {
   return handleColumns(columns, refine ?? {}, insertConditions);
 };
 
+// shared/notificationPreferences.ts
+var DEFAULT_NOTIFICATION_PREFERENCES = {
+  email: true,
+  sms: true,
+  push: true,
+  categories: {
+    quotes: true,
+    bookings: true,
+    messages: true,
+    jobUpdates: true,
+    reviews: true,
+    leads: true,
+    system: true
+  }
+};
+function normalizeNotificationPreferences(raw, _role) {
+  const categories = raw?.categories && typeof raw.categories === "object" ? raw.categories : {};
+  return {
+    email: raw?.email ?? DEFAULT_NOTIFICATION_PREFERENCES.email,
+    sms: raw?.sms ?? DEFAULT_NOTIFICATION_PREFERENCES.sms,
+    push: raw?.push ?? DEFAULT_NOTIFICATION_PREFERENCES.push,
+    categories: {
+      quotes: categories.quotes ?? DEFAULT_NOTIFICATION_PREFERENCES.categories.quotes,
+      bookings: categories.bookings ?? DEFAULT_NOTIFICATION_PREFERENCES.categories.bookings,
+      messages: categories.messages ?? DEFAULT_NOTIFICATION_PREFERENCES.categories.messages,
+      jobUpdates: categories.jobUpdates ?? DEFAULT_NOTIFICATION_PREFERENCES.categories.jobUpdates,
+      reviews: categories.reviews ?? DEFAULT_NOTIFICATION_PREFERENCES.categories.reviews,
+      leads: categories.leads ?? DEFAULT_NOTIFICATION_PREFERENCES.categories.leads,
+      system: true
+    }
+  };
+}
+
 // shared/schema.ts
 var userRoleEnum = pgEnum("user_role", ["CUSTOMER", "PROFESSIONAL", "ADMIN", "SUPPORT"]);
 var userStatusEnum = pgEnum("user_status", ["ACTIVE", "SUSPENDED", "BANNED", "PENDING"]);
@@ -43525,7 +43558,7 @@ var users = pgTable("users", {
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   firstJobId: varchar("first_job_id"),
   creditBalance: integer("credit_balance").notNull().default(0),
-  notificationPreferences: json("notification_preferences").$type().default({ email: true, sms: true, push: true }),
+  notificationPreferences: json("notification_preferences").$type().default(DEFAULT_NOTIFICATION_PREFERENCES),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
   deletedAt: timestamp("deleted_at")
@@ -43595,6 +43628,7 @@ var professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   businessName: text("business_name"),
+  website: text("website"),
   credentials: text("credentials"),
   licenseNumber: text("license_number"),
   insuranceVerified: boolean("insurance_verified").notNull().default(false),
@@ -53325,6 +53359,79 @@ function registerOnboardingRoutes(app2) {
 var stripe = new stripe_esm_node_default(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder", {
   apiVersion: "2026-02-25.clover"
 });
+var NOTIFICATION_CATEGORY_BY_TYPE = {
+  JOB_QUOTE: "quotes",
+  NEW_QUOTE: "quotes",
+  QUOTE_ACCEPTED: "quotes",
+  QUOTE_REJECTED: "quotes",
+  JOB_UNLOCK: "jobUpdates",
+  JOB_UPDATE: "jobUpdates",
+  JOB_MATCHED: "jobUpdates",
+  JOB_COMPLETED: "jobUpdates",
+  JOB_BOOSTED: "jobUpdates",
+  AFTERCARE: "jobUpdates",
+  AFTERCARE_2D: "jobUpdates",
+  AFTERCARE_5D: "jobUpdates",
+  AFTERCARE_REMINDER: "jobUpdates",
+  JOB_AUTO_CLOSED: "jobUpdates",
+  BOOKING_CREATED: "bookings",
+  BOOKING_IN_PROGRESS: "bookings",
+  BOOKING_COMPLETED: "bookings",
+  BOOKING_CANCELLED: "bookings",
+  NEW_MESSAGE: "messages",
+  CALL_REQUEST: "messages",
+  CALL_ACCEPTED: "messages",
+  CALL_DECLINED: "messages",
+  REVIEW: "reviews",
+  REVIEW_POSTED: "reviews",
+  NEW_JOB_AVAILABLE: "leads",
+  URGENT_JOB: "leads",
+  PAYMENT: "system",
+  CREDIT: "system",
+  TICKET_REPLY: "system",
+  TICKET_STATUS: "system",
+  VERIFICATION: "system",
+  VERIFICATION_SUBMITTED: "system",
+  VERIFICATION_APPROVED: "system",
+  VERIFICATION_REJECTED: "system",
+  SYSTEM: "system",
+  JOB_FLAGGED: "system",
+  MESSAGE_FLAGGED: "system"
+};
+var NON_DISABLEABLE_NOTIFICATION_TYPES = /* @__PURE__ */ new Set([
+  "SYSTEM",
+  "JOB_FLAGGED",
+  "MESSAGE_FLAGGED",
+  "VERIFICATION",
+  "VERIFICATION_SUBMITTED",
+  "VERIFICATION_APPROVED",
+  "VERIFICATION_REJECTED"
+]);
+function trimNullable2(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+function parseServiceAreasInput(value) {
+  if (value === void 0) return void 0;
+  if (value === null) return [];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+function getUserNotificationPreferences(user) {
+  return normalizeNotificationPreferences(user.notificationPreferences, user.role ?? void 0);
+}
+function canReceiveNotification(user, type) {
+  if (NON_DISABLEABLE_NOTIFICATION_TYPES.has(type)) return true;
+  const category = NOTIFICATION_CATEGORY_BY_TYPE[type];
+  if (!category) return true;
+  return getUserNotificationPreferences(user).categories[category] !== false;
+}
 async function createNotification(userIdOrRole, type, title, message, data = {}) {
   if (!userIdOrRole) return;
   try {
@@ -53346,6 +53453,9 @@ async function createNotification(userIdOrRole, type, title, message, data = {})
       }
       return;
     }
+    const [recipient] = await db.select({ id: users.id, role: users.role, notificationPreferences: users.notificationPreferences }).from(users).where(eq(users.id, userIdOrRole)).limit(1);
+    if (!recipient) return;
+    if (!canReceiveNotification(recipient, type)) return;
     const dataAny = data;
     const jobId = dataAny?.jobId;
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1e3);
@@ -53480,6 +53590,9 @@ async function registerRoutes(httpServer, app2) {
       const { accessToken, refreshToken } = generateTokens(user.id, user.role);
       return res.status(201).json({ accessToken, refreshToken, user: { ...user, passwordHash: void 0 } });
     } catch (e) {
+      if (e?.message === "Only pending quotes can be accepted." || e?.message === "Closed jobs cannot accept new quotes." || e?.message === "This job already has an active booking." || e?.message === "Another quote has already been accepted for this job.") {
+        return res.status(409).json({ error: e.message });
+      }
       return res.status(500).json({ error: e.message });
     }
   });
@@ -53501,7 +53614,15 @@ async function registerRoutes(httpServer, app2) {
         ipAddress: req.ip,
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3)
       });
-      return res.json({ accessToken, refreshToken, user: { ...user, passwordHash: void 0 } });
+      return res.json({
+        accessToken,
+        refreshToken,
+        user: {
+          ...user,
+          passwordHash: void 0,
+          notificationPreferences: getUserNotificationPreferences(user)
+        }
+      });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
@@ -53545,7 +53666,7 @@ async function registerRoutes(httpServer, app2) {
       onboardingCompleted: user.onboardingCompleted,
       creditBalance: user.creditBalance,
       createdAt: user.createdAt,
-      notificationPreferences: user.notificationPreferences || { email: true, sms: true, push: true }
+      notificationPreferences: getUserNotificationPreferences(user)
     };
     return res.json({ ...safeUser, profile });
   });
@@ -53881,17 +54002,35 @@ async function registerRoutes(httpServer, app2) {
         const radius = profile.radiusKm || 25;
         const lat = Number(profile.lat);
         const lng = Number(profile.lng);
+        const areaConditions = Array.isArray(profile.serviceAreas) ? profile.serviceAreas.map((area) => String(area).trim()).filter(Boolean).map((area) => sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`) : [];
+        const coordlessFallback = areaConditions.length > 0 ? or(...areaConditions) : null;
         conditions.push(
-          sql`
-            (${jobs.lat} IS NULL) OR 
-            (
-              6371 * acos(
-                cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) * 
-                cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) + 
-                sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-              ) <= ${radius}
-            )
-          `
+          coordlessFallback ? sql`
+                (
+                  (
+                    ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
+                    6371 * acos(
+                      cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
+                      cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
+                      sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+                    ) <= ${radius}
+                  )
+                  OR
+                  (
+                    (${jobs.lat} IS NULL OR ${jobs.lng} IS NULL) AND
+                    ${coordlessFallback}
+                  )
+                )
+              ` : sql`
+                (
+                  ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
+                  6371 * acos(
+                    cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
+                    cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
+                    sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+                  ) <= ${radius}
+                )
+              `
         );
       } else if (profile?.serviceAreas && profile.serviceAreas.length > 0) {
         const areaConditions = profile.serviceAreas.map(
@@ -54377,12 +54516,47 @@ async function registerRoutes(httpServer, app2) {
     try {
       const userId = req.user.userId;
       const filterJobId = req.query.jobId;
+      const summaryMode = req.query.summary;
       const [userRow] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, userId));
       if (!userRow) return res.status(404).json({ error: "User not found" });
       let conditions = [];
       if (userRow.role === "CUSTOMER") conditions.push(eq(quotes.customerId, userId));
       else conditions.push(eq(quotes.professionalId, userId));
       if (filterJobId) conditions.push(eq(quotes.jobId, filterJobId));
+      if (summaryMode === "jobCounts" && userRow.role === "CUSTOMER" && !filterJobId) {
+        const summaryRows = await db.select({
+          jobId: quotes.jobId,
+          status: quotes.status,
+          professionalFirstName: users.firstName
+        }).from(quotes).leftJoin(users, eq(quotes.professionalId, users.id)).where(and(...conditions)).orderBy(desc(quotes.createdAt));
+        const byJob = {};
+        for (const row of summaryRows) {
+          if (!row.jobId) continue;
+          if (!byJob[row.jobId]) {
+            byJob[row.jobId] = {
+              total: 0,
+              pending: 0,
+              accepted: 0,
+              rejected: 0,
+              withdrawn: 0,
+              pendingProfessionalFirstNames: []
+            };
+          }
+          const target = byJob[row.jobId];
+          target.total += 1;
+          if (row.status === "PENDING") {
+            target.pending += 1;
+            if (row.professionalFirstName) target.pendingProfessionalFirstNames.push(row.professionalFirstName);
+          } else if (row.status === "ACCEPTED") {
+            target.accepted += 1;
+          } else if (row.status === "REJECTED") {
+            target.rejected += 1;
+          } else if (row.status === "WITHDRAWN") {
+            target.withdrawn += 1;
+          }
+        }
+        return res.json({ byJob });
+      }
       const rows = await db.select({
         quote: quotes,
         jobId: jobs.id,
@@ -54391,8 +54565,11 @@ async function registerRoutes(httpServer, app2) {
         jobRefCode: jobs.referenceCode,
         jobLocationText: jobs.locationText,
         jobLocationEirc: jobs.locationEircode,
-        catName: serviceCategories.name
-      }).from(quotes).leftJoin(jobs, eq(quotes.jobId, jobs.id)).leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id)).where(and(...conditions)).orderBy(desc(quotes.createdAt));
+        catName: serviceCategories.name,
+        bookingId: bookings.id,
+        bookingStatus: bookings.status,
+        bookingCompletedAt: bookings.completedAt
+      }).from(quotes).leftJoin(jobs, eq(quotes.jobId, jobs.id)).leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id)).leftJoin(bookings, eq(bookings.quoteId, quotes.id)).where(and(...conditions)).orderBy(desc(quotes.createdAt));
       if (rows.length === 0) {
         if (userRow.role === "PROFESSIONAL") return res.json({ quotes: [], archived: [] });
         return res.json([]);
@@ -54431,6 +54608,11 @@ async function registerRoutes(httpServer, app2) {
           locationEircode: r.jobLocationEirc
         } : null,
         category: r.catName ? { name: r.catName } : null,
+        booking: r.bookingId ? {
+          id: r.bookingId,
+          status: r.bookingStatus,
+          completedAt: r.bookingCompletedAt
+        } : null,
         conversationId: r.jobId ? jobToConvId[r.jobId] ?? null : null,
         professional: userRow.role === "CUSTOMER" ? proInfoMap[r.quote.professionalId] ?? null : void 0
       }));
@@ -54450,23 +54632,53 @@ async function registerRoutes(httpServer, app2) {
       const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id));
       if (!quote) return res.status(404).json({ error: "Quote not found" });
       if (quote.customerId !== req.user.userId) return res.status(403).json({ error: "Forbidden" });
+      if (quote.status !== "PENDING") {
+        return res.status(409).json({ error: "Only pending quotes can be accepted." });
+      }
       let createdBookingId = "";
       await db.transaction(async (tx) => {
-        await tx.update(quotes).set({ status: "ACCEPTED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(quotes.id, quote.id));
+        const [lockedQuote] = await tx.select().from(quotes).where(eq(quotes.id, quote.id)).for("update");
+        if (!lockedQuote) throw new Error("Quote not found");
+        if (lockedQuote.status !== "PENDING") throw new Error("Only pending quotes can be accepted.");
+        const [job] = await tx.select({ id: jobs.id, status: jobs.status }).from(jobs).where(eq(jobs.id, lockedQuote.jobId)).for("update");
+        if (!job) throw new Error("Job not found");
+        if (["COMPLETED", "CLOSED"].includes(job.status)) {
+          throw new Error("Closed jobs cannot accept new quotes.");
+        }
+        const [existingActiveBooking] = await tx.select({ id: bookings.id }).from(bookings).where(and(
+          eq(bookings.jobId, lockedQuote.jobId),
+          inArray(bookings.status, ["CONFIRMED", "IN_PROGRESS", "DISPUTED"])
+        )).limit(1);
+        if (existingActiveBooking) {
+          throw new Error("This job already has an active booking.");
+        }
+        const [blockingAcceptedQuote] = await tx.select({ id: quotes.id }).from(quotes).leftJoin(bookings, eq(bookings.quoteId, quotes.id)).where(and(
+          eq(quotes.jobId, lockedQuote.jobId),
+          eq(quotes.status, "ACCEPTED"),
+          ne(quotes.id, lockedQuote.id),
+          or(
+            isNull(bookings.id),
+            inArray(bookings.status, ["CONFIRMED", "IN_PROGRESS", "COMPLETED", "DISPUTED"])
+          )
+        )).limit(1);
+        if (blockingAcceptedQuote) {
+          throw new Error("Another quote has already been accepted for this job.");
+        }
+        await tx.update(quotes).set({ status: "ACCEPTED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(quotes.id, lockedQuote.id));
         const [booking] = await tx.insert(bookings).values({
-          quoteId: quote.id,
-          jobId: quote.jobId,
-          customerId: quote.customerId,
-          professionalId: quote.professionalId,
-          totalAmount: quote.amount,
+          quoteId: lockedQuote.id,
+          jobId: lockedQuote.jobId,
+          customerId: lockedQuote.customerId,
+          professionalId: lockedQuote.professionalId,
+          totalAmount: lockedQuote.amount,
           status: "CONFIRMED"
         }).returning();
         createdBookingId = booking.id;
-        await tx.update(jobs).set({ status: "MATCHED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, quote.jobId));
+        await tx.update(jobs).set({ status: "MATCHED", updatedAt: /* @__PURE__ */ new Date() }).where(eq(jobs.id, lockedQuote.jobId));
         await tx.update(quotes).set({ status: "REJECTED", updatedAt: /* @__PURE__ */ new Date() }).where(and(
-          eq(quotes.jobId, quote.jobId),
-          eq(quotes.status, "PENDING"),
-          ne(quotes.id, quote.id)
+          eq(quotes.jobId, lockedQuote.jobId),
+          inArray(quotes.status, ["PENDING", "ACCEPTED"]),
+          ne(quotes.id, lockedQuote.id)
         ));
       });
       const [jobConv] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.jobId, quote.jobId)).orderBy(desc(conversations.createdAt)).limit(1);
@@ -54499,8 +54711,10 @@ async function registerRoutes(httpServer, app2) {
   });
   app2.get("/api/bookings", requireAuth, async (req, res) => {
     const userId = req.user.userId;
+    const filterJobId = req.query.jobId;
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     let conditions = user.role === "CUSTOMER" ? [eq(bookings.customerId, userId)] : [eq(bookings.professionalId, userId)];
+    if (filterJobId) conditions.push(eq(bookings.jobId, filterJobId));
     const rawBookings = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
     const enrichedBookings = await Promise.all(rawBookings.map(async (b) => {
       const [job] = await db.select().from(jobs).where(eq(jobs.id, b.jobId));
@@ -54882,6 +55096,13 @@ async function registerRoutes(httpServer, app2) {
           } catch (_logErr) {
           }
         }
+        await createNotification(
+          userId,
+          "SYSTEM",
+          "Contact sharing blocked",
+          "Phone numbers, emails, and social media handles are not allowed in messages. Please use in-app messaging to communicate.",
+          { conversationId: convId }
+        );
         return res.status(422).json({ error: chatMod.userMessage });
       }
       let { content: processedContent, originalContent, isFiltered, filterFlags, severity, profanityCount, contactCount } = processMessageContent(chatMod.cleanedText, !allowPhone);
@@ -55586,25 +55807,53 @@ async function registerRoutes(httpServer, app2) {
     return res.json({ success: true });
   });
   app2.get("/api/pro/profile", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
-    const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.user.userId));
-    return res.json(profile);
+    const [row] = await db.select({
+      profile: professionalProfiles,
+      bio: users.bio
+    }).from(professionalProfiles).leftJoin(users, eq(users.id, professionalProfiles.userId)).where(eq(professionalProfiles.userId, req.user.userId));
+    return res.json(row ? { ...row.profile, bio: row.bio } : null);
   });
   app2.patch("/api/pro/profile", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
-    const { businessName, bio, yearsExperience, hourlyRate, serviceCategories: cats, serviceAreas, availability, lat, lng, radiusKm } = req.body;
-    const [profile] = await db.update(professionalProfiles).set({
-      businessName: businessName || void 0,
-      yearsExperience: yearsExperience || void 0,
-      hourlyRate: hourlyRate ? String(hourlyRate) : void 0,
-      serviceCategories: cats || void 0,
-      serviceAreas: serviceAreas || void 0,
-      availability: availability || void 0,
-      lat: lat ? String(lat) : void 0,
-      lng: lng ? String(lng) : void 0,
-      radiusKm: radiusKm || void 0,
+    const {
+      businessName,
+      bio,
+      website,
+      yearsExperience,
+      hourlyRate,
+      serviceCategories: cats,
+      serviceAreas,
+      credentials,
+      availability,
+      lat,
+      lng,
+      radiusKm
+    } = req.body;
+    const profileUpdate = {
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq(professionalProfiles.userId, req.user.userId)).returning();
-    if (bio) await db.update(users).set({ bio, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, req.user.userId));
-    return res.json(profile);
+    };
+    if (businessName !== void 0) profileUpdate.businessName = trimNullable2(businessName);
+    if (website !== void 0) profileUpdate.website = trimNullable2(website);
+    if (credentials !== void 0) profileUpdate.credentials = trimNullable2(credentials);
+    if (yearsExperience !== void 0) {
+      const parsedYears = yearsExperience === null ? null : Number(yearsExperience);
+      profileUpdate.yearsExperience = parsedYears === null || Number.isFinite(parsedYears) ? parsedYears : null;
+    }
+    if (hourlyRate !== void 0) profileUpdate.hourlyRate = hourlyRate === null ? null : String(hourlyRate);
+    if (cats !== void 0) profileUpdate.serviceCategories = Array.isArray(cats) ? cats : [];
+    if (serviceAreas !== void 0) profileUpdate.serviceAreas = parseServiceAreasInput(serviceAreas) ?? [];
+    if (availability !== void 0) profileUpdate.availability = availability ?? {};
+    if (lat !== void 0) profileUpdate.lat = lat === null || lat === "" ? null : String(lat);
+    if (lng !== void 0) profileUpdate.lng = lng === null || lng === "" ? null : String(lng);
+    if (radiusKm !== void 0) {
+      const parsedRadius = radiusKm === null ? null : Number(radiusKm);
+      profileUpdate.radiusKm = parsedRadius === null || Number.isFinite(parsedRadius) ? parsedRadius : null;
+    }
+    const [profile] = await db.update(professionalProfiles).set(profileUpdate).where(eq(professionalProfiles.userId, req.user.userId)).returning();
+    if (bio !== void 0) {
+      await db.update(users).set({ bio: trimNullable2(bio), updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, req.user.userId));
+    }
+    const [updatedUser] = await db.select({ bio: users.bio }).from(users).where(eq(users.id, req.user.userId));
+    return res.json(profile ? { ...profile, bio: updatedUser?.bio ?? null } : null);
   });
   app2.post("/api/pro/verification/submit", requireAuth, requireRole("PROFESSIONAL"), async (req, res) => {
     try {
@@ -56271,7 +56520,12 @@ async function registerRoutes(httpServer, app2) {
       }
       if (phone !== void 0) updateData.phone = phone || null;
       if (avatarUrl !== void 0) updateData.avatarUrl = avatarUrl || null;
-      if (notificationPreferences !== void 0) updateData.notificationPreferences = notificationPreferences;
+      if (notificationPreferences !== void 0) {
+        updateData.notificationPreferences = normalizeNotificationPreferences(
+          notificationPreferences,
+          userRole
+        );
+      }
       const [updated] = await db.update(users).set(updateData).where(eq(users.id, userId)).returning();
       const isCustomer = updated.role === "CUSTOMER";
       return res.json({
@@ -56285,7 +56539,7 @@ async function registerRoutes(httpServer, app2) {
         avatarUrl: updated.avatarUrl,
         phoneVerified: updated.phoneVerified ?? false,
         emailVerified: updated.emailVerified,
-        notificationPreferences: updated.notificationPreferences || { email: true, sms: true, push: true }
+        notificationPreferences: getUserNotificationPreferences(updated)
       });
     } catch (err) {
       return res.status(500).json({ error: err.message });

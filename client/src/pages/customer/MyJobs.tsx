@@ -40,12 +40,11 @@ export default function MyJobs() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const { data: quotesRaw } = useQuery<any>({ queryKey: ["/api/quotes"] });
-  const allQuotes: any[] = Array.isArray(quotesRaw) ? quotesRaw : [];
-  const pendingByJob: Record<string, number> = {};
-  allQuotes.filter((q: any) => q.status === "PENDING").forEach((q: any) => {
-    if (q.jobId) pendingByJob[q.jobId] = (pendingByJob[q.jobId] || 0) + 1;
-  });
+  const { data: quoteSummaryData } = useQuery<any>({ queryKey: ["/api/quotes?summary=jobCounts"] });
+  const quoteSummaryByJob = quoteSummaryData?.byJob || {};
+  const pendingByJob: Record<string, number> = Object.fromEntries(
+    Object.entries(quoteSummaryByJob).map(([jobId, summary]: [string, any]) => [jobId, summary.pending || 0])
+  );
 
   const [showClosed, setShowClosed] = useState(false);
 
@@ -156,10 +155,10 @@ export default function MyJobs() {
                               {job.referenceCode && <span className="text-xs font-mono text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />{job.referenceCode}</span>}
                             </div>
                             <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{job.description}</p>
-                            {allQuotes.filter((q: any) => q.jobId === job.id).length > 0 && (
+                            {(quoteSummaryByJob[job.id]?.total || 0) > 0 && (
                               <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                                 <FileText className="w-3 h-3" />
-                                {allQuotes.filter((q: any) => q.jobId === job.id).length} quote{allQuotes.filter((q: any) => q.jobId === job.id).length > 1 ? "s" : ""} received
+                                {quoteSummaryByJob[job.id].total} quote{quoteSummaryByJob[job.id].total > 1 ? "s" : ""} received
                               </p>
                             )}
                             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-xs text-muted-foreground bg-white/40 dark:bg-white/5 backdrop-blur-sm p-3 rounded-xl border border-white/20 dark:border-white/5 w-fit">

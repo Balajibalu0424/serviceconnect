@@ -12,6 +12,27 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { User, Lock, Phone, Mail, Camera, CheckCircle2, XCircle, Bell } from "lucide-react";
+import {
+  normalizeNotificationPreferences,
+  type NotificationCategoryKey,
+  type NotificationPreferences,
+} from "@shared/notificationPreferences";
+
+const CUSTOMER_NOTIFICATION_OPTIONS: Array<{ key: NotificationCategoryKey; label: string; description: string }> = [
+  { key: "quotes", label: "Quotes", description: "New quotes, quote decisions, and quote follow-ups." },
+  { key: "bookings", label: "Bookings", description: "Booking confirmations, progress, completion, and cancellations." },
+  { key: "messages", label: "Messages", description: "New chat messages and call-request activity." },
+  { key: "jobUpdates", label: "Job Updates", description: "Unlocks, aftercare prompts, and job lifecycle updates." },
+  { key: "reviews", label: "Reviews", description: "Prompts and updates related to reviews." },
+];
+
+const PROFESSIONAL_NOTIFICATION_OPTIONS: Array<{ key: NotificationCategoryKey; label: string; description: string }> = [
+  { key: "leads", label: "Lead Alerts", description: "New matching jobs and urgent lead alerts." },
+  { key: "quotes", label: "Quotes", description: "Quote accepted or rejected activity." },
+  { key: "bookings", label: "Bookings", description: "Booking confirmations, progress, completion, and cancellations." },
+  { key: "messages", label: "Messages", description: "New chat messages and call-request activity." },
+  { key: "reviews", label: "Reviews", description: "New customer reviews and replies." },
+];
 
 export default function Settings() {
   const { user, refreshUser } = useAuth();
@@ -26,9 +47,8 @@ export default function Settings() {
   const [profileLoading, setProfileLoading] = useState(false);
   
   // Notification Preferences state
-  const defaultPrefs = { email: true, sms: true, push: true };
-  const userPrefs = (user as any)?.notificationPreferences || defaultPrefs;
-  const [notificationPreferences, setNotificationPreferences] = useState(userPrefs);
+  const userPrefs = normalizeNotificationPreferences((user as any)?.notificationPreferences);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(userPrefs);
 
   useEffect(() => {
     if (user) {
@@ -36,7 +56,7 @@ export default function Settings() {
       setLastName(user.lastName || "");
       setPhone((user as any).phone || "");
       setAvatarUrl(user.avatarUrl || "");
-      setNotificationPreferences((user as any).notificationPreferences || defaultPrefs);
+      setNotificationPreferences(normalizeNotificationPreferences((user as any).notificationPreferences));
     }
   }, [user]);
 
@@ -107,8 +127,17 @@ export default function Settings() {
       setPwLoading(false); }
   };
 
-  const updatePreference = async (key: keyof typeof notificationPreferences, checked: boolean) => {
-    const newPrefs = { ...notificationPreferences, [key]: checked };
+  const notificationOptions = isCustomer ? CUSTOMER_NOTIFICATION_OPTIONS : PROFESSIONAL_NOTIFICATION_OPTIONS;
+
+  const updatePreference = async (key: NotificationCategoryKey, checked: boolean) => {
+    const previousPrefs = notificationPreferences;
+    const newPrefs = {
+      ...notificationPreferences,
+      categories: {
+        ...notificationPreferences.categories,
+        [key]: checked,
+      },
+    };
     setNotificationPreferences(newPrefs);
     
     // Auto-save notification preference immediately
@@ -119,7 +148,7 @@ export default function Settings() {
       toast({ title: "Preferences updated" });
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
-      setNotificationPreferences(notificationPreferences); // revert on error
+      setNotificationPreferences(previousPrefs);
     }
   };
 
@@ -180,7 +209,7 @@ export default function Settings() {
               {isCustomer ? (
                 <div className="space-y-1.5">
                   <Label>Full name</Label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="px-3 py-2 rounded-md border bg-gray-50 dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 select-none">
                       {user?.firstName}
                     </div>
@@ -193,7 +222,7 @@ export default function Settings() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <Label htmlFor="firstName">First name</Label>
                     <Input
@@ -367,42 +396,25 @@ export default function Settings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-5 pb-4 space-y-3">
-            <p className="text-sm text-muted-foreground mb-4">Choose how you want to be notified about activity on your account. Settings are saved automatically.</p>
-            
-            <div className="flex items-center justify-between py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
-              <div className="space-y-0.5">
-                <Label className="text-base">Email Notifications</Label>
-                <p className="text-xs text-muted-foreground">Receive quotes, receipts, and important updates via email</p>
-              </div>
-              <Switch 
-                checked={notificationPreferences.email} 
-                onCheckedChange={(checked) => updatePreference("email", checked)} 
-              />
-            </div>
+            <p className="text-sm text-muted-foreground mb-4">Choose which in-app notification categories you want to receive. Changes are saved immediately.</p>
 
-            <div className="flex items-center justify-between py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
-              <div className="space-y-0.5">
-                <Label className="text-base">SMS Notification</Label>
-                <p className="text-xs text-muted-foreground">Get text messages for time-sensitive booking alerts</p>
+            {notificationOptions.map((option) => (
+              <div key={option.key} className="flex items-center justify-between gap-4 py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
+                <div className="space-y-0.5 flex-1 min-w-0">
+                  <Label className="text-base">{option.label}</Label>
+                  <p className="text-xs text-muted-foreground">{option.description}</p>
+                </div>
+                <Switch
+                  checked={notificationPreferences.categories[option.key]}
+                  onCheckedChange={(checked) => updatePreference(option.key, checked)}
+                />
               </div>
-              <Switch 
-                checked={notificationPreferences.sms} 
-                onCheckedChange={(checked) => updatePreference("sms", checked)} 
-              />
-            </div>
+            ))}
 
-            <div className="flex items-center justify-between py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
-              <div className="space-y-0.5">
-                <Label className="text-base">Push Notifications</Label>
-                <p className="text-xs text-muted-foreground">Deliver notifications to your device natively</p>
-              </div>
-              <Switch 
-                checked={notificationPreferences.push} 
-                onCheckedChange={(checked) => updatePreference("push", checked)} 
-              />
+            <div className="py-3 px-4 bg-muted/30 rounded-xl border border-border/40">
+              <p className="text-sm font-medium">System alerts</p>
+              <p className="text-xs text-muted-foreground mt-1">Security, verification, moderation, and support-critical alerts always stay enabled.</p>
             </div>
-            
-            <p className="text-xs text-muted-foreground mt-4 italic">In-app notifications (the bell icon) will always remain enabled for important account activity.</p>
           </CardContent>
         </Card>
       </div>

@@ -17,6 +17,13 @@ import { formatDistanceToNow } from "date-fns";
 import { ReviewReplyForm } from "@/components/reviews/ReviewReplyForm";
 import { ProfileCompleteness } from "@/components/pro/ProfileCompleteness";
 
+function parseServiceAreas(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function ProProfileEditor() {
   const { user, refreshUser } = useAuth();
   const { toast } = useToast();
@@ -46,9 +53,9 @@ export default function ProProfileEditor() {
         businessName: profile.businessName || "",
         yearsExperience: profile.yearsExperience != null ? String(profile.yearsExperience) : "",
         hourlyRate: profile.hourlyRate != null ? String(profile.hourlyRate) : "",
-        bio: profile.bio || "",
+        bio: profile.bio || user?.bio || "",
         website: profile.website || "",
-        serviceAreas: profile.serviceAreas || "",
+        serviceAreas: Array.isArray(profile.serviceAreas) ? profile.serviceAreas.join(", ") : profile.serviceAreas || "",
         credentials: profile.credentials || "",
         radiusKm: profile.radiusKm != null ? String(profile.radiusKm) : "25",
         lat: profile.lat || "",
@@ -57,7 +64,7 @@ export default function ProProfileEditor() {
       // Pre-populate selected categories (stored as UUID array)
       setSelectedCategories(profile.serviceCategories || []);
     }
-  }, [profile]);
+  }, [profile, user?.bio]);
 
   const updateProfile = useMutation({
     mutationFn: async () => {
@@ -66,8 +73,8 @@ export default function ProProfileEditor() {
         yearsExperience: form.yearsExperience ? parseInt(form.yearsExperience) : null,
         hourlyRate: form.hourlyRate ? parseFloat(form.hourlyRate) : null,
         bio: form.bio || null,
-        website: form.website || undefined,
-        serviceAreas: form.serviceAreas || undefined,
+        website: form.website || null,
+        serviceAreas: parseServiceAreas(form.serviceAreas),
         serviceCategories: selectedCategories,
         credentials: form.credentials || null,
         radiusKm: form.radiusKm ? parseInt(form.radiusKm) : 25,
@@ -116,6 +123,21 @@ export default function ProProfileEditor() {
   });
 
   const initials = `${user?.firstName?.[0] || ""}${user?.lastName?.[0] || ""}`.toUpperCase();
+  const completenessUser = {
+    avatarUrl: user?.avatarUrl,
+    bio: form.bio,
+  };
+  const completenessProfile = {
+    ...profile,
+    businessName: form.businessName || null,
+    yearsExperience: form.yearsExperience ? parseInt(form.yearsExperience, 10) : null,
+    website: form.website || null,
+    serviceCategories: selectedCategories,
+    serviceAreas: parseServiceAreas(form.serviceAreas),
+    credentials: form.credentials || null,
+    lat: form.lat || null,
+    lng: form.lng || null,
+  };
 
   return (
     <DashboardLayout>
@@ -126,7 +148,7 @@ export default function ProProfileEditor() {
         </div>
 
         {profile && user && (
-          <ProfileCompleteness user={user} profile={profile} />
+          <ProfileCompleteness user={completenessUser} profile={completenessProfile} />
         )}
 
         {/* Header card */}
@@ -150,7 +172,7 @@ export default function ProProfileEditor() {
             <CardTitle className="text-base font-heading font-semibold text-foreground/80">Personal Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5 pt-6">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>First name</Label>
                 <Input value={nameForm.firstName} onChange={e => setNameForm(f => ({ ...f, firstName: e.target.value }))} data-testid="input-firstname" />
@@ -193,7 +215,7 @@ export default function ProProfileEditor() {
                     data-testid="input-business-name"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Years of Experience</Label>
                     <Input
@@ -388,7 +410,7 @@ export default function ProProfileEditor() {
               <CardTitle className="text-base font-heading font-semibold text-foreground/80">Performance Metrics</CardTitle>
             </CardHeader>
             <CardContent className="pt-6">
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
                 <div className="space-y-1">
                   <div className="flex items-center justify-center gap-1">
                     <Star className="w-5 h-5 text-amber-500 fill-amber-500/20" />

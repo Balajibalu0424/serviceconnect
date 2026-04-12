@@ -8,10 +8,14 @@ export interface ProfileCompletenessProps {
     bio?: string | null;
   };
   profile: {
+    businessName?: string | null;
     credentials?: string | null;
     serviceCategories?: string[] | null;
     serviceAreas?: string[] | null;
+    yearsExperience?: number | null;
+    website?: string | null;
     lat?: number | string | null;
+    lng?: number | string | null;
     portfolio?: any[] | null;
   };
   compact?: boolean;
@@ -21,14 +25,19 @@ export function ProfileCompleteness({ user, profile, compact = false }: ProfileC
   const checks = [
     { id: "avatar", label: "Profile Photo", done: !!user?.avatarUrl },
     { id: "bio", label: "About You / Bio", done: !!user?.bio && user.bio.length > 10 },
+    { id: "business", label: "Business Name", done: !!profile?.businessName },
+    { id: "experience", label: "Years of Experience", done: (profile?.yearsExperience ?? 0) > 0 },
     { id: "categories", label: "Service Categories", done: !!profile?.serviceCategories?.length },
-    { id: "location", label: "Service Area & Location", done: !!profile?.lat || !!profile?.serviceAreas?.length },
+    { id: "serviceAreas", label: "Service Areas", done: !!profile?.serviceAreas?.length },
+    { id: "location", label: "Base Location", done: !!profile?.lat && !!profile?.lng },
+    { id: "website", label: "Website", done: !!profile?.website },
     { id: "credentials", label: "Credentials & Certifications", done: !!profile?.credentials && profile.credentials.length > 5 },
     { id: "portfolio", label: "Portfolio Examples", done: !!profile?.portfolio?.length },
   ];
 
   const completedCount = checks.filter((c) => c.done).length;
   const percentage = Math.round((completedCount / checks.length) * 100);
+  const nextSteps = checks.filter((check) => !check.done).slice(0, 3);
 
   if (compact) {
     return (
@@ -88,6 +97,12 @@ export function ProfileCompleteness({ user, profile, compact = false }: ProfileC
           </div>
         ))}
       </div>
+
+      {nextSteps.length > 0 && (
+        <p className="text-xs text-muted-foreground mt-4">
+          Next up: {nextSteps.map((step) => step.label).join(", ")}
+        </p>
+      )}
     </div>
   );
 }

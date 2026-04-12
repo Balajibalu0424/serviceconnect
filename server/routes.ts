@@ -34,6 +34,11 @@ import {
 import { z } from "zod";
 import Stripe from "stripe";
 import { registerOnboardingRoutes } from "./onboardingRoutes";
+import {
+  normalizeNotificationPreferences,
+  type NotificationCategoryKey,
+  type NotificationPreferences,
+} from "@shared/notificationPreferences";
 import { DEMO_OTP_CODE } from "@shared/verification";
 import { issueVerificationChallenge, verifyVerificationChallenge } from "./verificationService";
 
@@ -45,6 +50,88 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder"
 
 
 // ─── Helper: create notification ─────────────────────────────────────────────
+const NOTIFICATION_CATEGORY_BY_TYPE: Partial<Record<string, NotificationCategoryKey>> = {
+  JOB_QUOTE: "quotes",
+  NEW_QUOTE: "quotes",
+  QUOTE_ACCEPTED: "quotes",
+  QUOTE_REJECTED: "quotes",
+  JOB_UNLOCK: "jobUpdates",
+  JOB_UPDATE: "jobUpdates",
+  JOB_MATCHED: "jobUpdates",
+  JOB_COMPLETED: "jobUpdates",
+  JOB_BOOSTED: "jobUpdates",
+  AFTERCARE: "jobUpdates",
+  AFTERCARE_2D: "jobUpdates",
+  AFTERCARE_5D: "jobUpdates",
+  AFTERCARE_REMINDER: "jobUpdates",
+  JOB_AUTO_CLOSED: "jobUpdates",
+  BOOKING_CREATED: "bookings",
+  BOOKING_IN_PROGRESS: "bookings",
+  BOOKING_COMPLETED: "bookings",
+  BOOKING_CANCELLED: "bookings",
+  NEW_MESSAGE: "messages",
+  CALL_REQUEST: "messages",
+  CALL_ACCEPTED: "messages",
+  CALL_DECLINED: "messages",
+  REVIEW: "reviews",
+  REVIEW_POSTED: "reviews",
+  NEW_JOB_AVAILABLE: "leads",
+  URGENT_JOB: "leads",
+  PAYMENT: "system",
+  CREDIT: "system",
+  TICKET_REPLY: "system",
+  TICKET_STATUS: "system",
+  VERIFICATION: "system",
+  VERIFICATION_SUBMITTED: "system",
+  VERIFICATION_APPROVED: "system",
+  VERIFICATION_REJECTED: "system",
+  SYSTEM: "system",
+  JOB_FLAGGED: "system",
+  MESSAGE_FLAGGED: "system",
+};
+
+const NON_DISABLEABLE_NOTIFICATION_TYPES = new Set([
+  "SYSTEM",
+  "JOB_FLAGGED",
+  "MESSAGE_FLAGGED",
+  "VERIFICATION",
+  "VERIFICATION_SUBMITTED",
+  "VERIFICATION_APPROVED",
+  "VERIFICATION_REJECTED",
+]);
+
+function trimNullable(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseServiceAreasInput(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return [];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function getUserNotificationPreferences(user: { notificationPreferences?: NotificationPreferences | null; role?: string | null }) {
+  return normalizeNotificationPreferences(user.notificationPreferences, user.role ?? undefined);
+}
+
+function canReceiveNotification(user: { notificationPreferences?: NotificationPreferences | null; role?: string | null }, type: string) {
+  if (NON_DISABLEABLE_NOTIFICATION_TYPES.has(type)) return true;
+  const category = NOTIFICATION_CATEGORY_BY_TYPE[type];
+  if (!category) return true;
+  return getUserNotificationPreferences(user).categories[category] !== false;
+}
+
 async function createNotification(userIdOrRole: string, type: string, title: string, message: string, data: object = {}) {
   if (!userIdOrRole) return;
 
@@ -71,6 +158,14 @@ async function createNotification(userIdOrRole: string, type: string, title: str
 
     // Otherwise, single user — deduplicate within a 5-minute window
     // Same user + same type + same jobId (when present) = skip to prevent double-fire from scheduler restarts
+    const [recipient] = await db
+      .select({ id: users.id, role: users.role, notificationPreferences: users.notificationPreferences })
+      .from(users)
+      .where(eq(users.id, userIdOrRole))
+      .limit(1);
+    if (!recipient) return;
+    if (!canReceiveNotification(recipient, type)) return;
+
     const dataAny = data as any;
     const jobId = dataAny?.jobId;
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -243,6 +338,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { accessToken, refreshToken } = generateTokens(user.id, user.role);
       return res.status(201).json({ accessToken, refreshToken, user: { ...user, passwordHash: undefined } });
     } catch (e: any) {
+      if (
+        e?.message === "Only pending quotes can be accepted." ||
+        e?.message === "Closed jobs cannot accept new quotes." ||
+        e?.message === "This job already has an active booking." ||
+        e?.message === "Another quote has already been accepted for this job."
+      ) {
+        return res.status(409).json({ error: e.message });
+      }
       return res.status(500).json({ error: e.message });
     }
   });
@@ -263,7 +366,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         userId: user.id, refreshTokenHash: refreshHash,
         ipAddress: req.ip, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       });
-      return res.json({ accessToken, refreshToken, user: { ...user, passwordHash: undefined } });
+      return res.json({
+        accessToken,
+        refreshToken,
+        user: {
+          ...user,
+          passwordHash: undefined,
+          notificationPreferences: getUserNotificationPreferences(user),
+        },
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -311,7 +422,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       onboardingCompleted: user.onboardingCompleted,
       creditBalance: user.creditBalance,
       createdAt: user.createdAt,
-      notificationPreferences: (user as any).notificationPreferences || { email: true, sms: true, push: true },
+      notificationPreferences: getUserNotificationPreferences(user),
     };
     return res.json({ ...safeUser, profile });
   });
@@ -747,25 +858,46 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Location matching logic
       if (profile?.lat && profile?.lng) {
-        // Haversine formula (distance in km)
         const radius = profile.radiusKm || 25;
         const lat = Number(profile.lat);
         const lng = Number(profile.lng);
-        
-        // If the job has lat/lng, we use exact math.
-        // Or if job has no lat/lng, we allow it (graceful degradation) unless strictly filtered.
-        // Actually, let's filter if job has lat/lng, OR fallback to substring matching on locationTown
+        const areaConditions = Array.isArray(profile.serviceAreas)
+          ? profile.serviceAreas
+              .map((area) => String(area).trim())
+              .filter(Boolean)
+              .map((area) => sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`)
+          : [];
+        const coordlessFallback = areaConditions.length > 0 ? or(...areaConditions) : null;
+
         conditions.push(
-          sql`
-            (${jobs.lat} IS NULL) OR 
-            (
-              6371 * acos(
-                cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) * 
-                cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) + 
-                sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-              ) <= ${radius}
-            )
-          `
+          coordlessFallback
+            ? sql`
+                (
+                  (
+                    ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
+                    6371 * acos(
+                      cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
+                      cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
+                      sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+                    ) <= ${radius}
+                  )
+                  OR
+                  (
+                    (${jobs.lat} IS NULL OR ${jobs.lng} IS NULL) AND
+                    ${coordlessFallback}
+                  )
+                )
+              `
+            : sql`
+                (
+                  ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
+                  6371 * acos(
+                    cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
+                    cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
+                    sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+                  ) <= ${radius}
+                )
+              `
         );
       } else if (profile?.serviceAreas && profile.serviceAreas.length > 0) {
         // Fallback: If Pro has no lat/lng but has text regions, try ilike on towns
@@ -1371,6 +1503,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const userId = req.user!.userId;
       const filterJobId = req.query.jobId as string | undefined;
+      const summaryMode = req.query.summary as string | undefined;
 
       const [userRow] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, userId));
       if (!userRow) return res.status(404).json({ error: "User not found" });
@@ -1382,6 +1515,55 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Optional single-job filtering — used by JobDetail so it doesn't fetch all quotes
       if (filterJobId) conditions.push(eq(quotes.jobId, filterJobId));
 
+      if (summaryMode === "jobCounts" && userRow.role === "CUSTOMER" && !filterJobId) {
+        const summaryRows = await db.select({
+          jobId: quotes.jobId,
+          status: quotes.status,
+          professionalFirstName: users.firstName,
+        })
+          .from(quotes)
+          .leftJoin(users, eq(quotes.professionalId, users.id))
+          .where(and(...conditions))
+          .orderBy(desc(quotes.createdAt));
+
+        const byJob: Record<string, {
+          total: number;
+          pending: number;
+          accepted: number;
+          rejected: number;
+          withdrawn: number;
+          pendingProfessionalFirstNames: string[];
+        }> = {};
+
+        for (const row of summaryRows) {
+          if (!row.jobId) continue;
+          if (!byJob[row.jobId]) {
+            byJob[row.jobId] = {
+              total: 0,
+              pending: 0,
+              accepted: 0,
+              rejected: 0,
+              withdrawn: 0,
+              pendingProfessionalFirstNames: [],
+            };
+          }
+          const target = byJob[row.jobId];
+          target.total += 1;
+          if (row.status === "PENDING") {
+            target.pending += 1;
+            if (row.professionalFirstName) target.pendingProfessionalFirstNames.push(row.professionalFirstName);
+          } else if (row.status === "ACCEPTED") {
+            target.accepted += 1;
+          } else if (row.status === "REJECTED") {
+            target.rejected += 1;
+          } else if (row.status === "WITHDRAWN") {
+            target.withdrawn += 1;
+          }
+        }
+
+        return res.json({ byJob });
+      }
+
       // ─── Single pass: quotes + jobs + categories via JOIN (eliminates per-quote job/cat queries) ───
       const rows = await db.select({
         quote: quotes,
@@ -1392,10 +1574,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         jobLocationText: jobs.locationText,
         jobLocationEirc: jobs.locationEircode,
         catName:         serviceCategories.name,
+        bookingId:       bookings.id,
+        bookingStatus:   bookings.status,
+        bookingCompletedAt: bookings.completedAt,
       })
         .from(quotes)
         .leftJoin(jobs, eq(quotes.jobId, jobs.id))
         .leftJoin(serviceCategories, eq(jobs.categoryId, serviceCategories.id))
+        .leftJoin(bookings, eq(bookings.quoteId, quotes.id))
         .where(and(...conditions))
         .orderBy(desc(quotes.createdAt));
 
@@ -1441,6 +1627,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           referenceCode: r.jobRefCode, locationText: r.jobLocationText, locationEircode: r.jobLocationEirc,
         } : null,
         category: r.catName ? { name: r.catName } : null,
+        booking: r.bookingId ? {
+          id: r.bookingId,
+          status: r.bookingStatus,
+          completedAt: r.bookingCompletedAt,
+        } : null,
         conversationId: r.jobId ? (jobToConvId[r.jobId] ?? null) : null,
         professional: userRow.role === "CUSTOMER" ? (proInfoMap[r.quote.professionalId] ?? null) : undefined,
       }));
@@ -1465,27 +1656,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [quote] = await db.select().from(quotes).where(eq(quotes.id, req.params.id as string));
       if (!quote) return res.status(404).json({ error: "Quote not found" });
       if (quote.customerId !== req.user!.userId) return res.status(403).json({ error: "Forbidden" });
+      if (quote.status !== "PENDING") {
+        return res.status(409).json({ error: "Only pending quotes can be accepted." });
+      }
 
       let createdBookingId = "";
       await db.transaction(async (tx) => {
-        await tx.update(quotes).set({ status: "ACCEPTED", updatedAt: new Date() }).where(eq(quotes.id, quote.id));
+        const [lockedQuote] = await tx.select().from(quotes).where(eq(quotes.id, quote.id)).for("update");
+        if (!lockedQuote) throw new Error("Quote not found");
+        if (lockedQuote.status !== "PENDING") throw new Error("Only pending quotes can be accepted.");
+
+        const [job] = await tx.select({ id: jobs.id, status: jobs.status }).from(jobs).where(eq(jobs.id, lockedQuote.jobId)).for("update");
+        if (!job) throw new Error("Job not found");
+        if (["COMPLETED", "CLOSED"].includes(job.status)) {
+          throw new Error("Closed jobs cannot accept new quotes.");
+        }
+
+        const [existingActiveBooking] = await tx.select({ id: bookings.id })
+          .from(bookings)
+          .where(and(
+            eq(bookings.jobId, lockedQuote.jobId),
+            inArray(bookings.status, ["CONFIRMED", "IN_PROGRESS", "DISPUTED"])
+          ))
+          .limit(1);
+        if (existingActiveBooking) {
+          throw new Error("This job already has an active booking.");
+        }
+
+        const [blockingAcceptedQuote] = await tx.select({ id: quotes.id })
+          .from(quotes)
+          .leftJoin(bookings, eq(bookings.quoteId, quotes.id))
+          .where(and(
+            eq(quotes.jobId, lockedQuote.jobId),
+            eq(quotes.status, "ACCEPTED"),
+            ne(quotes.id, lockedQuote.id),
+            or(
+              isNull(bookings.id),
+              inArray(bookings.status, ["CONFIRMED", "IN_PROGRESS", "COMPLETED", "DISPUTED"])
+            )
+          ))
+          .limit(1);
+        if (blockingAcceptedQuote) {
+          throw new Error("Another quote has already been accepted for this job.");
+        }
+
+        await tx.update(quotes).set({ status: "ACCEPTED", updatedAt: new Date() }).where(eq(quotes.id, lockedQuote.id));
 
         const [booking] = await tx.insert(bookings).values({
-          quoteId: quote.id, jobId: quote.jobId,
-          customerId: quote.customerId, professionalId: quote.professionalId,
-          totalAmount: quote.amount, status: "CONFIRMED"
+          quoteId: lockedQuote.id, jobId: lockedQuote.jobId,
+          customerId: lockedQuote.customerId, professionalId: lockedQuote.professionalId,
+          totalAmount: lockedQuote.amount, status: "CONFIRMED"
         }).returning();
         createdBookingId = booking.id;
 
-        await tx.update(jobs).set({ status: "MATCHED", updatedAt: new Date() }).where(eq(jobs.id, quote.jobId));
+        await tx.update(jobs).set({ status: "MATCHED", updatedAt: new Date() }).where(eq(jobs.id, lockedQuote.jobId));
 
-        // Auto-reject all other pending quotes for this job
+        // Auto-close the rest of the decision tree so the customer only has one live path.
         await tx.update(quotes)
           .set({ status: "REJECTED", updatedAt: new Date() })
           .where(and(
-            eq(quotes.jobId, quote.jobId),
-            eq(quotes.status, "PENDING"),
-            ne(quotes.id, quote.id)
+            eq(quotes.jobId, lockedQuote.jobId),
+            inArray(quotes.status, ["PENDING", "ACCEPTED"]),
+            ne(quotes.id, lockedQuote.id)
           ));
       });
 
@@ -1527,9 +1759,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   app.get("/api/bookings", requireAuth, async (req: AuthRequest, res: Response) => {
     const userId = req.user!.userId;
+    const filterJobId = req.query.jobId as string | undefined;
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     let conditions: any[] =
       user.role === "CUSTOMER" ? [eq(bookings.customerId, userId)] : [eq(bookings.professionalId, userId)];
+    if (filterJobId) conditions.push(eq(bookings.jobId, filterJobId));
     
     const rawBookings = await db.select().from(bookings).where(and(...conditions)).orderBy(desc(bookings.createdAt));
     
@@ -2002,6 +2236,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             // logging failure is non-blocking
           }
         }
+        await createNotification(
+          userId,
+          "SYSTEM",
+          "Contact sharing blocked",
+          "Phone numbers, emails, and social media handles are not allowed in messages. Please use in-app messaging to communicate.",
+          { conversationId: convId }
+        );
         return res.status(422).json({ error: chatMod.userMessage });
       }
 
@@ -2749,28 +2990,64 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // PROFESSIONAL PROFILE
   // ═══════════════════════════════════════════════════════════════════════════
   app.get("/api/pro/profile", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
-    const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.user!.userId));
-    return res.json(profile);
+    const [row] = await db.select({
+      profile: professionalProfiles,
+      bio: users.bio,
+    })
+      .from(professionalProfiles)
+      .leftJoin(users, eq(users.id, professionalProfiles.userId))
+      .where(eq(professionalProfiles.userId, req.user!.userId));
+    return res.json(row ? { ...row.profile, bio: row.bio } : null);
   });
 
   app.patch("/api/pro/profile", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
-    const { businessName, bio, yearsExperience, hourlyRate, serviceCategories: cats, serviceAreas, availability, lat, lng, radiusKm } = req.body;
-    const [profile] = await db.update(professionalProfiles).set({
-      businessName: businessName || undefined,
-      yearsExperience: yearsExperience || undefined,
-      hourlyRate: hourlyRate ? String(hourlyRate) : undefined,
-      serviceCategories: cats || undefined,
-      serviceAreas: serviceAreas || undefined,
-      availability: availability || undefined,
-      lat: lat ? String(lat) : undefined,
-      lng: lng ? String(lng) : undefined,
-      radiusKm: radiusKm || undefined,
-      updatedAt: new Date()
-    }).where(eq(professionalProfiles.userId, req.user!.userId)).returning();
+    const {
+      businessName,
+      bio,
+      website,
+      yearsExperience,
+      hourlyRate,
+      serviceCategories: cats,
+      serviceAreas,
+      credentials,
+      availability,
+      lat,
+      lng,
+      radiusKm,
+    } = req.body;
 
-    // Also update user bio
-    if (bio) await db.update(users).set({ bio, updatedAt: new Date() }).where(eq(users.id, req.user!.userId));
-    return res.json(profile);
+    const profileUpdate: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+    if (businessName !== undefined) profileUpdate.businessName = trimNullable(businessName);
+    if (website !== undefined) profileUpdate.website = trimNullable(website);
+    if (credentials !== undefined) profileUpdate.credentials = trimNullable(credentials);
+    if (yearsExperience !== undefined) {
+      const parsedYears = yearsExperience === null ? null : Number(yearsExperience);
+      profileUpdate.yearsExperience = parsedYears === null || Number.isFinite(parsedYears) ? parsedYears : null;
+    }
+    if (hourlyRate !== undefined) profileUpdate.hourlyRate = hourlyRate === null ? null : String(hourlyRate);
+    if (cats !== undefined) profileUpdate.serviceCategories = Array.isArray(cats) ? cats : [];
+    if (serviceAreas !== undefined) profileUpdate.serviceAreas = parseServiceAreasInput(serviceAreas) ?? [];
+    if (availability !== undefined) profileUpdate.availability = availability ?? {};
+    if (lat !== undefined) profileUpdate.lat = lat === null || lat === "" ? null : String(lat);
+    if (lng !== undefined) profileUpdate.lng = lng === null || lng === "" ? null : String(lng);
+    if (radiusKm !== undefined) {
+      const parsedRadius = radiusKm === null ? null : Number(radiusKm);
+      profileUpdate.radiusKm = parsedRadius === null || Number.isFinite(parsedRadius) ? parsedRadius : null;
+    }
+
+    const [profile] = await db.update(professionalProfiles).set(profileUpdate)
+      .where(eq(professionalProfiles.userId, req.user!.userId)).returning();
+
+    if (bio !== undefined) {
+      await db.update(users)
+        .set({ bio: trimNullable(bio), updatedAt: new Date() })
+        .where(eq(users.id, req.user!.userId));
+    }
+
+    const [updatedUser] = await db.select({ bio: users.bio }).from(users).where(eq(users.id, req.user!.userId));
+    return res.json(profile ? { ...profile, bio: updatedUser?.bio ?? null } : null);
   });
 
   // ── Pro Verification ─────────────────────────────────────────────────────────
@@ -3569,7 +3846,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (phone !== undefined) updateData.phone = phone || null;
       if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl || null;
-      if (notificationPreferences !== undefined) updateData.notificationPreferences = notificationPreferences;
+      if (notificationPreferences !== undefined) {
+        updateData.notificationPreferences = normalizeNotificationPreferences(
+          notificationPreferences,
+          userRole,
+        );
+      }
 
       const [updated] = await db
         .update(users)
@@ -3590,7 +3872,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         avatarUrl: updated.avatarUrl,
         phoneVerified: (updated as any).phoneVerified ?? false,
         emailVerified: updated.emailVerified,
-        notificationPreferences: (updated as any).notificationPreferences || { email: true, sms: true, push: true },
+        notificationPreferences: getUserNotificationPreferences(updated),
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

@@ -5,6 +5,8 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
+import type { NotificationPreferences } from "./notificationPreferences";
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "./notificationPreferences";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 export const userRoleEnum = pgEnum("user_role", ["CUSTOMER", "PROFESSIONAL", "ADMIN", "SUPPORT"]);
@@ -67,11 +69,7 @@ export const users = pgTable("users", {
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   firstJobId: varchar("first_job_id"),
   creditBalance: integer("credit_balance").notNull().default(0),
-  notificationPreferences: json("notification_preferences").$type<{
-    email: boolean;
-    sms: boolean;
-    push: boolean;
-  }>().default({ email: true, sms: true, push: true }),
+  notificationPreferences: json("notification_preferences").$type<NotificationPreferences>().default(DEFAULT_NOTIFICATION_PREFERENCES),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
   deletedAt: timestamp("deleted_at"),
@@ -147,6 +145,7 @@ export const professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   businessName: text("business_name"),
+  website: text("website"),
   credentials: text("credentials"),
   licenseNumber: text("license_number"),
   insuranceVerified: boolean("insurance_verified").notNull().default(false),
