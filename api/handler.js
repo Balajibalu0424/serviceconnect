@@ -70711,6 +70711,20 @@ function privateMetadata(user) {
     onboardingCompleted: user.onboardingCompleted
   };
 }
+function getUserPhoneNumbers(user) {
+  const phone = user.phone?.trim();
+  return phone ? [phone] : void 0;
+}
+function isRecoverableClerkBridgeError(error) {
+  const maybeError = error;
+  if (!maybeError || !Array.isArray(maybeError.errors)) {
+    return false;
+  }
+  return maybeError.errors.some((entry) => {
+    const message = `${entry?.message || ""} ${entry?.longMessage || ""}`.toLowerCase();
+    return maybeError.status === 422 && (entry?.code === "form_data_missing" || message.includes("doesn't match user requirements")) || maybeError.status === 403 && entry?.code === "unsupported_country_code";
+  });
+}
 async function verifyExistingIdentifiers(clerkUser, user) {
   const clerk = getClerkClient();
   if (user.email) {
@@ -70795,6 +70809,7 @@ async function ensureClerkUserForInternalUser(user, options = {}) {
     clerkUser = await clerk.users.createUser({
       externalId: user.id,
       emailAddress: [normalizedEmail(user.email)],
+      phoneNumber: getUserPhoneNumbers(user),
       firstName: user.firstName,
       lastName: user.lastName,
       passwordDigest: user.passwordHash,
@@ -70822,7 +70837,15 @@ async function ensureClerkUserForInternalUser(user, options = {}) {
   return clerk.users.getUser(clerkUser.id);
 }
 async function createClerkSignInTokenForInternalUser(user, authSource = "CLERK_BRIDGE") {
-  const clerkUser = await ensureClerkUserForInternalUser(user, { authSource });
+  let clerkUser = null;
+  try {
+    clerkUser = await ensureClerkUserForInternalUser(user, { authSource });
+  } catch (error) {
+    if (isRecoverableClerkBridgeError(error)) {
+      return null;
+    }
+    throw error;
+  }
   if (!clerkUser) {
     return null;
   }
@@ -70836,9 +70859,17 @@ async function syncClerkPasswordFromInternalUser(user) {
   if (!isClerkMigrationEnabled()) {
     return;
   }
-  const clerkUser = await ensureClerkUserForInternalUser(user, {
-    authSource: user.authSource === "CLERK_NATIVE" ? "CLERK_NATIVE" : "CLERK_BRIDGE"
-  });
+  let clerkUser = null;
+  try {
+    clerkUser = await ensureClerkUserForInternalUser(user, {
+      authSource: user.authSource === "CLERK_NATIVE" ? "CLERK_NATIVE" : "CLERK_BRIDGE"
+    });
+  } catch (error) {
+    if (isRecoverableClerkBridgeError(error)) {
+      return;
+    }
+    throw error;
+  }
   if (!clerkUser) {
     return;
   }
@@ -70856,9 +70887,16 @@ async function syncClerkVerificationState(userId) {
   if (!user) {
     return;
   }
-  await ensureClerkUserForInternalUser(user, {
-    authSource: user.authSource === "CLERK_NATIVE" ? "CLERK_NATIVE" : "CLERK_BRIDGE"
-  });
+  try {
+    await ensureClerkUserForInternalUser(user, {
+      authSource: user.authSource === "CLERK_NATIVE" ? "CLERK_NATIVE" : "CLERK_BRIDGE"
+    });
+  } catch (error) {
+    if (isRecoverableClerkBridgeError(error)) {
+      return;
+    }
+    throw error;
+  }
 }
 async function resolveInternalUserFromClerkUserId(clerkUserId) {
   const [linkedUser] = await db.select().from(users).where(eq(users.clerkUserId, clerkUserId));

@@ -2039,9 +2039,9 @@ All secrets remain env-only. No credentials are stored in source.
 
 ### Testing Results
 
-- `npm run check` - pending rerun after the final Clerk webhook + env/documentation changes
-- `npm run test` - pending rerun after the final Clerk webhook + env/documentation changes
-- `npm run build` - pending rerun after the final Clerk webhook + env/documentation changes
+- `npm run check` - passed
+- `npm run test` - passed
+- `npm run build` - passed
 - `npm run db:push` - previously passed for the auth schema additions
 - `npm run db:seed` - still fails locally when PostgreSQL is unavailable on `localhost:5432`, so seeded local browser verification depends on a reachable local DB
 
@@ -2049,4 +2049,11 @@ All secrets remain env-only. No credentials are stored in source.
 
 - Existing-user login intentionally remains bridge-driven on the backend to guarantee no forced reverification for already trusted accounts.
 - Full production verification still depends on Clerk env vars being present in Vercel for both preview and production deployments.
+- The current Clerk instance configuration is not yet fully compatible with the live Irish user base:
+  - the instance currently requires `phone_number` for some sign-in/user flows
+  - Clerk currently rejects Irish phone numbers in this instance with `unsupported_country_code`
+  - because of that, the bridge now degrades safely back to legacy JWT sessions instead of failing with a 500 when Clerk cannot provision or update a user
+- To complete the migration fully in production, the Clerk instance settings still need to be aligned with ServiceConnect:
+  - make phone optional for migrated users, or
+  - enable a supported phone strategy/country configuration for the target market
 - Any Clerk credentials shared in chat should be rotated before production use.
