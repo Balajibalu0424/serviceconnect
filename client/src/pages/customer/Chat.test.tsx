@@ -16,6 +16,15 @@ const { apiRequestMock, navigateMock, toastMock } = vi.hoisted(() => ({
 vi.mock("wouter", () => ({
   useLocation: () => [mockPathname, navigateMock],
   useSearch: () => mockSearch,
+  useRoute: (pattern: string) => {
+    if (pattern === "/chat/:conversationId" && mockPathname.startsWith("/chat/")) {
+      return [true, { conversationId: mockPathname.replace("/chat/", "") }];
+    }
+    if (pattern === "/pro/chat/:conversationId" && mockPathname.startsWith("/pro/chat/")) {
+      return [true, { conversationId: mockPathname.replace("/pro/chat/", "") }];
+    }
+    return [false, null];
+  },
 }));
 
 vi.mock("@/components/layouts/DashboardLayout", () => ({

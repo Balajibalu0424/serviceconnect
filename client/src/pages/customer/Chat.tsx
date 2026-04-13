@@ -11,8 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Send, Loader2, ArrowLeft, Phone, CheckCircle2, Lock, Archive } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import { useLocation, useSearch } from "wouter";
-import { buildConversationPath, extractConversationId, getChatBasePath } from "@shared/chatRoutes";
+import { useLocation, useRoute, useSearch } from "wouter";
+import { buildConversationPath, getChatBasePath, getRouteSearchParam } from "@shared/chatRoutes";
 
 const TERMINAL_JOB_STATUSES = ["COMPLETED", "CLOSED"];
 
@@ -48,7 +48,14 @@ export default function Chat() {
   const [pathname, setLocation] = useLocation();
   const searchString = useSearch();
   const isProChat = pathname.startsWith("/pro");
-  const urlConvId = extractConversationId(pathname, searchString) || null;
+  const [customerRouteMatch, customerParams] = useRoute<{ conversationId: string }>("/chat/:conversationId");
+  const [proRouteMatch, proParams] = useRoute<{ conversationId: string }>("/pro/chat/:conversationId");
+  const matchedConversationId = customerRouteMatch
+    ? customerParams?.conversationId
+    : proRouteMatch
+      ? proParams?.conversationId
+      : null;
+  const urlConvId = matchedConversationId || getRouteSearchParam(pathname, searchString, "conversationId") || null;
   const chatBase = getChatBasePath(isProChat);
 
   const [activeConvId, setActiveConvId] = useState<string | null>(urlConvId);
