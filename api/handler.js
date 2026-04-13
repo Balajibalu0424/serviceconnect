@@ -70720,9 +70720,11 @@ function isRecoverableClerkBridgeError(error) {
   if (!maybeError || !Array.isArray(maybeError.errors)) {
     return false;
   }
+  if (maybeError.status === 422) {
+    return true;
+  }
   return maybeError.errors.some((entry) => {
-    const message = `${entry?.message || ""} ${entry?.longMessage || ""}`.toLowerCase();
-    return maybeError.status === 422 && (entry?.code === "form_data_missing" || message.includes("doesn't match user requirements")) || maybeError.status === 403 && entry?.code === "unsupported_country_code";
+    return maybeError.status === 403 && entry?.code === "unsupported_country_code";
   });
 }
 async function verifyExistingIdentifiers(clerkUser, user) {
