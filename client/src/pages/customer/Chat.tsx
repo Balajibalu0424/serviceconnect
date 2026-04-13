@@ -69,15 +69,19 @@ export default function Chat() {
     return 0;
   });
 
+  const routeConversation = (conversations as any[]).find((c: any) => c.id === urlConvId);
+  const missingConversation = !!urlConvId && !loadingConvs && !routeConversation;
+  const selectedConvId = missingConversation ? null : activeConvId;
+
   const { data: msgList = [], isLoading: loadingMsgs } = useQuery<any[]>({
-    queryKey: ["/api/chat/conversations", activeConvId, "messages"],
+    queryKey: ["/api/chat/conversations", selectedConvId, "messages"],
     queryFn: async () => {
-      if (!activeConvId) return [];
-      const res = await apiRequest("GET", `/api/chat/conversations/${activeConvId}/messages`);
+      if (!selectedConvId) return [];
+      const res = await apiRequest("GET", `/api/chat/conversations/${selectedConvId}/messages`);
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: !!activeConvId,
+    enabled: !!selectedConvId,
     refetchInterval: 3000,
   });
 
@@ -88,12 +92,12 @@ export default function Chat() {
 
   const sendMessage = useMutation({
     mutationFn: async (content: string) => {
-      const res = await apiRequest("POST", `/api/chat/conversations/${activeConvId}/messages`, { content });
+      const res = await apiRequest("POST", `/api/chat/conversations/${selectedConvId}/messages`, { content });
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/chat/conversations", activeConvId, "messages"] });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations", selectedConvId, "messages"] });
       qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
       setMessage("");
     },
@@ -122,8 +126,8 @@ export default function Chat() {
   });
 
   useEffect(() => {
-    if (activeConvId) markRead.mutate(activeConvId);
-  }, [activeConvId]);
+    if (selectedConvId) markRead.mutate(selectedConvId);
+  }, [selectedConvId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -131,14 +135,13 @@ export default function Chat() {
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || !activeConvId) return;
+    if (!message.trim() || !selectedConvId) return;
     sendMessage.mutate(message.trim());
   };
 
-  const activeConv = (conversations as any[]).find((c: any) => c.id === activeConvId);
+  const activeConv = (conversations as any[]).find((c: any) => c.id === selectedConvId);
   const isActiveConvFinished = activeConv ? isFinishedConv(activeConv) : false;
   const activeJobStatus = activeConv?.job?.status;
-  const missingConversation = !!urlConvId && !loadingConvs && !(conversations as any[]).some((c: any) => c.id === urlConvId);
 
   useEffect(() => {
     if (missingConversation) {
@@ -173,7 +176,7 @@ export default function Chat() {
         {/* Sidebar: conversation list */}
         <div className={cn(
           "w-full md:w-80 flex-shrink-0 border-r bg-background flex flex-col",
-          activeConvId && "hidden md:flex"
+          selectedConvId && "hidden md:flex"
         )}>
           <div className="p-4 border-b">
             <div className="flex items-center justify-between">
@@ -198,7 +201,7 @@ export default function Chat() {
               <>
                 {/* Active conversations */}
                 {activeConvs.map((conv: any) => (
-                  <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => selectConversation(conv.id)} finished={false} />
+                  <ConvRow key={conv.id} conv={conv} user={user} activeConvId={selectedConvId} onClick={() => selectConversation(conv.id)} finished={false} />
                 ))}
 
                 {/* Archived/finished conversations */}
@@ -211,7 +214,7 @@ export default function Chat() {
                       </div>
                     )}
                     {archivedConvs.map((conv: any) => (
-                      <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => selectConversation(conv.id)} finished={true} />
+                      <ConvRow key={conv.id} conv={conv} user={user} activeConvId={selectedConvId} onClick={() => selectConversation(conv.id)} finished={true} />
                     ))}
                   </>
                 )}
@@ -223,9 +226,9 @@ export default function Chat() {
         {/* Main: message thread */}
         <div className={cn(
           "flex-1 flex flex-col bg-background",
-          !activeConvId && "hidden md:flex items-center justify-center"
+          !selectedConvId && "hidden md:flex items-center justify-center"
         )}>
-          {!activeConvId ? (
+          {!selectedConvId ? (
             <div className="text-center text-muted-foreground">
               <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-20" />
               {missingConversation ? (
