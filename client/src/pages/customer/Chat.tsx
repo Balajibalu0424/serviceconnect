@@ -149,6 +149,12 @@ export default function Chat() {
   const activeJobStatus = activeConv?.job?.status;
   const missingConversation = !!urlConvId && !loadingConvs && !(conversations as any[]).some((c: any) => c.id === urlConvId);
 
+  useEffect(() => {
+    if (missingConversation && activeConvId) {
+      setActiveConvId(null);
+    }
+  }, [activeConvId, missingConversation]);
+
   // Group conversations for sidebar
   const activeConvs = (conversations as any[]).filter(c => !isFinishedConv(c));
   const archivedConvs = (conversations as any[]).filter(c => isFinishedConv(c));
