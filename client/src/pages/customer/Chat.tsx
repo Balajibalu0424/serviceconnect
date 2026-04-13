@@ -55,15 +55,6 @@ export default function Chat() {
   const [message, setMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (urlConvId && urlConvId !== activeConvId) {
-      setActiveConvId(urlConvId);
-    }
-    if (!urlConvId && activeConvId) {
-      setActiveConvId(null);
-    }
-  }, [activeConvId, urlConvId]);
-
   const { data: allConversations = [], isLoading: loadingConvs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations"],
     refetchInterval: 5000,
@@ -150,10 +141,22 @@ export default function Chat() {
   const missingConversation = !!urlConvId && !loadingConvs && !(conversations as any[]).some((c: any) => c.id === urlConvId);
 
   useEffect(() => {
-    if (missingConversation && activeConvId) {
+    if (missingConversation) {
+      if (activeConvId) {
+        setActiveConvId(null);
+      }
+      return;
+    }
+
+    if (urlConvId && urlConvId !== activeConvId) {
+      setActiveConvId(urlConvId);
+      return;
+    }
+
+    if (!urlConvId && activeConvId) {
       setActiveConvId(null);
     }
-  }, [activeConvId, missingConversation]);
+  }, [activeConvId, missingConversation, urlConvId]);
 
   // Group conversations for sidebar
   const activeConvs = (conversations as any[]).filter(c => !isFinishedConv(c));
