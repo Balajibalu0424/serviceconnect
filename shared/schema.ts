@@ -97,6 +97,18 @@ export const phoneVerificationTokens = pgTable("phone_verification_tokens", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => [index("phone_tokens_user_idx").on(t.userId)]);
 
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("pwd_reset_user_idx").on(t.userId),
+  index("pwd_reset_token_idx").on(t.tokenHash),
+]);
+
 export const onboardingSessions = pgTable("onboarding_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   role: onboardingRoleEnum("role").notNull(),

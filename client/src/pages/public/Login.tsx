@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { getAccessToken } from "@/lib/queryClient";
@@ -15,9 +15,17 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { login } = useAuth();
+  const { user, login, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      if (user.role === "PROFESSIONAL") setLocation("/pro/dashboard");
+      else if (user.role === "ADMIN") setLocation("/admin");
+      else setLocation("/dashboard");
+    }
+  }, [isAuthenticated, user, setLocation]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,7 +146,12 @@ export default function Login() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="password" className="text-sm font-medium">Password</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password" className="text-sm font-medium">Password</Label>
+                    <Link href="/forgot-password" className="text-xs text-blue-600 hover:text-blue-700 hover:underline font-medium" data-testid="link-forgot-password">
+                      Forgot password?
+                    </Link>
+                  </div>
                   <div className="relative">
                     <Input
                       id="password"

@@ -19,6 +19,8 @@ import AdminLogin from "@/pages/public/AdminLogin";
 import Services from "@/pages/public/Services";
 import ProOnboarding from "@/pages/public/ProOnboarding";
 import ProPublicProfile from "@/pages/public/ProProfile";
+import ForgotPassword from "@/pages/public/ForgotPassword";
+import ResetPassword from "@/pages/public/ResetPassword";
 
 // Customer pages
 import CustomerDashboard from "@/pages/customer/Dashboard";
@@ -88,6 +90,8 @@ function AppRoutes() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/register/customer" component={RegisterCustomer} />
+      <Route path="/forgot-password" component={ForgotPassword} />
+      <Route path="/reset-password" component={ResetPassword} />
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/services" component={Services} />
       <Route path="/post-job" component={PostJobRoute} />

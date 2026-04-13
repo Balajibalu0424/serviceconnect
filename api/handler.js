@@ -39137,6 +39137,7 @@ __export(schema_exports, {
   onboardingStatusEnum: () => onboardingStatusEnum,
   onboardingStepEnum: () => onboardingStepEnum,
   participantRoleEnum: () => participantRoleEnum,
+  passwordResetTokens: () => passwordResetTokens,
   paymentStatusEnum: () => paymentStatusEnum,
   payments: () => payments,
   phoneVerificationTokens: () => phoneVerificationTokens,
@@ -43583,6 +43584,17 @@ var phoneVerificationTokens = pgTable("phone_verification_tokens", {
   used: boolean("used").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`)
 }, (t) => [index("phone_tokens_user_idx").on(t.userId)]);
+var passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`)
+}, (t) => [
+  index("pwd_reset_user_idx").on(t.userId),
+  index("pwd_reset_token_idx").on(t.tokenHash)
+]);
 var onboardingSessions = pgTable("onboarding_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   role: onboardingRoleEnum("role").notNull(),
@@ -56541,6 +56553,69 @@ async function registerRoutes(httpServer, app2) {
         emailVerified: updated.emailVerified,
         notificationPreferences: getUserNotificationPreferences(updated)
       });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string") {
+        return res.status(400).json({ error: "Email is required" });
+      }
+      const [user] = await db.select({ id: users.id, email: users.email, firstName: users.firstName }).from(users).where(and(eq(users.email, email.toLowerCase().trim()), isNull(users.deletedAt)));
+      if (!user) {
+        return res.json({ message: "If that email is registered you will receive a reset link shortly." });
+      }
+      await db.update(passwordResetTokens).set({ usedAt: /* @__PURE__ */ new Date() }).where(and(
+        eq(passwordResetTokens.userId, user.id),
+        isNull(passwordResetTokens.usedAt)
+      ));
+      const { randomBytes } = await import("crypto");
+      const rawToken = randomBytes(32).toString("hex");
+      const tokenHash = await hashPassword(rawToken);
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1e3);
+      await db.insert(passwordResetTokens).values({
+        userId: user.id,
+        tokenHash,
+        expiresAt
+      });
+      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password?token=${rawToken}`;
+      console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
+      return res.json({ message: "If that email is registered you will receive a reset link shortly." });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, password } = req.body;
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ error: "Reset token is required" });
+      }
+      if (!password || typeof password !== "string" || password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters" });
+      }
+      const candidates = await db.select().from(passwordResetTokens).where(and(
+        isNull(passwordResetTokens.usedAt),
+        gt(passwordResetTokens.expiresAt, /* @__PURE__ */ new Date())
+      ));
+      let matched = null;
+      for (const candidate of candidates) {
+        const valid = await comparePassword(token, candidate.tokenHash);
+        if (valid) {
+          matched = candidate;
+          break;
+        }
+      }
+      if (!matched) {
+        return res.status(400).json({ error: "Invalid or expired reset token. Please request a new one." });
+      }
+      await db.update(passwordResetTokens).set({ usedAt: /* @__PURE__ */ new Date() }).where(eq(passwordResetTokens.id, matched.id));
+      const newHash = await hashPassword(password);
+      await db.update(users).set({ passwordHash: newHash, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, matched.userId));
+      await db.delete(userSessions).where(eq(userSessions.userId, matched.userId));
+      return res.json({ message: "Password updated successfully. Please sign in with your new password." });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

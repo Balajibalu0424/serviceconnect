@@ -8,7 +8,7 @@ import {
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
   adminAuditLogs, platformMetrics, featureFlags, callRequests,
-  faqArticles, cannedResponses
+  faqArticles, cannedResponses, passwordResetTokens
 } from "@shared/schema";
 import { pusher } from "./pusher";
 import {
@@ -2314,21 +2314,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ))
           .limit(1);
 
+        const notificationPreview = maskContactInfo(processedContent).masked.slice(0, 100);
+
         if (existingUnread) {
           // Update the existing unread notification instead of creating a duplicate
           await db.update(notifications)
             .set({
-              message: processedContent.slice(0, 100),
+              message: notificationPreview,
               createdAt: new Date(),
             })
             .where(eq(notifications.id, existingUnread.id));
           // Still push real-time event so badge counter is accurate
           pusher.trigger(`private-user-${p.userId}`, "new_notification", {
             type: "NEW_MESSAGE", title: "New message",
-            message: processedContent.slice(0, 100), data: { conversationId: convId }
+            message: notificationPreview, data: { conversationId: convId }
           }).catch(() => {});
         } else {
-          await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });
+          await createNotification(p.userId, "NEW_MESSAGE", "New message", notificationPreview, { conversationId: convId });
         }
       }
 
@@ -3874,6 +3876,110 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         emailVerified: updated.emailVerified,
         notificationPreferences: getUserNotificationPreferences(updated),
       });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FORGOT PASSWORD — request a reset link
+  // ═══════════════════════════════════════════════════════════════════════════
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string") {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      const [user] = await db.select({ id: users.id, email: users.email, firstName: users.firstName })
+        .from(users)
+        .where(and(eq(users.email, email.toLowerCase().trim()), isNull(users.deletedAt)));
+
+      // Always return 200 to prevent email enumeration
+      if (!user) {
+        return res.json({ message: "If that email is registered you will receive a reset link shortly." });
+      }
+
+      // Invalidate any existing unused tokens for this user
+      await db.update(passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(and(
+          eq(passwordResetTokens.userId, user.id),
+          isNull(passwordResetTokens.usedAt)
+        ));
+
+      // Generate a cryptographically-secure random token
+      const { randomBytes } = await import("crypto");
+      const rawToken = randomBytes(32).toString("hex");
+      const tokenHash = await hashPassword(rawToken); // reuse bcrypt hasher from auth module
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await db.insert(passwordResetTokens).values({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      });
+
+      // In production this would send an email via a mail provider.
+      // For now we log the link so developers can test without SMTP configured.
+      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password?token=${rawToken}`;
+      console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
+
+      // TODO: replace console.log with actual email send, e.g.:
+      // await sendEmail({ to: user.email, subject: "Reset your ServiceConnect password", body: `Click here: ${resetLink}` });
+
+      return res.json({ message: "If that email is registered you will receive a reset link shortly." });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RESET PASSWORD — validate token and set new password
+  // ═══════════════════════════════════════════════════════════════════════════
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    try {
+      const { token, password } = req.body;
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ error: "Reset token is required" });
+      }
+      if (!password || typeof password !== "string" || password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters" });
+      }
+
+      // Find all non-expired, unused tokens and check which one matches
+      const candidates = await db.select()
+        .from(passwordResetTokens)
+        .where(and(
+          isNull(passwordResetTokens.usedAt),
+          gt(passwordResetTokens.expiresAt, new Date())
+        ));
+
+      let matched: typeof candidates[0] | null = null;
+      for (const candidate of candidates) {
+        const valid = await comparePassword(token, candidate.tokenHash);
+        if (valid) { matched = candidate; break; }
+      }
+
+      if (!matched) {
+        return res.status(400).json({ error: "Invalid or expired reset token. Please request a new one." });
+      }
+
+      // Mark token as used
+      await db.update(passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(eq(passwordResetTokens.id, matched.id));
+
+      // Update the user's password
+      const newHash = await hashPassword(password);
+      await db.update(users)
+        .set({ passwordHash: newHash, updatedAt: new Date() })
+        .where(eq(users.id, matched.userId));
+
+      // Invalidate all sessions so the old password can no longer be reused
+      await db.delete(userSessions).where(eq(userSessions.userId, matched.userId));
+
+      return res.json({ message: "Password updated successfully. Please sign in with your new password." });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

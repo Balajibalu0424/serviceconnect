@@ -13,6 +13,15 @@ import { apiRequest, setTokens } from "@/lib/queryClient";
 import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, Lightbulb, Flame, Clock, Users, Star, Shield, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+
+/**
+ * ARCHITECTURAL NOTE:
+ * This component intentionally uses the legacy AiOnboardingFlow component (`/api/ai/onboarding-chat`)
+ * instead of the new `RoleAwareOnboarding` session-based flow. 
+ * This is because PostJob is used by already-authenticated customers within the platform, 
+ * whereas RoleAwareOnboarding handles the complex public-to-authenticated conversion funnel.
+ * Migrating this to the new flow is planned for post-beta cleanup.
+ */
 import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
 import PhoneVerificationModal from "@/components/auth/PhoneVerificationModal";
 import { DEMO_OTP_CODE } from "@shared/verification";
