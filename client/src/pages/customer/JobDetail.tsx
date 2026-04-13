@@ -17,6 +17,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { UploadedAsset } from "@shared/uploads";
+import { buildConversationPath } from "@shared/chatRoutes";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "secondary", LIVE: "default", IN_DISCUSSION: "secondary",
@@ -311,7 +312,7 @@ export default function JobDetail() {
                 <Button variant="outline" onClick={() => navigate("/dashboard")}>
                   <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
                 </Button>
-                <Button onClick={() => navigate("/jobs")}>View My Jobs</Button>
+                <Button onClick={() => navigate("/my-jobs")}>View My Jobs</Button>
               </div>
             </CardContent>
           </Card>
@@ -403,7 +404,7 @@ export default function JobDetail() {
                       <ArrowRight className="w-3.5 h-3.5" /> View Booking
                     </Button>
                     {acceptedQuote.conversationId && (
-                      <Button size="sm" variant="outline" className="gap-1.5 border-green-300 text-green-700 hover:bg-green-50" onClick={() => navigate(`/chat?conversationId=${acceptedQuote.conversationId}`)}>
+                      <Button size="sm" variant="outline" className="gap-1.5 border-green-300 text-green-700 hover:bg-green-50" onClick={() => navigate(buildConversationPath(false, acceptedQuote.conversationId))}>
                         <MessageSquare className="w-3.5 h-3.5" /> Chat
                       </Button>
                     )}
@@ -686,7 +687,7 @@ export default function JobDetail() {
                           </Button>
                           {q.conversationId && (
                             <Button size="sm" variant="outline" className="gap-2 rounded-xl h-10 flex-1 md:flex-auto w-full"
-                              onClick={() => navigate(`/chat?conversationId=${q.conversationId}`)}>
+                              onClick={() => navigate(buildConversationPath(false, q.conversationId))}>
                               <MessageSquare className="w-4 h-4" /> Open Chat
                             </Button>
                           )}

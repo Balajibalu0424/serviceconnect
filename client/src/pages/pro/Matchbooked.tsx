@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Star, MapPin, Lock, Zap, Loader2, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { buildConversationPath } from "@shared/chatRoutes";
 
 function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
   const { toast } = useToast();
@@ -37,7 +38,7 @@ function UnlockModal({ job, onClose }: { job: any; onClose: () => void }) {
       onClose();
       // Navigate directly to the new conversation
       if (data.conversationId) {
-        setLocation(`/pro/chat?conversationId=${data.conversationId}`);
+        setLocation(buildConversationPath(true, data.conversationId));
       }
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -119,7 +120,7 @@ export default function ProMatchbooked() {
         description: data.customerPhone ? `Customer's phone: ${data.customerPhone}` : "Phone number unlocked — visible on the card.",
       });
       if (data.conversationId) {
-        setLocation(`/pro/chat?conversationId=${data.conversationId}`);
+        setLocation(buildConversationPath(true, data.conversationId));
       }
     },
     onError: (e: any) => toast({ title: "Upgrade failed", description: e.message, variant: "destructive" }),
@@ -221,7 +222,7 @@ export default function ProMatchbooked() {
                       )}
                       {isUnlocked && (
                         <Button size="sm" variant="default" className="rounded-xl h-10 px-6 w-full md:w-auto" asChild>
-                          <a href={row.unlock?.conversationId ? `/#/pro/chat?conversationId=${row.unlock.conversationId}` : "/#/pro/chat"}>Open chat</a>
+                          <a href={`/#${buildConversationPath(true, row.unlock?.conversationId)}`}>Open chat</a>
                         </Button>
                       )}
                       <Button size="sm" variant="ghost" className="text-muted-foreground rounded-xl h-10 px-4 w-full md:w-auto hover:bg-destructive/10 hover:text-destructive transition-colors"

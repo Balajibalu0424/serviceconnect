@@ -67429,6 +67429,16 @@ function registerOnboardingRoutes(app2) {
   });
 }
 
+// shared/chatRoutes.ts
+function getChatBasePath(isProfessional) {
+  return isProfessional ? "/pro/chat" : "/chat";
+}
+function buildConversationPath(isProfessional, conversationId) {
+  const basePath = getChatBasePath(isProfessional);
+  if (!conversationId) return basePath;
+  return `${basePath}/${encodeURIComponent(conversationId)}`;
+}
+
 // shared/uploads.ts
 var UPLOAD_RULES = {
   JOB_PHOTO: {
@@ -73305,32 +73315,32 @@ var uploadMiddleware = (0, import_multer.default)({
   }
 });
 function buildAppLinkFromNotification(type, data = {}) {
-  const base = `${getAppUrl()}/#/`;
+  const base = `${getAppUrl()}/#`;
   switch (type) {
     case "NEW_QUOTE":
     case "JOB_QUOTE":
-      return data.jobId ? `${base}jobs/${data.jobId}` : null;
+      return data.jobId ? `${base}/jobs/${data.jobId}` : null;
     case "QUOTE_ACCEPTED":
     case "QUOTE_REJECTED":
-      return data.conversationId ? `${base}pro/chat?conversationId=${data.conversationId}` : `${base}pro/leads`;
+      return data.conversationId ? `${base}${buildConversationPath(true, data.conversationId)}` : `${base}/pro/leads`;
     case "BOOKING_CREATED":
     case "BOOKING_IN_PROGRESS":
     case "BOOKING_COMPLETED":
     case "BOOKING_CANCELLED":
-      return data.conversationId ? `${base}chat?conversationId=${data.conversationId}` : `${base}bookings`;
+      return data.conversationId ? `${base}${buildConversationPath(false, data.conversationId)}` : `${base}/bookings`;
     case "NEW_MESSAGE":
-      return data.conversationId ? `${base}chat?conversationId=${data.conversationId}` : `${base}chat`;
+      return data.conversationId ? `${base}${buildConversationPath(false, data.conversationId)}` : `${base}/chat`;
     case "URGENT_JOB":
     case "NEW_JOB_AVAILABLE":
-      return data.jobId ? `${base}pro/feed?highlight=${data.jobId}` : `${base}pro/feed`;
+      return data.jobId ? `${base}/pro/feed?highlight=${data.jobId}` : `${base}/pro/feed`;
     case "VERIFICATION_SUBMITTED":
     case "VERIFICATION_APPROVED":
     case "VERIFICATION_REJECTED":
-      return `${base}pro/verification-pending`;
+      return `${base}/pro/verification-pending`;
     case "PAYMENT":
-      return `${base}pro/credits`;
+      return `${base}/pro/credits`;
     default:
-      return data.jobId ? `${base}jobs/${data.jobId}` : null;
+      return data.jobId ? `${base}/jobs/${data.jobId}` : null;
   }
 }
 function getUserNotificationPreferences(user) {

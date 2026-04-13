@@ -147,6 +147,9 @@ function AppRoutes() {
       <Route path="/bookings">
         <ProtectedRoute><CustomerBookings /></ProtectedRoute>
       </Route>
+      <Route path="/chat/:conversationId">
+        <ProtectedRoute><CustomerChat /></ProtectedRoute>
+      </Route>
       <Route path="/chat">
         <ProtectedRoute><CustomerChat /></ProtectedRoute>
       </Route>
@@ -180,6 +183,9 @@ function AppRoutes() {
       </Route>
       <Route path="/pro/bookings">
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProBookings /></ProtectedRoute>
+      </Route>
+      <Route path="/pro/chat/:conversationId">
+        <ProtectedRoute roles={["PROFESSIONAL"]}><ProChat /></ProtectedRoute>
       </Route>
       <Route path="/pro/chat">
         <ProtectedRoute roles={["PROFESSIONAL"]}><ProChat /></ProtectedRoute>

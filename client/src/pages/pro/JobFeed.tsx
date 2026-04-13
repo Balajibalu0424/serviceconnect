@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { buildConversationPath, getRouteSearchParam } from "@shared/chatRoutes";
 
 // ─── Unlock Modal ────────────────────────────────────────────────────────────
 function UnlockModal({ job, onClose, onUnlocked }: { job: any; onClose: () => void; onUnlocked: (result: any, tier: string) => void }) {
@@ -249,15 +250,13 @@ const PAGE_SIZE = 20;
 export default function ProJobFeed() {
   const qc = useQueryClient();
   const [location, setLocation] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState("my");
   const [urgencyFilter, setUrgencyFilter] = useState<string>("all");
 
   // Support ?highlight=jobId deep-link from notifications
-  const highlightJobId = (() => {
-    const search = location.includes("?") ? location.split("?")[1] : "";
-    return new URLSearchParams(search).get("highlight") || null;
-  })();
+  const highlightJobId = getRouteSearchParam(location, search, "highlight");
   const [unlockJob, setUnlockJob] = useState<any | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -316,7 +315,7 @@ export default function ProJobFeed() {
         description: data.customerPhone ? `Customer's phone: ${data.customerPhone}` : "Phone number unlocked.",
       });
       if (data.conversationId) {
-        setLocation(data.conversationId ? `/pro/chat?conversationId=${data.conversationId}` : "/pro/chat");
+        setLocation(buildConversationPath(true, data.conversationId));
       }
     },
     onError: (e: any) => toast({ title: "Upgrade failed", description: e.message, variant: "destructive" })
@@ -498,7 +497,7 @@ export default function ProJobFeed() {
                             </Button>
                           )}
                           <Button size="sm" variant="default" className="gap-1.5 h-8 text-xs ml-auto rounded-lg shadow-sm"
-                            onClick={() => setLocation(job.unlock?.conversationId ? `/pro/chat?conversationId=${job.unlock.conversationId}` : "/pro/chat")} data-testid={`button-chat-${job.id}`}>
+                            onClick={() => setLocation(buildConversationPath(true, job.unlock?.conversationId))} data-testid={`button-chat-${job.id}`}>
                             <MessageCircle className="w-3.5 h-3.5" /> Chat
                           </Button>
                         </div>

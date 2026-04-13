@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
 import { formatDistanceToNow, isToday, isYesterday, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
+import { buildConversationPath, getChatBasePath } from "@shared/chatRoutes";
 import {
   Bell, CheckCheck, Briefcase, MessageSquare, CreditCard,
   Star, AlertTriangle, ShieldCheck, Zap, Gift, Phone, FileText,
@@ -66,7 +67,7 @@ function getNotifStyle(type: string) {
 function getNotificationLink(n: any, userRole: string): string | null {
   const data = n.data || {};
   const isProRole = userRole === "PROFESSIONAL";
-  const chatBase = isProRole ? "/pro/chat" : "/chat";
+  const chatBase = getChatBasePath(isProRole);
 
   switch (n.type) {
     case "NEW_QUOTE":
@@ -74,11 +75,11 @@ function getNotificationLink(n: any, userRole: string): string | null {
       return data.jobId ? `/jobs/${data.jobId}` : null;
     case "QUOTE_ACCEPTED":
       return isProRole
-        ? (data.conversationId ? `/pro/chat?conversationId=${data.conversationId}` : "/pro/bookings")
+        ? (data.conversationId ? buildConversationPath(true, data.conversationId) : "/pro/bookings")
         : (data.jobId ? `/jobs/${data.jobId}` : null);
     case "BOOKING_CREATED":
       return isProRole
-        ? (data.conversationId ? `/pro/chat?conversationId=${data.conversationId}` : "/pro/bookings")
+        ? (data.conversationId ? buildConversationPath(true, data.conversationId) : "/pro/bookings")
         : "/bookings";
     case "JOB_UPDATE":
     case "JOB_MATCHED":
@@ -99,7 +100,7 @@ function getNotificationLink(n: any, userRole: string): string | null {
       return data.jobId ? (isProRole ? "/pro/feed" : `/jobs/${data.jobId}`) : null;
     case "NEW_MESSAGE":
     case "MESSAGE_FLAGGED":
-      return data.conversationId ? `${chatBase}?conversationId=${data.conversationId}` : chatBase;
+      return data.conversationId ? buildConversationPath(isProRole, data.conversationId) : chatBase;
     case "CALL_REQUEST":
     case "CALL_ACCEPTED":
     case "CALL_DECLINED":
@@ -135,7 +136,7 @@ function getNotificationLink(n: any, userRole: string): string | null {
     default:
       // Try to infer from data
       if (data.jobId) return isProRole ? "/pro/feed" : `/jobs/${data.jobId}`;
-      if (data.conversationId) return `${chatBase}?conversationId=${data.conversationId}`;
+      if (data.conversationId) return buildConversationPath(isProRole, data.conversationId);
       if (data.ticketId) return "/support";
       return null;
   }

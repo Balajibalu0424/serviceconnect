@@ -14,6 +14,7 @@ import {
   ArrowRight, Star, BadgeCheck, Mail, FileText, Bell
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { buildConversationPath } from "@shared/chatRoutes";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "secondary", LIVE: "default", IN_DISCUSSION: "secondary",
@@ -463,7 +464,7 @@ export default function CustomerDashboard() {
               ) : (
                 <div className="space-y-1">
                   {(conversations as any[]).slice(0, 4).map((conv: any) => (
-                    <Link key={conv.id} href={`/chat?conversationId=${conv.id}`}>
+                    <Link key={conv.id} href={buildConversationPath(false, conv.id)}>
                       <div className="flex items-center gap-4 p-3.5 rounded-xl border border-transparent hover:border-border/60 hover:bg-white/50 dark:hover:bg-white/5 transition-all cursor-pointer">
                         <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
                           <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />

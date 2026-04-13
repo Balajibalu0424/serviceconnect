@@ -8,6 +8,7 @@ import { Users, MessageSquare, Briefcase, Euro, Clock, Tag, ChevronDown, Chevron
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
+import { buildConversationPath } from "@shared/chatRoutes";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   PENDING: { label: "Pending", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
@@ -114,7 +115,7 @@ export default function ProLeads() {
               </span>
 
               {q.conversationId && (
-                <Link href={`/pro/chat?conversationId=${q.conversationId}`}>
+                <Link href={buildConversationPath(true, q.conversationId)}>
                   <Button
                     variant="outline"
                     size="sm"

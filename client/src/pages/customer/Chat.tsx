@@ -12,6 +12,7 @@ import { MessageSquare, Send, Loader2, ArrowLeft, Phone, CheckCircle2, Lock, Arc
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useLocation, useSearch } from "wouter";
+import { buildConversationPath, extractConversationId, getChatBasePath } from "@shared/chatRoutes";
 
 const TERMINAL_JOB_STATUSES = ["COMPLETED", "CLOSED"];
 
@@ -46,9 +47,9 @@ export default function Chat() {
   const qc = useQueryClient();
   const [pathname, setLocation] = useLocation();
   const searchString = useSearch();
-  const searchParams = new URLSearchParams(searchString);
-  const urlConvId = searchParams.get("conversationId");
-  const chatBase = pathname.startsWith("/pro") ? "/pro/chat" : "/chat";
+  const isProChat = pathname.startsWith("/pro");
+  const urlConvId = extractConversationId(pathname, searchString) || null;
+  const chatBase = getChatBasePath(isProChat);
 
   const [activeConvId, setActiveConvId] = useState<string | null>(urlConvId);
   const [message, setMessage] = useState("");
@@ -154,7 +155,7 @@ export default function Chat() {
 
   const selectConversation = (conversationId: string) => {
     setActiveConvId(conversationId);
-    setLocation(`${chatBase}?conversationId=${conversationId}`);
+    setLocation(buildConversationPath(isProChat, conversationId));
   };
 
   return (

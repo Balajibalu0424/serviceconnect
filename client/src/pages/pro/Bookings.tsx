@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { BookingTimeline } from "@/components/bookings/BookingTimeline";
+import { buildConversationPath } from "@shared/chatRoutes";
 
 const STATUS_COLORS: Record<string, string> = {
   CONFIRMED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -94,7 +95,7 @@ export default function ProBookings() {
     },
     onSuccess: (data) => {
       setSelectedBooking(null);
-      setLocation(`/pro/chat?conversationId=${data.id}`);
+      setLocation(buildConversationPath(true, data.id));
     },
     onError: (error: Error) => {
       toast({ title: "Could not open chat", description: error.message, variant: "destructive" });

@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { BookingTimeline } from "@/components/bookings/BookingTimeline";
+import { buildConversationPath } from "@shared/chatRoutes";
 
 const STATUS_COLORS: Record<string, string> = {
   CONFIRMED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -67,12 +68,12 @@ export default function Bookings() {
 
   const openChat = (b: any) => {
     if (b.conversationId) {
-      navigate(`/chat?conversationId=${b.conversationId}`);
+      navigate(buildConversationPath(false, b.conversationId));
     } else if (b.professionalId) {
       // Fallback: create or find conversation
       apiRequest("POST", "/api/conversations", { participantId: b.professionalId, jobId: b.jobId })
         .then(r => r.json())
-        .then(data => navigate(`/chat?conversationId=${data.id}`))
+        .then(data => navigate(buildConversationPath(false, data.id)))
         .catch(() => toast({ title: "Could not open chat", variant: "destructive" }));
     }
   };
