@@ -234,7 +234,7 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
   const search = useSearch();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user, isLoading: authLoading, refreshUser } = useAuth();
+  const { user, isLoading: authLoading, refreshUser, completeSignInWithToken } = useAuth();
   const { data: categories = [] } = useQuery<CategoryRecord[]>({ queryKey: ["/api/categories"] });
 
   const [session, setSession] = useState<OnboardingSessionState | null>(null);
@@ -595,7 +595,11 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
         `/api/onboarding/sessions/${session.id}/complete`,
         { password },
       );
-      setTokens(result.accessToken, result.refreshToken);
+      if (result.signInToken) {
+        await completeSignInWithToken(result.signInToken);
+      } else if (result.accessToken && result.refreshToken) {
+        setTokens(result.accessToken, result.refreshToken);
+      }
       await refreshUser();
       clearStoredOnboardingSessionId();
       setCompletionState(result);

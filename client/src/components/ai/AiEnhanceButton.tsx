@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Loader2, Check } from "lucide-react";
-import { getAccessToken } from "@/lib/queryClient";
+import { getAuthHeaders } from "@/lib/queryClient";
 
 interface AiEnhanceButtonProps {
   endpoint: string;
@@ -25,14 +25,11 @@ export default function AiEnhanceButton({
     setLoading(true);
     setDone(false);
     try {
-      const token = getAccessToken();
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
+        credentials: "include",
       });
       const data = await res.json();
       onResult(data);

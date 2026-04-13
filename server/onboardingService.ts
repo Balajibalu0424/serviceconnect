@@ -34,6 +34,7 @@ import { detectCategory, detectUrgency, scoreJobQuality } from "./aiEngine";
 import { handleOnboardingChat } from "./geminiService";
 import { generateTokens, hashPassword } from "./auth";
 import { invalidateVerificationChallenges } from "./verificationService";
+import { createClerkSignInTokenForInternalUser, isClerkMigrationEnabled } from "./clerkService";
 
 type CategoryOption = { id: string; name: string; slug: string; baseCreditCost?: number | null };
 
@@ -642,8 +643,9 @@ export async function completeOnboardingSession(
   password: string,
   requestIp?: string,
 ): Promise<{
-  accessToken: string;
-  refreshToken: string;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  signInToken?: string | null;
   user: Record<string, unknown>;
   redirectTo: string;
   createdJobId?: string | null;
@@ -673,6 +675,7 @@ export async function completeOnboardingSession(
   }
 
   const passwordHash = await hashPassword(parsedPassword.data);
+  const clerkEnabled = isClerkMigrationEnabled();
 
   const completion = await db.transaction(async (tx) => {
     if (session.role === "CUSTOMER") {
@@ -693,10 +696,11 @@ export async function completeOnboardingSession(
           email,
           phone: personalValidation.details.phone ?? "",
           passwordHash,
-          role: "CUSTOMER",
-          status: "ACTIVE",
-          firstName: personalValidation.details.firstName ?? "",
-          lastName: personalValidation.details.lastName ?? "",
+        role: "CUSTOMER",
+        authSource: clerkEnabled ? "CLERK_NATIVE" : "LEGACY",
+        status: "ACTIVE",
+        firstName: personalValidation.details.firstName ?? "",
+        lastName: personalValidation.details.lastName ?? "",
           emailVerified: true,
           phoneVerified: true,
           onboardingCompleted: true,
@@ -757,6 +761,7 @@ export async function completeOnboardingSession(
         phone: personalValidation.details.phone ?? "",
         passwordHash,
         role: "PROFESSIONAL",
+        authSource: clerkEnabled ? "CLERK_NATIVE" : "LEGACY",
         status: "ACTIVE",
         firstName: personalValidation.details.firstName ?? "",
         lastName: personalValidation.details.lastName ?? "",
@@ -801,13 +806,26 @@ export async function completeOnboardingSession(
     };
   });
 
-  const { accessToken, refreshToken } = generateTokens(completion.user.id, completion.user.role);
-  await db.insert(userSessions).values({
-    userId: completion.user.id,
-    refreshTokenHash: Buffer.from(refreshToken).toString("base64"),
-    ipAddress: requestIp,
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-  });
+  let accessToken: string | null = null;
+  let refreshToken: string | null = null;
+  let signInToken: string | null = null;
+
+  if (clerkEnabled) {
+    const clerkSession = await createClerkSignInTokenForInternalUser(completion.user, "CLERK_NATIVE");
+    signInToken = clerkSession?.token ?? null;
+  }
+
+  if (!signInToken) {
+    const legacyTokens = generateTokens(completion.user.id, completion.user.role);
+    accessToken = legacyTokens.accessToken;
+    refreshToken = legacyTokens.refreshToken;
+    await db.insert(userSessions).values({
+      userId: completion.user.id,
+      refreshTokenHash: Buffer.from(refreshToken).toString("base64"),
+      ipAddress: requestIp,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+  }
 
   const [completedSession] = await db
     .update(onboardingSessions)
@@ -836,6 +854,7 @@ export async function completeOnboardingSession(
   return {
     accessToken,
     refreshToken,
+    signInToken,
     user: userPayload,
     redirectTo: completion.redirectTo,
     createdJobId: "createdJobId" in completion ? completion.createdJobId ?? null : null,

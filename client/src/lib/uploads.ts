@@ -1,5 +1,5 @@
 import type { UploadedAsset } from "@shared/uploads";
-import { getAccessToken, getApiBase } from "@/lib/queryClient";
+import { getApiBase, getAuthHeaders } from "@/lib/queryClient";
 
 type UploadRoutePurpose = "job-photo" | "portfolio-image" | "verification-document";
 
@@ -14,11 +14,6 @@ export async function uploadAsset(
   file: File,
   options?: { entityType?: string; entityId?: string },
 ): Promise<UploadedAsset> {
-  const token = getAccessToken();
-  if (!token) {
-    throw new Error("You must be signed in before uploading files.");
-  }
-
   const formData = new FormData();
   formData.append("file", file);
   if (options?.entityType) formData.append("entityType", options.entityType);
@@ -26,10 +21,9 @@ export async function uploadAsset(
 
   const response = await fetch(`${getApiBase()}/api/uploads/${purpose}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await getAuthHeaders(),
     body: formData,
+    credentials: "include",
   });
 
   const payload = await response.json().catch(() => ({}));

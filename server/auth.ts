@@ -1,9 +1,8 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { Request, Response, NextFunction } from "express";
-import { db } from "./db";
-import { users, userSessions } from "@shared/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { getAuth } from "@clerk/express";
+import { isClerkMigrationEnabled, resolveInternalUserFromClerkUserId } from "./clerkService";
 
 function readRequiredAuthSecret(name: "JWT_SECRET", fallback: string) {
   const configured = process.env[name]?.trim();
@@ -57,10 +56,39 @@ export async function comparePassword(password: string, hash: string) {
 }
 
 export interface AuthRequest extends Request {
-  user?: { userId: string; role: string };
+  user?: {
+    userId: string;
+    role: string;
+    authType: "legacy" | "clerk";
+    clerkUserId?: string | null;
+  };
 }
 
-export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
+export async function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
+  if (isClerkMigrationEnabled()) {
+    try {
+      const auth = getAuth(req);
+      if (auth.userId) {
+        const internalUser = await resolveInternalUserFromClerkUserId(auth.userId);
+        if (!internalUser) {
+          return res.status(401).json({ error: "No linked ServiceConnect account found for this Clerk session" });
+        }
+        if (internalUser.status === "SUSPENDED" || internalUser.status === "BANNED") {
+          return res.status(403).json({ error: `Account ${internalUser.status.toLowerCase()}` });
+        }
+        req.user = {
+          userId: internalUser.id,
+          role: internalUser.role,
+          authType: "clerk",
+          clerkUserId: auth.userId,
+        };
+        return next();
+      }
+    } catch {
+      // Fall back to legacy JWT validation during the migration.
+    }
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     return res.status(401).json({ error: "No token provided" });
@@ -68,8 +96,8 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
   const token = authHeader.split(" ")[1];
   try {
     const payload = verifyAccessToken(token);
-    req.user = payload;
-    next();
+    req.user = { ...payload, authType: "legacy", clerkUserId: null };
+    return next();
   } catch {
     return res.status(401).json({ error: "Invalid or expired token" });
   }

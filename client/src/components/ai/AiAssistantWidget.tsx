@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X, Sparkles, Bot, User, Briefcase, LifeBuoy, ArrowLeft, Send, CheckCircle2, Loader2, FileEdit } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAccessToken, apiRequest } from "@/lib/queryClient";
+import { apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { AI_DISPLAY_NAME } from "@/lib/constants";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -137,11 +137,11 @@ export default function AiAssistantWidget() {
     setMessages(newMessages);
     setLoading(true);
     try {
-      const token = getAccessToken();
       const res = await fetch("/api/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ message: userMsg, history: newMessages.slice(-8), mode: "post_job" }),
+        credentials: "include",
       });
       const data = await res.json();
       const aiReply = data.reply || "I can help you post a job. What service do you need?";

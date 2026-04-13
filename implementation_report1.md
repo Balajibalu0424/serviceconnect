@@ -1893,3 +1893,160 @@ All secrets remain env-only. No credentials are stored in source.
 - Live Resend/Twilio verification still requires valid env vars and provider-side setup; when absent, the system intentionally stays in the explicit fallback/degraded mode instead of silently pretending to send OTPs.
 - Upload persistence depends on the configured blob/storage token being present in the deployment environment.
 - Authenticated customer `PostJob` still intentionally uses the legacy AI onboarding component; that broader migration remains outside this pass.
+
+## Session X — Resend + Twilio Setup
+
+### Browser Setup Completed
+
+- Opened the Resend dashboard and reviewed the Domains setup flow.
+- Confirmed the Resend account is logged in, but no sending domain is configured yet.
+- Opened the Twilio Console and verified the account is logged in.
+- Opened Twilio Verify Services and confirmed SMS-capable Verify services already existed.
+- Selected the newest Verify service and renamed it to `ServiceConnect Verify` for clarity.
+- Completed the Twilio friendly-name compliance attestation required after renaming the service.
+
+### Manual Steps Required From User
+
+- Resend:
+  - obtain or use a domain you control
+  - add a dedicated sending subdomain such as `mail.yourdomain.com`
+  - add the DNS records Resend provides for that domain
+  - wait for domain verification
+  - create a Resend API key locally and store it outside the repo
+- Twilio:
+  - if staying on a trial account, verify any recipient phone numbers you want to test against
+  - or upgrade the account to remove trial delivery restrictions
+  - copy the Twilio Auth Token locally instead of storing it in code or docs
+
+### Env Vars Needed
+
+- `RESEND_API_KEY=`
+- `RESEND_FROM_EMAIL=`
+- `TWILIO_ACCOUNT_SID=`
+- `TWILIO_AUTH_TOKEN=`
+- `TWILIO_VERIFY_SERVICE_SID=`
+
+### Code Integration Completed
+
+- No new source changes were required in this setup session because the provider-backed OTP integration was already implemented in Session 11:
+  - `server/deliveryConfig.ts`
+  - `server/emailService.ts`
+  - `server/smsVerifyService.ts`
+  - `server/verificationService.ts`
+- The app already:
+  - loads provider settings from environment variables only
+  - prefers real Resend/Twilio delivery when configured
+  - falls back safely only when explicit fallback conditions allow it
+  - avoids crashing when provider configuration is absent
+
+### Remaining Limitations
+
+- Resend production email sending is still blocked until a real sending domain is added and verified.
+- Without a verified Resend domain, `resend.dev` remains test-only and is not suitable for sending OTP emails to real users.
+- Twilio trial mode restricts SMS delivery to verified recipient numbers until the account is upgraded.
+
+## Session 12 — Clerk Auth Migration
+
+### Chosen Migration Strategy
+
+- Implemented a transitional legacy-auth bridge rather than a hard cut-over.
+- Existing users keep using the ServiceConnect email + password form.
+- The backend verifies the current bcrypt password hash against the existing `users` table, provisions or links the matching Clerk user, then returns a short-lived Clerk sign-in token.
+- The browser completes that token inside Clerk, so the live session is Clerk-backed without forcing existing users through a new sign-in ritual.
+
+### Existing-User Compatibility Logic
+
+- Added `users.clerkUserId`, `users.authSource`, and `users.legacyAuthMigratedAt` to preserve migration state.
+- Existing verified email / phone state is mirrored into Clerk when a legacy account is linked.
+- Existing role and onboarding state are preserved as metadata and continue to resolve to the existing internal `users.id`, so jobs, bookings, conversations, notifications, reviews, and profile relations keep working without re-linking data.
+- Existing customers, professionals, admins, and support users can continue using their current credentials.
+
+### No-Reverification Handling
+
+- The migration deliberately keeps existing-user login on the server bridge because Clerk’s direct password flow can introduce additional verification friction on a new device.
+- By validating the existing password server-side and minting a Clerk sign-in token, already trusted users are not forced back through fresh email OTP or phone OTP.
+- Password reset, password change, and post-verification flows now sync back into Clerk so credentials and trusted verification state stay aligned.
+
+### New-User Clerk Flow
+
+- Role-aware onboarding remains the canonical public signup flow.
+- When onboarding completes with Clerk configured, new users are provisioned into Clerk as `CLERK_NATIVE` accounts and signed in through Clerk immediately.
+- If Clerk env vars are absent, the app safely falls back to the legacy JWT path instead of crashing.
+
+### Backend / API Changes
+
+- Added Clerk middleware to Express when Clerk is configured.
+- `requireAuth` now accepts Clerk-authenticated requests first and falls back to legacy JWT validation during the transition.
+- `/api/auth/login` now returns a Clerk sign-in token when Clerk migration is enabled.
+- `/api/auth/me` now returns `authSource` and always includes the internal `id` so downstream chat / realtime / dashboard surfaces keep functioning after Clerk-backed page reloads.
+- Added `/api/webhooks/clerk` with signed webhook verification via `CLERK_WEBHOOK_SECRET`.
+- Clerk webhook sync now updates linked internal user name / email / phone / avatar / verification state and safely unlinks deleted Clerk users without deleting ServiceConnect data.
+
+### Frontend Auth Changes
+
+- Added Clerk provider bootstrapping in `client/src/main.tsx`.
+- Preserved the existing ServiceConnect login screen for seamless legacy credential entry.
+- Added Clerk sign-in token completion support in `client/src/contexts/AuthContext.tsx`.
+- Updated authenticated API helpers, uploads, AI actions, and realtime signal calls so they can use Clerk session tokens instead of only local JWT storage.
+- Fixed Clerk sign-out redirect to the hash-routed login page (`/#/login`).
+
+### Files Changed
+
+- `.env.example`
+- `api/handler.js`
+- `client/src/components/ai/AiAssistantWidget.tsx`
+- `client/src/components/ai/AiEnhanceButton.tsx`
+- `client/src/components/onboarding/RoleAwareOnboarding.tsx`
+- `client/src/contexts/AuthContext.tsx`
+- `client/src/contexts/SocketContext.tsx`
+- `client/src/lib/clerk.ts`
+- `client/src/lib/queryClient.ts`
+- `client/src/lib/uploads.ts`
+- `client/src/main.tsx`
+- `client/src/pages/public/Login.tsx`
+- `implementation_report1.md`
+- `package-lock.json`
+- `package.json`
+- `server/auth.ts`
+- `server/clerkService.ts`
+- `server/index.ts`
+- `server/onboardingService.ts`
+- `server/routes.ts`
+- `shared/onboarding.ts`
+- `shared/schema.ts`
+
+### Schema / API Changes
+
+- `shared/schema.ts`
+  - added `clerkUserId`
+  - added `authSource`
+  - added `legacyAuthMigratedAt`
+  - added a unique index on `clerkUserId`
+- `shared/onboarding.ts`
+  - onboarding completion now supports `signInToken` in addition to legacy access / refresh tokens
+- `server/routes.ts`
+  - `/api/auth/login` now returns Clerk token-based auth payloads when enabled
+  - `/api/webhooks/clerk` handles webhook verification and user sync
+  - password reset / change-password / verification routes sync back into Clerk
+
+### Required Env Vars
+
+- `VITE_CLERK_PUBLISHABLE_KEY=`
+- `CLERK_SECRET_KEY=`
+- `CLERK_WEBHOOK_SECRET=`
+- Optional legacy alias for older frontend environments:
+  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=`
+
+### Testing Results
+
+- `npm run check` - pending rerun after the final Clerk webhook + env/documentation changes
+- `npm run test` - pending rerun after the final Clerk webhook + env/documentation changes
+- `npm run build` - pending rerun after the final Clerk webhook + env/documentation changes
+- `npm run db:push` - previously passed for the auth schema additions
+- `npm run db:seed` - still fails locally when PostgreSQL is unavailable on `localhost:5432`, so seeded local browser verification depends on a reachable local DB
+
+### Remaining Limitations
+
+- Existing-user login intentionally remains bridge-driven on the backend to guarantee no forced reverification for already trusted accounts.
+- Full production verification still depends on Clerk env vars being present in Vercel for both preview and production deployments.
+- Any Clerk credentials shared in chat should be rotated before production use.

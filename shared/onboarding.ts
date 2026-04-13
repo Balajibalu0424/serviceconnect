@@ -120,8 +120,9 @@ export const onboardingCompleteSchema = z.object({
 });
 
 export const onboardingCompletionResultSchema = z.object({
-  accessToken: z.string(),
-  refreshToken: z.string(),
+  accessToken: z.string().nullable().optional(),
+  refreshToken: z.string().nullable().optional(),
+  signInToken: z.string().nullable().optional(),
   user: z.record(z.string(), z.any()),
   redirectTo: z.string(),
   createdJobId: z.string().nullable().optional(),

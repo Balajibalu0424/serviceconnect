@@ -25,6 +25,7 @@ export function getApiBase() {
 }
 
 const TOKEN_KEYS = { access: "sc_access_token", refresh: "sc_refresh_token" } as const;
+let clerkTokenResolver: null | (() => Promise<string | null>) = null;
 
 function safeGetItem(key: string): string | null {
   try {
@@ -77,15 +78,28 @@ export function getRefreshToken() {
   return tokenStore.refreshToken;
 }
 
+export function registerClerkTokenResolver(resolver: (() => Promise<string | null>) | null) {
+  clerkTokenResolver = resolver;
+}
+
+export async function getAuthHeaders(extraHeaders: Record<string, string> = {}) {
+  const headers: Record<string, string> = { ...extraHeaders };
+  const token = tokenStore.accessToken || (clerkTokenResolver ? await clerkTokenResolver().catch(() => null) : null);
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function apiRequest(method: string, url: string, body?: unknown) {
-  const token = tokenStore.accessToken;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const usingLegacyToken = Boolean(tokenStore.accessToken || tokenStore.refreshToken);
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const res = await fetch(`${getApiBase()}${url}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    credentials: "include",
   });
 
   if (res.status === 401) {
@@ -95,6 +109,7 @@ export async function apiRequest(method: string, url: string, body?: unknown) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
+        credentials: "include",
       });
       if (refreshRes.ok) {
         const { accessToken } = await refreshRes.json();
@@ -102,14 +117,17 @@ export async function apiRequest(method: string, url: string, body?: unknown) {
         safeSetItem(TOKEN_KEYS.access, accessToken);
         headers.Authorization = `Bearer ${accessToken}`;
         return fetch(`${getApiBase()}${url}`, {
-          method,
-          headers,
-          body: body ? JSON.stringify(body) : undefined,
-        });
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined,
+            credentials: "include",
+          });
       }
     }
-    clearTokens();
-    window.location.hash = "/login";
+    if (usingLegacyToken) {
+      clearTokens();
+      window.location.hash = "/login";
+    }
   }
 
   return res;

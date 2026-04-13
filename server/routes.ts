@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { Readable } from "stream";
 import { createServer, type Server } from "http";
 import multer from "multer";
+import { verifyWebhook } from "@clerk/backend/webhooks";
 import { db } from "./db";
 import {
   users, userSessions, professionalProfiles, serviceCategories,
@@ -77,6 +78,15 @@ import {
   quoteSubmissionRateLimiter,
   supportTicketRateLimiter,
 } from "./rateLimit";
+import {
+  createClerkSignInTokenForInternalUser,
+  getClerkWebhookSecret,
+  isClerkMigrationEnabled,
+  syncInternalUserFromClerkWebhookUser,
+  syncClerkPasswordFromInternalUser,
+  syncClerkVerificationState,
+  unlinkInternalUserFromClerk,
+} from "./clerkService";
 
 // ─── Pusher Initialization (Imported from ./pusher) ──────────────────────────
 
@@ -535,6 +545,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   // AUTH ROUTES
   // ═══════════════════════════════════════════════════════════════════════════
+  app.post("/api/webhooks/clerk", async (req: Request, res: Response) => {
+    const signingSecret = getClerkWebhookSecret();
+    if (!signingSecret) {
+      return res.status(503).json({ error: "Clerk webhooks are not configured" });
+    }
+
+    const rawBody =
+      Buffer.isBuffer(req.rawBody)
+        ? req.rawBody.toString("utf8")
+        : typeof req.rawBody === "string"
+          ? req.rawBody
+          : JSON.stringify(req.body ?? {});
+
+    try {
+      const headers = new Headers({
+        "content-type": req.get("content-type") || "application/json",
+        "svix-id": req.get("svix-id") || "",
+        "svix-timestamp": req.get("svix-timestamp") || "",
+        "svix-signature": req.get("svix-signature") || "",
+      });
+
+      const event = await verifyWebhook(
+        new Request(`${getRequestOrigin(req)}/api/webhooks/clerk`, {
+          method: "POST",
+          headers,
+          body: rawBody,
+        }),
+        { signingSecret },
+      );
+
+      if (event.type === "user.created" || event.type === "user.updated") {
+        await syncInternalUserFromClerkWebhookUser(event.data as any);
+      } else if (event.type === "user.deleted") {
+        await unlinkInternalUserFromClerk(event.data.id || "", (event.data as any).external_id || null);
+      }
+
+      return res.json({ received: true });
+    } catch (error) {
+      console.error("Clerk webhook verification failed:", error);
+      return res.status(400).json({ error: "Invalid Clerk webhook" });
+    }
+  });
+
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     const requestedRole = req.body?.role || "CUSTOMER";
     if (requestedRole === "CUSTOMER" || requestedRole === "PROFESSIONAL") {
@@ -590,6 +643,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (user.status === "SUSPENDED" || user.status === "BANNED") {
         return res.status(403).json({ error: `Account ${user.status.toLowerCase()}` });
       }
+
+      const sanitizedUser = {
+        ...user,
+        passwordHash: undefined,
+        notificationPreferences: getUserNotificationPreferences(user),
+      };
+
+      if (isClerkMigrationEnabled()) {
+        const clerkSession = await createClerkSignInTokenForInternalUser(
+          user,
+          user.authSource === "CLERK_NATIVE" ? "CLERK_NATIVE" : "CLERK_BRIDGE",
+        );
+
+        if (clerkSession?.token) {
+          return res.json({
+            authMode: "CLERK",
+            signInToken: clerkSession.token,
+            user: sanitizedUser,
+          });
+        }
+      }
+
       const { accessToken, refreshToken } = generateTokens(user.id, user.role);
       const refreshHash = Buffer.from(refreshToken).toString("base64");
       await db.insert(userSessions).values({
@@ -597,13 +672,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ipAddress: req.ip, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       });
       return res.json({
+        authMode: "LEGACY",
         accessToken,
         refreshToken,
-        user: {
-          ...user,
-          passwordHash: undefined,
-          notificationPreferences: getUserNotificationPreferences(user),
-        },
+        user: sanitizedUser,
       });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -635,10 +707,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (user.role === "PROFESSIONAL") {
       [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, user.id));
     }
-    const isCustomer = user.role === "CUSTOMER";
-    // Strip internal ID from customer-facing responses; admins and pros retain it for system references
     const safeUser = {
-      ...(isCustomer ? {} : { id: user.id }),
+      id: user.id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
@@ -652,6 +722,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       onboardingCompleted: user.onboardingCompleted,
       creditBalance: user.creditBalance,
       createdAt: user.createdAt,
+      authSource: user.authSource,
       notificationPreferences: getUserNotificationPreferences(user),
     };
     return res.json({ ...safeUser, profile });
@@ -664,7 +735,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ error: "Current password is incorrect" });
     }
     const passwordHash = await hashPassword(newPassword);
-    await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, user.id));
+    const [updatedUser] = await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, user.id)).returning();
+    if (updatedUser) {
+      await syncClerkPasswordFromInternalUser(updatedUser);
+    }
     return res.json({ success: true });
   });
 
@@ -721,6 +795,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       await db.update(users).set({ phoneVerified: true, updatedAt: new Date() } as any).where(eq(users.id, userId));
+      await syncClerkVerificationState(userId);
 
       return res.json({ success: true, message: "Phone number verified successfully." });
     } catch (err: any) {
@@ -931,8 +1006,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Mark user as verified + onboarding complete
       await db.update(users)
-        .set({ emailVerified: true, onboardingCompleted: true })
+        .set({ emailVerified: true, onboardingCompleted: true, updatedAt: new Date() })
         .where(eq(users.id, userId));
+      await syncClerkVerificationState(userId);
 
       // Fetch user name for notification
       const [fullUser] = await db.select().from(users).where(eq(users.id, userId));
@@ -4466,9 +4542,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Update the user's password
       const newHash = await hashPassword(password);
-      await db.update(users)
+      const [updatedUser] = await db.update(users)
         .set({ passwordHash: newHash, updatedAt: new Date() })
-        .where(eq(users.id, matched.userId));
+        .where(eq(users.id, matched.userId))
+        .returning();
+
+      if (updatedUser) {
+        await syncClerkPasswordFromInternalUser(updatedUser);
+      }
 
       // Invalidate all sessions so the old password can no longer be reused
       await db.delete(userSessions).where(eq(userSessions.userId, matched.userId));

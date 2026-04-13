@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAccessToken } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,14 +35,10 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      await login(email, password);
-      const token = getAccessToken();
-      if (token) {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        if (payload.role === "PROFESSIONAL") setLocation("/pro/dashboard");
-        else if (payload.role === "ADMIN") setLocation("/admin");
-        else setLocation("/dashboard");
-      }
+      const loggedInUser = await login(email, password);
+      if (loggedInUser.role === "PROFESSIONAL") setLocation("/pro/dashboard");
+      else if (loggedInUser.role === "ADMIN") setLocation("/admin");
+      else setLocation("/dashboard");
     } catch (e: any) {
       const msg = e.message || "Invalid email or password";
       setError(msg);
