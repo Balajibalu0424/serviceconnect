@@ -52,8 +52,6 @@ export default function Chat() {
   const routePath = rawHashPath || pathname;
   const urlConvId = extractConversationId(routePath, searchString) || null;
   const chatBase = getChatBasePath(isProChat);
-
-  const [activeConvId, setActiveConvId] = useState<string | null>(urlConvId);
   const [message, setMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -71,9 +69,13 @@ export default function Chat() {
     return 0;
   });
 
-  const activeConversationFromState = (conversations as any[]).find((c: any) => c.id === activeConvId);
-  const missingConversation = !!urlConvId && !loadingConvs && !activeConversationFromState;
-  const selectedConvId = missingConversation ? null : activeConvId;
+  const activeConv = urlConvId
+    ? (conversations as any[]).find((c: any) => c.id === urlConvId) ?? null
+    : null;
+  const missingConversation = !!urlConvId && !loadingConvs && !activeConv;
+  const showConversationLoading = !!urlConvId && loadingConvs;
+  const selectedConvId = activeConv?.id ?? null;
+  const showThreadPane = showConversationLoading || missingConversation || !!selectedConvId;
 
   const { data: msgList = [], isLoading: loadingMsgs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations", selectedConvId, "messages"],
@@ -141,36 +143,14 @@ export default function Chat() {
     sendMessage.mutate(message.trim());
   };
 
-  const activeConv = missingConversation
-    ? null
-    : activeConversationFromState ?? (conversations as any[]).find((c: any) => c.id === selectedConvId);
   const isActiveConvFinished = activeConv ? isFinishedConv(activeConv) : false;
   const activeJobStatus = activeConv?.job?.status;
-
-  useEffect(() => {
-    if (missingConversation) {
-      if (activeConvId) {
-        setActiveConvId(null);
-      }
-      return;
-    }
-
-    if (urlConvId && urlConvId !== activeConvId) {
-      setActiveConvId(urlConvId);
-      return;
-    }
-
-    if (!urlConvId && activeConvId) {
-      setActiveConvId(null);
-    }
-  }, [activeConvId, missingConversation, urlConvId]);
 
   // Group conversations for sidebar
   const activeConvs = (conversations as any[]).filter(c => !isFinishedConv(c));
   const archivedConvs = (conversations as any[]).filter(c => isFinishedConv(c));
 
   const selectConversation = (conversationId: string) => {
-    setActiveConvId(conversationId);
     setLocation(buildConversationPath(isProChat, conversationId));
   };
 
@@ -180,7 +160,7 @@ export default function Chat() {
         {/* Sidebar: conversation list */}
         <div className={cn(
           "w-full md:w-80 flex-shrink-0 border-r bg-background flex flex-col",
-          selectedConvId && "hidden md:flex"
+          showThreadPane && "hidden md:flex"
         )}>
           <div className="p-4 border-b">
             <div className="flex items-center justify-between">
@@ -230,9 +210,13 @@ export default function Chat() {
         {/* Main: message thread */}
         <div className={cn(
           "flex-1 flex flex-col bg-background",
-          !selectedConvId && "hidden md:flex items-center justify-center"
+          !showThreadPane && "hidden md:flex items-center justify-center"
         )}>
-          {!selectedConvId ? (
+          {showConversationLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : !selectedConvId ? (
             <div className="text-center text-muted-foreground">
               <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-20" />
               {missingConversation ? (
@@ -256,7 +240,6 @@ export default function Chat() {
                 <button
                   className="md:hidden text-muted-foreground hover:text-foreground"
                   onClick={() => {
-                    setActiveConvId(null);
                     setLocation(chatBase);
                   }}
                 >
