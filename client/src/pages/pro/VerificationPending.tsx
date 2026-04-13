@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ShieldCheck, Clock, XCircle, Upload, CheckCircle2, LogOut, ArrowRight } from "lucide-react";
+import { formatFileSize, uploadAsset } from "@/lib/uploads";
+import type { UploadedAsset } from "@shared/uploads";
 
 export default function ProVerificationPending() {
   const { user, refreshUser, logout } = useAuth();
@@ -20,8 +22,20 @@ export default function ProVerificationPending() {
   const profile = user?.profile;
   const status: string = profile?.verificationStatus ?? "UNSUBMITTED";
 
-  const [documentUrl, setDocumentUrl] = useState(profile?.verificationDocumentUrl ?? "");
   const [licenseNumber, setLicenseNumber] = useState(profile?.licenseNumber ?? "");
+  const [documentAsset, setDocumentAsset] = useState<UploadedAsset | null>(
+    profile?.verificationDocumentUrl
+      ? {
+          id: profile?.verificationDocumentUploadId ?? "existing",
+          purpose: "VERIFICATION_DOCUMENT",
+          url: profile.verificationDocumentUrl,
+          originalName: "Submitted verification document",
+          mimeType: "application/octet-stream",
+          sizeBytes: 0,
+        }
+      : null,
+  );
+  const [uploadingDocument, setUploadingDocument] = useState(false);
 
   // Listen for real-time approval notification from admin via Pusher
   useEffect(() => {
@@ -41,7 +55,7 @@ export default function ProVerificationPending() {
 
   const submit = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/pro/verification/submit", { documentUrl, licenseNumber });
+      const res = await apiRequest("POST", "/api/pro/verification/submit", { uploadId: documentAsset?.id, licenseNumber });
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
     },
@@ -51,6 +65,24 @@ export default function ProVerificationPending() {
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+
+  const handleDocumentUpload = async (file: File | null) => {
+    if (!file) return;
+    setUploadingDocument(true);
+    try {
+      const asset = await uploadAsset("verification-document", file, { entityType: "professional_verification" });
+      setDocumentAsset(asset);
+      toast({ title: "Document uploaded", description: "Your file is ready to submit for review." });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingDocument(false);
+    }
+  };
 
   const statusConfig = {
     UNSUBMITTED: {
@@ -117,14 +149,33 @@ export default function ProVerificationPending() {
             {canSubmit && (
               <div className="space-y-3 pt-2">
                 <div className="space-y-1">
-                  <Label>License / Insurance Document URL</Label>
+                  <Label>Verification document</Label>
                   <Input
-                    value={documentUrl}
-                    onChange={e => setDocumentUrl(e.target.value)}
-                    placeholder="https://drive.google.com/your-document"
-                    data-testid="input-document-url"
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp"
+                    onChange={(e) => {
+                      void handleDocumentUpload(e.target.files?.[0] ?? null);
+                      e.currentTarget.value = "";
+                    }}
+                    disabled={uploadingDocument}
+                    data-testid="input-document-file"
                   />
-                  <p className="text-xs text-muted-foreground">Upload to Google Drive, Dropbox, or similar and paste the link here.</p>
+                  <p className="text-xs text-muted-foreground">Upload your licence, insurance certificate, or similar proof of trade.</p>
+                  {documentAsset && (
+                    <div className="rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{documentAsset.originalName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {documentAsset.sizeBytes > 0 ? formatFileSize(documentAsset.sizeBytes) : "Previously submitted"}
+                          </p>
+                        </div>
+                        <a href={documentAsset.url} target="_blank" rel="noreferrer" className="text-primary text-xs hover:underline">
+                          Open
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>License Number <span className="text-muted-foreground">(optional)</span></Label>
@@ -138,7 +189,7 @@ export default function ProVerificationPending() {
                 <Button
                   className="w-full"
                   onClick={() => submit.mutate()}
-                  disabled={submit.isPending || !documentUrl.trim()}
+                  disabled={submit.isPending || uploadingDocument || !documentAsset?.id}
                   data-testid="button-submit-verification"
                 >
                   {submit.isPending ? "Submitting…" : status === "REJECTED" ? "Resubmit Documents" : "Submit Documents (Optional)"}

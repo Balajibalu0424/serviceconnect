@@ -19,6 +19,7 @@ import {
   recordOnboardingOtpSent,
 } from "./onboardingService";
 import { issueVerificationChallenge, verifyVerificationChallenge } from "./verificationService";
+import { onboardingChatRateLimiter, onboardingSessionRateLimiter, otpSendRateLimiter, otpVerifyRateLimiter } from "./rateLimit";
 
 const createSessionSchema = z.object({
   role: onboardingRoleSchema,
@@ -75,7 +76,7 @@ function handleRouteError(res: Response, error: unknown) {
 }
 
 export function registerOnboardingRoutes(app: Express) {
-  app.post("/api/onboarding/sessions", async (req: Request, res: Response) => {
+  app.post("/api/onboarding/sessions", onboardingSessionRateLimiter, async (req: Request, res: Response) => {
     try {
       const { role, previousSessionId } = createSessionSchema.parse(req.body ?? {});
       const session = await createOnboardingSession(role, previousSessionId);
@@ -94,7 +95,7 @@ export function registerOnboardingRoutes(app: Express) {
     }
   });
 
-  app.post("/api/onboarding/sessions/:id/chat", async (req: Request, res: Response) => {
+  app.post("/api/onboarding/sessions/:id/chat", onboardingChatRateLimiter, async (req: Request, res: Response) => {
     try {
       const { message } = onboardingChatRequestSchema.parse(req.body ?? {});
       const categories = await listActiveCategories();
@@ -116,7 +117,7 @@ export function registerOnboardingRoutes(app: Express) {
     }
   });
 
-  app.post("/api/onboarding/sessions/:id/otp/send", async (req: Request, res: Response) => {
+  app.post("/api/onboarding/sessions/:id/otp/send", otpSendRateLimiter, async (req: Request, res: Response) => {
     try {
       const { channel } = onboardingOtpSendSchema.parse(req.body ?? {});
       const session = await getOnboardingSession(getRouteParam(req.params.id));
@@ -140,7 +141,7 @@ export function registerOnboardingRoutes(app: Express) {
     }
   });
 
-  app.post("/api/onboarding/sessions/:id/otp/verify", async (req: Request, res: Response) => {
+  app.post("/api/onboarding/sessions/:id/otp/verify", otpVerifyRateLimiter, async (req: Request, res: Response) => {
     try {
       const { channel, code } = onboardingOtpVerifySchema.parse(req.body ?? {});
       const isValid = await verifyVerificationChallenge({

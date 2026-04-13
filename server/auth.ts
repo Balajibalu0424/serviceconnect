@@ -5,8 +5,21 @@ import { db } from "./db";
 import { users, userSessions } from "@shared/schema";
 import { eq, and, gt } from "drizzle-orm";
 
-const JWT_SECRET = process.env.JWT_SECRET || "serviceconnect-jwt-secret-dev-2024";
-const REFRESH_SECRET = process.env.REFRESH_SECRET || "serviceconnect-refresh-secret-dev-2024";
+function readAuthSecret(name: "JWT_SECRET" | "REFRESH_SECRET", fallback: string) {
+  const configured = process.env[name]?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`${name} must be configured in production.`);
+  }
+
+  return fallback;
+}
+
+const JWT_SECRET = readAuthSecret("JWT_SECRET", "serviceconnect-dev-jwt-secret");
+const REFRESH_SECRET = readAuthSecret("REFRESH_SECRET", "serviceconnect-dev-refresh-secret");
 
 export function generateTokens(userId: string, role: string) {
   const accessToken = jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: "30m" });

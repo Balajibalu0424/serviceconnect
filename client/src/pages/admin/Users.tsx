@@ -109,6 +109,8 @@ export default function AdminUsers() {
   // Suspend dialog
   const [suspendTarget, setSuspendTarget] = useState<User | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
+  const [verificationRejectTarget, setVerificationRejectTarget] = useState<User | null>(null);
+  const [verificationRejectNote, setVerificationRejectNote] = useState("");
 
   // Detail sheet
   const [detailUserId, setDetailUserId] = useState<string | null>(null);
@@ -185,6 +187,8 @@ export default function AdminUsers() {
     onSuccess: (_, vars) => {
       invalidateUsers();
       toast({ title: vars.approved ? "Pro verified" : "Verification rejected" });
+      setVerificationRejectTarget(null);
+      setVerificationRejectNote("");
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -439,7 +443,10 @@ export default function AdminUsers() {
                             size="sm"
                             variant="outline"
                             className="gap-1 rounded-xl text-destructive border-destructive/30 hover:bg-destructive/5"
-                            onClick={() => verifyPro.mutate({ id: u.id, approved: false, note: "Documents not sufficient" })}
+                            onClick={() => {
+                              setVerificationRejectTarget(u);
+                              setVerificationRejectNote(u.proVerification?.verificationReviewNote || "");
+                            }}
                             disabled={verifyPro.isPending}
                             data-testid={`button-reject-${u.id}`}
                           >
@@ -662,6 +669,47 @@ export default function AdminUsers() {
       </Dialog>
 
       {/* ── User Detail Sheet ─────────────────────────────────────────────── */}
+      <Dialog open={!!verificationRejectTarget} onOpenChange={() => setVerificationRejectTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Verification</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Add a review note for <span className="font-semibold text-foreground">{verificationRejectTarget?.firstName} {verificationRejectTarget?.lastName}</span> so they know what to correct before resubmitting.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Review note</Label>
+              <Textarea
+                placeholder="e.g. The uploaded licence is expired or the document is unreadable."
+                value={verificationRejectNote}
+                onChange={(e) => setVerificationRejectNote(e.target.value)}
+                rows={3}
+                data-testid="input-verification-reject-note"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVerificationRejectTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() =>
+                verificationRejectTarget &&
+                verifyPro.mutate({
+                  id: verificationRejectTarget.id,
+                  approved: false,
+                  note: verificationRejectNote.trim() || "Verification documents were not sufficient.",
+                })
+              }
+              disabled={verifyPro.isPending}
+              data-testid="button-confirm-verification-reject"
+            >
+              {verifyPro.isPending ? "Rejecting..." : "Reject Verification"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Sheet open={!!detailUserId} onOpenChange={() => setDetailUserId(null)}>
         <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
           <SheetHeader>
@@ -703,6 +751,90 @@ export default function AdminUsers() {
                   )}
                 </div>
               </div>
+
+              {userDetail.user.role === "PROFESSIONAL" && (
+                <div className={cn(GLASS, "p-4 space-y-3")}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="font-semibold text-sm">Verification review</h4>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Status: {userDetail.profile?.verificationStatus || "UNSUBMITTED"}
+                      </p>
+                    </div>
+                    {userDetail.profile?.verificationStatus === "APPROVED" ? (
+                      <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0">Approved</Badge>
+                    ) : userDetail.profile?.verificationStatus === "PENDING" ? (
+                      <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0">Pending review</Badge>
+                    ) : userDetail.profile?.verificationStatus === "REJECTED" ? (
+                      <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">Rejected</Badge>
+                    ) : (
+                      <Badge variant="outline">Unsubmitted</Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-muted-foreground">
+                    <div>
+                      <span className="font-medium text-foreground">Submitted:</span>{" "}
+                      {userDetail.profile?.verificationSubmittedAt
+                        ? format(new Date(userDetail.profile.verificationSubmittedAt), "MMM d, yyyy HH:mm")
+                        : "Not submitted"}
+                    </div>
+                    <div>
+                      <span className="font-medium text-foreground">Reviewed:</span>{" "}
+                      {userDetail.profile?.verificationReviewedAt
+                        ? format(new Date(userDetail.profile.verificationReviewedAt), "MMM d, yyyy HH:mm")
+                        : "Not reviewed"}
+                    </div>
+                  </div>
+
+                  {userDetail.profile?.verificationDocumentUrl && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={userDetail.profile.verificationDocumentUrl} target="_blank" rel="noreferrer">
+                          Open verification document
+                        </a>
+                      </Button>
+                      {userDetail.profile?.licenseNumber && (
+                        <span className="text-xs text-muted-foreground">
+                          Licence: <span className="font-medium text-foreground">{userDetail.profile.licenseNumber}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {userDetail.profile?.verificationReviewNote && (
+                    <div className="rounded-xl border border-border/50 bg-muted/30 p-3 text-sm">
+                      <p className="font-medium mb-1">Latest review note</p>
+                      <p className="text-muted-foreground">{userDetail.profile.verificationReviewNote}</p>
+                    </div>
+                  )}
+
+                  {userDetail.profile?.verificationStatus === "PENDING" && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        className="gap-1 rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => verifyPro.mutate({ id: userDetail.user.id, approved: true })}
+                        disabled={verifyPro.isPending}
+                      >
+                        <ShieldCheck className="w-3 h-3" /> Approve verification
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1 rounded-xl text-destructive border-destructive/30 hover:bg-destructive/5"
+                        onClick={() => {
+                          setVerificationRejectTarget(userDetail.user);
+                          setVerificationRejectNote(userDetail.profile?.verificationReviewNote || "");
+                        }}
+                        disabled={verifyPro.isPending}
+                      >
+                        <ShieldX className="w-3 h-3" /> Reject with note
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Tabs */}
               <Tabs defaultValue="activity" className="w-full">

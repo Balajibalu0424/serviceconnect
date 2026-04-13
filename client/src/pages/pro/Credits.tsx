@@ -1,18 +1,31 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
+import { formatDistanceToNow } from "date-fns";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { CreditCard, TrendingDown, TrendingUp, Gift, Zap, CheckCircle, Loader2, X, Shield, Clock, Star, Infinity } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatDistanceToNow } from "date-fns";
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  CreditCard,
+  Gift,
+  Infinity,
+  Loader2,
+  Shield,
+  Star,
+  TrendingDown,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
 
 interface CreditPackage {
   id: string;
@@ -20,7 +33,7 @@ interface CreditPackage {
   price: number;
   credits: number;
   bonusCredits: number;
-  description?: string;
+  description?: string | null;
 }
 
 interface Transaction {
@@ -32,7 +45,42 @@ interface Transaction {
   createdAt: string;
 }
 
-const PACKAGE_ICONS = ["⚡", "🚀", "💼", "🏆"];
+interface PaymentConfig {
+  provider: "STRIPE";
+  ready: boolean;
+  mode: "LIVE" | "TEST" | "DEMO" | "DISABLED";
+  publishableKey: string | null;
+  missing: string[];
+  message: string;
+}
+
+interface PaymentIntentResponse {
+  paymentId: string;
+  clientSecret: string | null;
+  publishableKey: string | null;
+  mode: "LIVE" | "TEST" | "DEMO";
+  packageSnapshot: {
+    id: string;
+    name: string;
+    price: string;
+    currency: string;
+    credits: number;
+    bonusCredits: number;
+    totalCredits: number;
+  };
+}
+
+interface PaymentRecord {
+  id: string;
+  status: "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+  mode: "LIVE" | "TEST" | "DEMO";
+  fulfilledAt: string | null;
+  failedAt: string | null;
+  failureReason: string | null;
+}
+
+type CheckoutStep = "confirm" | "payment" | "processing" | "success";
+
 const PACKAGE_COLORS = [
   "border-border",
   "border-primary ring-1 ring-primary/30",
@@ -40,7 +88,7 @@ const PACKAGE_COLORS = [
   "border-amber-400 ring-1 ring-amber-400/30",
 ];
 
-const TX_ICONS: Record<string, any> = {
+const TX_ICONS: Record<string, typeof TrendingUp> = {
   PURCHASE: TrendingUp,
   SPEND: TrendingDown,
   BONUS: Gift,
@@ -58,200 +106,396 @@ const TX_LABELS: Record<string, string> = {
   UPGRADE: "Upgrade",
 };
 
-// ServiceConnect vs Bark comparison
 const COMPARISON = [
-  { feature: "Credits expire", bark: "After 3 months", sc: "Never expire", scGood: true },
-  { feature: "Lead exclusivity", bark: "Same lead to 5 pros", sc: "Matchbook — your lead", scGood: true },
-  { feature: "Money-back on first pack", bark: "No guarantee", sc: "Full refund if no jobs match", scGood: true },
-  { feature: "Chat before spending", bark: "Pay to contact", sc: "Free chat always", scGood: true },
-  { feature: "Aftercare follow-up", bark: "None", sc: "Automated follow-up", scGood: true },
+  { feature: "Credits expire", bark: "After 3 months", sc: "Never expire" },
+  { feature: "Lead exclusivity", bark: "Same lead to 5 pros", sc: "Matchbook - your lead" },
+  { feature: "Money-back on first pack", bark: "No guarantee", sc: "Refund if no jobs match" },
+  { feature: "Chat before spending", bark: "Pay to contact", sc: "Free chat always" },
+  { feature: "Aftercare follow-up", bark: "None", sc: "Automated follow-up" },
 ];
+
+const cardElementOptions = {
+  hidePostalCode: true,
+  style: {
+    base: {
+      color: "#111827",
+      fontFamily: "system-ui, sans-serif",
+      fontSize: "16px",
+      "::placeholder": {
+        color: "#6b7280",
+      },
+    },
+    invalid: {
+      color: "#dc2626",
+    },
+  },
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchPaymentStatus(paymentId: string) {
+  const res = await apiRequest("GET", `/api/payments/${paymentId}`);
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({ error: "Unable to read payment status." }));
+    throw new Error(payload.error || "Unable to read payment status.");
+  }
+  return res.json() as Promise<PaymentRecord>;
+}
+
+async function waitForPaymentFinalization(paymentId: string, attempts = 8, delayMs = 1500) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const payment = await fetchPaymentStatus(paymentId);
+    if (payment.status === "COMPLETED" && payment.fulfilledAt) return payment;
+    if (payment.status === "FAILED") throw new Error(payment.failureReason || "Payment failed.");
+    if (payment.status === "REFUNDED") throw new Error("Payment was refunded before fulfillment completed.");
+    await sleep(delayMs);
+  }
+  return null;
+}
+
+function StripePaymentForm({
+  clientSecret,
+  amountLabel,
+  busy,
+  onBack,
+  onProviderConfirmed,
+}: {
+  clientSecret: string;
+  amountLabel: string;
+  busy: boolean;
+  onBack: () => void;
+  onProviderConfirmed: () => Promise<void>;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!stripe || !elements) {
+      setSubmitError("Stripe has not finished loading yet.");
+      return;
+    }
+
+    const card = elements.getElement(CardElement);
+    if (!card) {
+      setSubmitError("Card details are not ready.");
+      return;
+    }
+
+    setSubmitError(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: { card },
+      });
+      if (result.error) throw new Error(result.error.message || "Card confirmation failed.");
+      if (!result.paymentIntent) throw new Error("Stripe did not return a payment intent.");
+      await onProviderConfirmed();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Payment confirmation failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 py-2">
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Card details</p>
+        <div className="rounded-lg border bg-background px-3 py-3">
+          <CardElement options={cardElementOptions} />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Card details are sent directly to Stripe. ServiceConnect only fulfills credits after the backend confirms the payment.
+        </p>
+      </div>
+
+      {submitError && (
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {submitError}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" className="flex-1" onClick={onBack} disabled={isSubmitting || busy}>
+          Back
+        </Button>
+        <Button type="submit" className="flex-1" disabled={!stripe || isSubmitting || busy} data-testid="button-pay">
+          {isSubmitting || busy ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Processing...
+            </span>
+          ) : (
+            `Pay ${amountLabel}`
+          )}
+        </Button>
+      </div>
+    </form>
+  );
+}
 
 export default function ProCredits() {
   const { user, refreshUser } = useAuth();
   const { toast } = useToast();
-  const qc = useQueryClient();
-
+  const queryClient = useQueryClient();
   const [selectedPkg, setSelectedPkg] = useState<CreditPackage | null>(null);
-  const [checkoutStep, setCheckoutStep] = useState<"confirm" | "payment" | "success">("confirm");
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvc, setCardCvc] = useState("");
-  const [processingPayment, setProcessingPayment] = useState(false);
+  const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("confirm");
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [activePayment, setActivePayment] = useState<PaymentIntentResponse | null>(null);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
 
   const { data: packages = [] } = useQuery<CreditPackage[]>({ queryKey: ["/api/credits/packages"] });
   const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/credits/transactions"] });
+  const { data: paymentConfig, isLoading: paymentConfigLoading } = useQuery<PaymentConfig>({
+    queryKey: ["/api/payments/config"],
+  });
 
-  const isFirstPurchase = (transactions as Transaction[]).filter(t => t.type === "PURCHASE").length === 0;
+  const stripePromise = useMemo(() => {
+    const key = paymentConfig?.publishableKey ?? activePayment?.publishableKey;
+    return key ? loadStripe(key) : null;
+  }, [activePayment?.publishableKey, paymentConfig?.publishableKey]);
 
-  const purchase = useMutation({
+  const paymentsReady = Boolean(paymentConfig?.ready && paymentConfig?.publishableKey);
+  const isFirstPurchase = transactions.filter((tx) => tx.type === "PURCHASE").length === 0;
+
+  const createPaymentIntent = useMutation({
     mutationFn: async (packageId: string) => {
-      const res = await apiRequest("POST", "/api/credits/purchase", { packageId });
-      if (!res.ok) throw new Error((await res.json()).error);
-      return res.json();
+      const res = await apiRequest("POST", "/api/credits/stripe/payment-intent", { packageId });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || "Unable to create payment intent.");
+      return payload as PaymentIntentResponse;
     },
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["/api/credits/transactions"] });
-      refreshUser();
-      setCheckoutStep("success");
-      toast({ title: "Credits added!", description: `${data.creditsAdded} credits have been added to your account.` });
+    onSuccess: (paymentIntent) => {
+      setCheckoutError(null);
+      setActivePayment(paymentIntent);
+      setCheckoutStep("payment");
     },
-    onError: (e: any) => {
-      toast({ title: "Payment failed", description: e.message, variant: "destructive" });
-      setProcessingPayment(false);
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Unable to start checkout.";
+      setCheckoutError(message);
+      toast({ title: "Checkout unavailable", description: message, variant: "destructive" });
     },
   });
 
   const openCheckout = (pkg: CreditPackage) => {
     setSelectedPkg(pkg);
     setCheckoutStep("confirm");
-    setCardNumber(""); setCardExpiry(""); setCardCvc("");
-    setProcessingPayment(false);
+    setCheckoutError(null);
+    setActivePayment(null);
+    setVerifyingPayment(false);
   };
 
   const closeCheckout = () => {
     setSelectedPkg(null);
     setCheckoutStep("confirm");
+    setCheckoutError(null);
+    setActivePayment(null);
+    setVerifyingPayment(false);
   };
 
-  const handlePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPkg) return;
-    setProcessingPayment(true);
-    await new Promise(r => setTimeout(r, 1200));
-    purchase.mutate(selectedPkg.id);
+  const finalizeCompletedPayment = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["/api/credits/transactions"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/credits/balance"] }),
+      refreshUser(),
+    ]);
+    setCheckoutStep("success");
   };
 
-  const formatCardNumber = (v: string) => v.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
-  const formatExpiry = (v: string) => {
-    const d = v.replace(/\D/g, "").slice(0, 4);
-    return d.length >= 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+  const verifyPayment = async (paymentId: string) => {
+    setVerifyingPayment(true);
+    setCheckoutError(null);
+    setCheckoutStep("processing");
+
+    try {
+      const finalPayment = await waitForPaymentFinalization(paymentId);
+      if (finalPayment) {
+        await finalizeCompletedPayment();
+        toast({
+          title: "Credits added",
+          description: `${selectedPkg ? selectedPkg.credits + selectedPkg.bonusCredits : "Your"} credits are now available.`,
+        });
+        return;
+      }
+
+      setCheckoutError("The provider confirmed your payment, but fulfillment is still processing. You can check again in a moment.");
+      toast({
+        title: "Payment processing",
+        description: "Stripe accepted the payment. Credits will appear once the webhook completes.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to verify payment status.";
+      setCheckoutError(message);
+      setCheckoutStep("payment");
+      toast({ title: "Payment failed", description: message, variant: "destructive" });
+    } finally {
+      setVerifyingPayment(false);
+    }
   };
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
+      <div className="space-y-6 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-xl font-bold">Credits</h1>
-          <div className="flex items-center gap-2 bg-primary/10 px-4 py-2 rounded-full">
-            <CreditCard className="w-4 h-4 text-primary" />
+          <div className="flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2">
+            <CreditCard className="h-4 w-4 text-primary" />
             <span className="font-bold text-primary" data-testid="text-credit-balance">
               {user?.creditBalance || 0} credits
             </span>
           </div>
         </div>
 
-        {/* Never-expire + money-back guarantee banner */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {!paymentConfigLoading && paymentConfig && !paymentConfig.ready && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">Payments are not configured yet.</p>
+                <p>{paymentConfig.message}</p>
+                {paymentConfig.missing.length > 0 && (
+                  <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                    Missing environment variables: {paymentConfig.missing.join(", ")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             {
               icon: Infinity,
               color: "text-primary",
               bg: "bg-primary/5 border-primary/20",
               title: "Credits never expire",
-              desc: "Use them whenever you're ready. No rush, no expiry, no stress.",
+              desc: "Use them whenever you are ready. No expiry window and no forced spending.",
             },
             {
               icon: Shield,
               color: "text-green-600",
               bg: "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
               title: "Money-back guarantee",
-              desc: isFirstPurchase ? "Not happy with your first pack? Full refund — no questions asked." : "Your credits are protected. Contact support for any issue.",
+              desc: isFirstPurchase
+                ? "Your first pack is refundable if no jobs match within 30 days."
+                : "Support can review payment issues and package disputes.",
             },
             {
               icon: Zap,
               color: "text-amber-500",
               bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800",
               title: "Earn free credits",
-              desc: "Spin the wheel every 72 hours to win bonus credits.",
+              desc: "Spin the wheel every 72 hours for bonus credits and boosts.",
             },
           ].map(({ icon: Icon, color, bg, title, desc }) => (
-            <div key={title} className={`flex items-start gap-3 p-4 rounded-xl border ${bg}`}>
-              <div className={`w-9 h-9 rounded-lg bg-white/60 dark:bg-black/20 flex items-center justify-center shrink-0`}>
-                <Icon className={`w-5 h-5 ${color}`} />
+            <div key={title} className={`flex items-start gap-3 rounded-xl border p-4 ${bg}`}>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/60 dark:bg-black/20">
+                <Icon className={`h-5 w-5 ${color}`} />
               </div>
               <div>
-                <p className="font-semibold text-sm">{title}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                <p className="text-sm font-semibold">{title}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{desc}</p>
               </div>
             </div>
           ))}
         </div>
 
-        {/* First-purchase money-back callout */}
         {isFirstPurchase && (
-          <div className="flex items-start gap-3 p-4 rounded-xl bg-green-50 border border-green-200 dark:bg-green-950/20 dark:border-green-800">
-            <Shield className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/20">
+            <Shield className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
             <div>
-              <p className="font-semibold text-sm text-green-800 dark:text-green-400">First pack — 100% money-back guarantee</p>
-              <p className="text-xs text-green-700 dark:text-green-500 mt-0.5">
-                Buy your first credit pack risk-free. If you don't get a matched job within 30 days, we'll refund every cent — no questions asked.
+              <p className="text-sm font-semibold text-green-800 dark:text-green-400">First pack - 100% money-back guarantee</p>
+              <p className="mt-0.5 text-xs text-green-700 dark:text-green-500">
+                Buy your first credit pack risk-free. If you do not get a matched job within 30 days, support can refund the full amount.
               </p>
             </div>
           </div>
         )}
 
-        {/* How credits work */}
-        <Card className="bg-muted/40 border-dashed">
-          <CardContent className="pt-4 pb-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-              <div className="flex items-start gap-2">
-                <Zap className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-medium">FREE tier</p>
-                  <p className="text-muted-foreground text-xs">Chat always free, contact info masked</p>
-                </div>
+        <Card className="border-dashed bg-muted/40">
+          <CardContent className="grid grid-cols-1 gap-4 pb-4 pt-4 text-sm sm:grid-cols-3">
+            <div className="flex items-start gap-2">
+              <Zap className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div>
+                <p className="font-medium">Free tier</p>
+                <p className="text-xs text-muted-foreground">Chat remains free while contact info stays masked.</p>
               </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle className="w-4 h-4 text-accent mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-medium">STANDARD unlock</p>
-                  <p className="text-muted-foreground text-xs">Spend credits to reveal phone &amp; book</p>
-                </div>
+            </div>
+            <div className="flex items-start gap-2">
+              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+              <div>
+                <p className="font-medium">Standard unlock</p>
+                <p className="text-xs text-muted-foreground">Spend credits when you want to reveal contact details and book.</p>
               </div>
-              <div className="flex items-start gap-2">
-                <Star className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-medium">Credits = access, not leads</p>
-                  <p className="text-muted-foreground text-xs">Unlike Bark — you control when you spend</p>
-                </div>
+            </div>
+            <div className="flex items-start gap-2">
+              <Star className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <div>
+                <p className="font-medium">Credits control access</p>
+                <p className="text-xs text-muted-foreground">You decide when to spend, instead of paying for every lead upfront.</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Packages */}
         <div>
-          <h2 className="font-semibold mb-1">Buy Credits</h2>
-          <p className="text-xs text-muted-foreground mb-3">All credits never expire. Your first pack is covered by our money-back guarantee.</p>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {(packages as CreditPackage[]).map((pkg, i) => (
+          <h2 className="mb-1 font-semibold">Buy Credits</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            All credits never expire. Stripe powers checkout once payment keys and webhook secrets are configured.
+          </p>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {packages.map((pkg, index) => (
               <Card
                 key={pkg.id}
-                className={`relative transition-shadow hover:shadow-md cursor-pointer ${PACKAGE_COLORS[i] || "border-border"}`}
+                className={`relative cursor-pointer transition-shadow hover:shadow-md ${PACKAGE_COLORS[index] || "border-border"}`}
+                onClick={() => paymentsReady && openCheckout(pkg)}
                 data-testid={`package-${pkg.id}`}
-                onClick={() => openCheckout(pkg)}
               >
-                <CardContent className="pt-4 pb-4 text-center">
+                <CardContent className="pb-4 pt-4 text-center">
                   {pkg.name === "Popular" && (
-                    <Badge className="mb-2 text-xs absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap">Most Popular</Badge>
-                  )}
-                  {i === 0 && isFirstPurchase && (
-                    <Badge variant="outline" className="mb-2 text-xs absolute -top-2 right-2 text-green-600 border-green-400 bg-green-50 whitespace-nowrap">
-                      <Shield className="w-2.5 h-2.5 mr-1" />Guaranteed
+                    <Badge className="absolute left-1/2 top-[-8px] -translate-x-1/2 whitespace-nowrap text-xs">
+                      Most Popular
                     </Badge>
                   )}
-                  <div className="text-2xl mb-1">{PACKAGE_ICONS[i] || "💳"}</div>
+                  {index === 0 && isFirstPurchase && (
+                    <Badge
+                      variant="outline"
+                      className="absolute right-2 top-[-8px] whitespace-nowrap border-green-400 bg-green-50 text-xs text-green-600"
+                    >
+                      <Shield className="mr-1 h-2.5 w-2.5" />
+                      Guaranteed
+                    </Badge>
+                  )}
+                  <div className="mb-2 flex justify-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                      <CreditCard className="h-5 w-5 text-primary" />
+                    </div>
+                  </div>
                   <p className="font-bold">{pkg.name}</p>
-                  <p className="text-2xl font-bold text-primary mt-1">€{pkg.price}</p>
+                  <p className="mt-1 text-2xl font-bold text-primary">EUR {pkg.price}</p>
                   <p className="text-sm text-muted-foreground">
                     {pkg.credits} credits
                     {pkg.bonusCredits > 0 && <span className="text-accent"> +{pkg.bonusCredits} bonus</span>}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Never expire</p>
-                  <Button size="sm" className="w-full mt-3" onClick={e => { e.stopPropagation(); openCheckout(pkg); }} data-testid={`button-buy-${pkg.id}`}>
-                    Buy
+                  <p className="mt-1 text-xs text-muted-foreground">Never expire</p>
+                  <Button
+                    size="sm"
+                    className="mt-3 w-full"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (paymentsReady) openCheckout(pkg);
+                    }}
+                    disabled={!paymentsReady}
+                    data-testid={`button-buy-${pkg.id}`}
+                  >
+                    {paymentsReady ? "Buy" : "Setup needed"}
                   </Button>
                 </CardContent>
               </Card>
@@ -259,32 +503,34 @@ export default function ProCredits() {
           </div>
         </div>
 
-        {/* ServiceConnect vs Bark comparison */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-base">
               Why ServiceConnect beats Bark
-              <Badge variant="secondary" className="text-xs">Ireland's better option</Badge>
+              <Badge variant="secondary" className="text-xs">
+                Better credit model
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left border-b border-border">
-                    <th className="pb-2 text-muted-foreground font-medium pr-4">Feature</th>
-                    <th className="pb-2 text-muted-foreground font-medium pr-4">Bark</th>
+                  <tr className="border-b border-border text-left">
+                    <th className="pb-2 pr-4 font-medium text-muted-foreground">Feature</th>
+                    <th className="pb-2 pr-4 font-medium text-muted-foreground">Bark</th>
                     <th className="pb-2 font-medium">ServiceConnect</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {COMPARISON.map(row => (
+                  {COMPARISON.map((row) => (
                     <tr key={row.feature} className="border-b border-border/50 last:border-0">
-                      <td className="py-2.5 pr-4 text-muted-foreground text-xs">{row.feature}</td>
+                      <td className="py-2.5 pr-4 text-xs text-muted-foreground">{row.feature}</td>
                       <td className="py-2.5 pr-4 text-xs text-destructive">{row.bark}</td>
                       <td className="py-2.5 text-xs">
-                        <span className="flex items-center gap-1.5 text-green-700 dark:text-green-400 font-medium">
-                          <CheckCircle className="w-3.5 h-3.5" />{row.sc}
+                        <span className="flex items-center gap-1.5 font-medium text-green-700 dark:text-green-400">
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          {row.sc}
                         </span>
                       </td>
                     </tr>
@@ -295,40 +541,48 @@ export default function ProCredits() {
           </CardContent>
         </Card>
 
-        {/* Transaction history */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Transaction History</CardTitle>
           </CardHeader>
           <CardContent>
-            {(transactions as Transaction[]).length === 0 ? (
-              <div className="text-center py-8">
-                <CreditCard className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+            {transactions.length === 0 ? (
+              <div className="py-8 text-center">
+                <CreditCard className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">No transactions yet</p>
-                <p className="text-xs text-muted-foreground mt-1">Your first credit purchase will appear here</p>
+                <p className="mt-1 text-xs text-muted-foreground">Your first completed credit purchase will appear here.</p>
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {(transactions as Transaction[]).map((tx) => {
+                {transactions.map((tx) => {
                   const Icon = TX_ICONS[tx.type] || CreditCard;
                   const isPositive = tx.amount > 0;
                   return (
                     <div key={tx.id} className="flex items-center justify-between py-3" data-testid={`tx-${tx.id}`}>
                       <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isPositive ? "bg-accent/10" : "bg-destructive/10"}`}>
-                          <Icon className={`w-4 h-4 ${isPositive ? "text-accent" : "text-destructive"}`} />
+                        <div
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                            isPositive ? "bg-accent/10" : "bg-destructive/10"
+                          }`}
+                        >
+                          <Icon className={`h-4 w-4 ${isPositive ? "text-accent" : "text-destructive"}`} />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-medium">{tx.description}</p>
-                            <Badge variant="outline" className="text-xs py-0">{TX_LABELS[tx.type] || tx.type}</Badge>
+                            <Badge variant="outline" className="py-0 text-xs">
+                              {TX_LABELS[tx.type] || tx.type}
+                            </Badge>
                           </div>
-                          <p className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(tx.createdAt), { addSuffix: true })}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDistanceToNow(new Date(tx.createdAt), { addSuffix: true })}
+                          </p>
                         </div>
                       </div>
-                      <div className="text-right shrink-0 ml-4">
-                        <p className={`font-bold text-sm ${isPositive ? "text-accent" : "text-destructive"}`}>
-                          {isPositive ? "+" : ""}{tx.amount}
+                      <div className="ml-4 shrink-0 text-right">
+                        <p className={`text-sm font-bold ${isPositive ? "text-accent" : "text-destructive"}`}>
+                          {isPositive ? "+" : ""}
+                          {tx.amount}
                         </p>
                         <p className="text-xs text-muted-foreground">Bal: {tx.balanceAfter}</p>
                       </div>
@@ -341,104 +595,166 @@ export default function ProCredits() {
         </Card>
       </div>
 
-      {/* Checkout Dialog */}
-      <Dialog open={!!selectedPkg} onOpenChange={open => !open && closeCheckout()}>
+      <Dialog open={!!selectedPkg} onOpenChange={(open) => !open && closeCheckout()}>
         <DialogContent className="sm:max-w-md">
           {checkoutStep === "confirm" && selectedPkg && (
             <>
               <DialogHeader>
                 <DialogTitle>Confirm Purchase</DialogTitle>
-                <DialogDescription>Review your order before payment</DialogDescription>
+                <DialogDescription>Review your package before Stripe checkout starts.</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-2">
-                <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Package</span><span className="font-medium">{selectedPkg.name}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Credits</span><span className="font-medium">{selectedPkg.credits}</span></div>
+                <div className="space-y-2 rounded-lg bg-muted/50 p-4">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Package</span>
+                    <span className="font-medium">{selectedPkg.name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Credits</span>
+                    <span className="font-medium">{selectedPkg.credits}</span>
+                  </div>
                   {selectedPkg.bonusCredits > 0 && (
-                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Bonus credits</span><span className="font-medium text-accent">+{selectedPkg.bonusCredits}</span></div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Bonus credits</span>
+                      <span className="font-medium text-accent">+{selectedPkg.bonusCredits}</span>
+                    </div>
                   )}
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Credits expire</span>
-                    <span className="font-medium text-green-600 flex items-center gap-1"><Infinity className="w-3.5 h-3.5" /> Never</span>
+                    <span className="flex items-center gap-1 font-medium text-green-600">
+                      <Infinity className="h-3.5 w-3.5" />
+                      Never
+                    </span>
                   </div>
                   <Separator />
-                  <div className="flex justify-between font-bold"><span>Total</span><span>€{selectedPkg.price}</span></div>
+                  <div className="flex justify-between font-bold">
+                    <span>Total</span>
+                    <span>EUR {selectedPkg.price}</span>
+                  </div>
                 </div>
-                {isFirstPurchase && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 border border-green-200 dark:bg-green-950/20 dark:border-green-800 text-xs text-green-700 dark:text-green-400">
-                    <Shield className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                    <span><strong>Money-back guarantee applies</strong> — this is your first pack. Full refund if no jobs match in 30 days.</span>
+
+                {checkoutError && (
+                  <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                    {checkoutError}
                   </div>
                 )}
+
+                {isFirstPurchase && (
+                  <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-700 dark:border-green-800 dark:bg-green-950/20 dark:text-green-400">
+                    <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      <strong>Money-back guarantee applies.</strong> Your first credit pack is eligible if no jobs match in 30 days.
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={closeCheckout} className="flex-1">Cancel</Button>
-                  <Button onClick={() => setCheckoutStep("payment")} className="flex-1" data-testid="button-proceed-to-payment">Proceed to Payment</Button>
+                  <Button variant="outline" onClick={closeCheckout} className="flex-1">
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => createPaymentIntent.mutate(selectedPkg.id)}
+                    className="flex-1"
+                    disabled={createPaymentIntent.isPending || !paymentsReady}
+                    data-testid="button-proceed-to-payment"
+                  >
+                    {createPaymentIntent.isPending ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Starting...
+                      </span>
+                    ) : (
+                      "Proceed to Payment"
+                    )}
+                  </Button>
                 </div>
               </div>
             </>
           )}
 
-          {checkoutStep === "payment" && selectedPkg && (
+          {checkoutStep === "payment" && selectedPkg && activePayment?.clientSecret && stripePromise && (
             <>
               <DialogHeader>
                 <DialogTitle>Payment Details</DialogTitle>
-                <DialogDescription>Your payment is secured by Stripe · €{selectedPkg.price}</DialogDescription>
+                <DialogDescription>
+                  Stripe {activePayment.mode === "LIVE" ? "live" : "test"} mode - EUR {selectedPkg.price}
+                </DialogDescription>
               </DialogHeader>
-              <form onSubmit={handlePaymentSubmit} className="space-y-4 py-2">
-                <div className="space-y-1">
-                  <Label htmlFor="cardNumber">Card number</Label>
-                  <div className="relative">
-                    <Input id="cardNumber" placeholder="1234 5678 9012 3456" value={cardNumber}
-                      onChange={e => setCardNumber(formatCardNumber(e.target.value))} maxLength={19} required disabled={processingPayment} className="pr-10" data-testid="input-card-number" />
-                    <CreditCard className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="cardExpiry">Expiry</Label>
-                    <Input id="cardExpiry" placeholder="MM/YY" value={cardExpiry} onChange={e => setCardExpiry(formatExpiry(e.target.value))} maxLength={5} required disabled={processingPayment} data-testid="input-card-expiry" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="cardCvc">CVC</Label>
-                    <Input id="cardCvc" placeholder="123" value={cardCvc} onChange={e => setCardCvc(e.target.value.replace(/\D/g, "").slice(0, 4))} maxLength={4} required disabled={processingPayment} data-testid="input-card-cvc" />
-                  </div>
-                </div>
-                <div className="bg-muted/40 rounded p-3 text-xs text-muted-foreground flex items-start gap-2">
-                  <CheckCircle className="w-3.5 h-3.5 mt-0.5 text-accent shrink-0" />
-                  <span>Scaffolded Stripe integration. In production, card data goes directly to Stripe — never to our servers.</span>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" onClick={() => setCheckoutStep("confirm")} disabled={processingPayment} className="flex-1">Back</Button>
-                  <Button type="submit" disabled={processingPayment} className="flex-1" data-testid="button-pay">
-                    {processingPayment ? <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</span> : `Pay €${selectedPkg.price}`}
-                  </Button>
-                </div>
-              </form>
+              <Elements stripe={stripePromise}>
+                <StripePaymentForm
+                  clientSecret={activePayment.clientSecret}
+                  amountLabel={`EUR ${selectedPkg.price}`}
+                  busy={verifyingPayment}
+                  onBack={() => {
+                    setCheckoutStep("confirm");
+                    setCheckoutError(null);
+                  }}
+                  onProviderConfirmed={async () => {
+                    await verifyPayment(activePayment.paymentId);
+                  }}
+                />
+              </Elements>
             </>
           )}
 
-          {checkoutStep === "success" && selectedPkg && (
-            <div className="text-center py-6 space-y-4">
-              <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto">
-                <CheckCircle className="w-8 h-8 text-accent" />
+          {checkoutStep === "processing" && selectedPkg && activePayment && (
+            <div className="space-y-4 py-4 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                <Clock className="h-8 w-8 text-primary" />
               </div>
               <div>
-                <h3 className="font-bold text-lg">Payment Successful!</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {selectedPkg.credits + (selectedPkg.bonusCredits || 0)} credits added to your account.
+                <h3 className="text-lg font-bold">Payment submitted</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Stripe accepted the payment. ServiceConnect is waiting for the webhook to confirm fulfillment before credits are granted.
+                </p>
+              </div>
+              {checkoutError && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+                  {checkoutError}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={closeCheckout}>
+                  Close
+                </Button>
+                <Button className="flex-1" onClick={() => verifyPayment(activePayment.paymentId)} disabled={verifyingPayment}>
+                  {verifyingPayment ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Checking...
+                    </span>
+                  ) : (
+                    "Check status"
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {checkoutStep === "success" && selectedPkg && (
+            <div className="space-y-4 py-6 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent/10">
+                <CheckCircle className="h-8 w-8 text-accent" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold">Payment Complete</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {selectedPkg.credits + selectedPkg.bonusCredits} credits were added after backend confirmation.
                 </p>
               </div>
               <div className="space-y-2">
-                <div className="bg-muted/50 rounded-lg p-3 text-sm">
+                <div className="rounded-lg bg-muted/50 p-3 text-sm">
                   <span className="text-muted-foreground">New balance: </span>
                   <span className="font-bold text-primary">{user?.creditBalance || 0} credits</span>
                 </div>
                 <div className="flex items-center justify-center gap-2 text-xs text-green-600">
-                  <Infinity className="w-3.5 h-3.5" />
-                  <span>These credits never expire</span>
+                  <Infinity className="h-3.5 w-3.5" />
+                  <span>These credits never expire.</span>
                 </div>
               </div>
-              <Button onClick={closeCheckout} className="w-full" data-testid="button-close-success">Done</Button>
+              <Button onClick={closeCheckout} className="w-full" data-testid="button-close-success">
+                Done
+              </Button>
             </div>
           )}
         </DialogContent>

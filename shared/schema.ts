@@ -31,6 +31,9 @@ export const creditTxTypeEnum = pgEnum("credit_tx_type", [
   "PURCHASE", "SPEND", "REFUND", "BONUS", "ADMIN_GRANT", "UPGRADE"
 ]);
 export const paymentStatusEnum = pgEnum("payment_status", ["PENDING", "COMPLETED", "FAILED", "REFUNDED"]);
+export const paymentProviderEnum = pgEnum("payment_provider", ["STRIPE"]);
+export const paymentModeEnum = pgEnum("payment_mode", ["LIVE", "TEST", "DEMO"]);
+export const paymentWebhookStatusEnum = pgEnum("payment_webhook_status", ["RECEIVED", "PROCESSED", "IGNORED", "FAILED"]);
 export const spinPrizeEnum = pgEnum("spin_prize", ["CREDITS", "BOOST", "BADGE", "DISCOUNT", "NONE"]);
 export const ticketPriorityEnum = pgEnum("ticket_priority", ["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "WAITING", "RESOLVED", "CLOSED"]);
@@ -51,6 +54,8 @@ export const onboardingStepEnum = pgEnum("onboarding_step", [
 export const onboardingStatusEnum = pgEnum("onboarding_status", ["ACTIVE", "COMPLETED", "ABANDONED", "EXPIRED"]);
 export const verificationChannelEnum = pgEnum("verification_channel", ["EMAIL", "PHONE"]);
 export const verificationPurposeEnum = pgEnum("verification_purpose", ["ONBOARDING", "PHONE_UPDATE"]);
+export const uploadPurposeEnum = pgEnum("upload_purpose", ["JOB_PHOTO", "PORTFOLIO_IMAGE", "VERIFICATION_DOCUMENT"]);
+export const uploadStatusEnum = pgEnum("upload_status", ["ACTIVE", "DELETED"]);
 
 // ─── Users & Auth ─────────────────────────────────────────────────────────────
 export const users = pgTable("users", {
@@ -153,6 +158,29 @@ export const verificationChallenges = pgTable("verification_challenges", {
 
 export const verificationLevelEnum = pgEnum("verification_level", ["NONE", "SELF_DECLARED", "DOCUMENT_VERIFIED"]);
 
+export const uploads = pgTable("uploads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  purpose: uploadPurposeEnum("purpose").notNull(),
+  storageProvider: text("storage_provider").notNull().default("vercel_blob"),
+  storagePath: text("storage_path").notNull(),
+  storageUrl: text("storage_url").notNull(),
+  originalName: text("original_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  entityType: text("entity_type"),
+  entityId: varchar("entity_id"),
+  status: uploadStatusEnum("status").notNull().default("ACTIVE"),
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("uploads_created_by_idx").on(t.createdBy),
+  index("uploads_purpose_idx").on(t.purpose),
+  index("uploads_entity_idx").on(t.entityType, t.entityId),
+  index("uploads_status_idx").on(t.status),
+]);
+
 export const professionalProfiles = pgTable("professional_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
@@ -168,6 +196,7 @@ export const professionalProfiles = pgTable("professional_profiles", {
   isVerified: boolean("is_verified").notNull().default(false),
   verificationLevel: verificationLevelEnum("verification_level").notNull().default("NONE"),
   verificationStatus: text("verification_status").notNull().default("UNSUBMITTED"),
+  verificationDocumentUploadId: varchar("verification_document_upload_id").references(() => uploads.id, { onDelete: "set null" }),
   verificationDocumentUrl: text("verification_document_url"),
   verificationSubmittedAt: timestamp("verification_submitted_at"),
   verificationReviewedAt: timestamp("verification_reviewed_at"),
@@ -424,13 +453,45 @@ export const payments = pgTable("payments", {
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   currency: text("currency").notNull().default("EUR"),
   status: paymentStatusEnum("status").notNull().default("PENDING"),
+  provider: paymentProviderEnum("provider").notNull().default("STRIPE"),
+  mode: paymentModeEnum("mode").notNull().default("TEST"),
   paymentMethod: text("payment_method"),
   stripePaymentId: text("stripe_payment_id"),
+  providerChargeId: text("provider_charge_id"),
+  idempotencyKey: text("idempotency_key"),
   referenceType: text("reference_type"),
   referenceId: varchar("reference_id"),
   description: text("description"),
+  metadata: json("metadata").$type<Record<string, unknown>>().default({}),
+  fulfilledAt: timestamp("fulfilled_at"),
+  failedAt: timestamp("failed_at"),
+  failureReason: text("failure_reason"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-}, (t) => [index("payments_user_idx").on(t.userId)]);
+}, (t) => [
+  index("payments_user_idx").on(t.userId),
+  index("payments_status_idx").on(t.status),
+  index("payments_mode_idx").on(t.mode),
+  uniqueIndex("payments_idempotency_idx").on(t.idempotencyKey),
+  uniqueIndex("payments_provider_payment_idx").on(t.provider, t.stripePaymentId),
+]);
+
+export const paymentWebhookEvents = pgTable("payment_webhook_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  provider: paymentProviderEnum("provider").notNull(),
+  providerEventId: text("provider_event_id").notNull(),
+  eventType: text("event_type").notNull(),
+  status: paymentWebhookStatusEnum("status").notNull().default("RECEIVED"),
+  paymentId: varchar("payment_id").references(() => payments.id, { onDelete: "set null" }),
+  payload: json("payload").$type<Record<string, unknown>>().default({}),
+  errorMessage: text("error_message"),
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  uniqueIndex("payment_webhook_events_provider_event_idx").on(t.provider, t.providerEventId),
+  index("payment_webhook_events_payment_idx").on(t.paymentId),
+  index("payment_webhook_events_status_idx").on(t.status),
+]);
 
 // ─── Gamification ─────────────────────────────────────────────────────────────
 export const spinWheelEvents = pgTable("spin_wheel_events", {
@@ -635,3 +696,5 @@ export type OnboardingSession = typeof onboardingSessions.$inferSelect;
 export type InsertOnboardingSession = typeof onboardingSessions.$inferInsert;
 export type VerificationChallenge = typeof verificationChallenges.$inferSelect;
 export type InsertVerificationChallenge = typeof verificationChallenges.$inferInsert;
+export type Upload = typeof uploads.$inferSelect;
+export type InsertUpload = typeof uploads.$inferInsert;

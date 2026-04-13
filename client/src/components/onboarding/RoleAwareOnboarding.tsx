@@ -36,7 +36,6 @@ import {
 } from "@/lib/onboarding";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
-import { DEMO_OTP_CODE } from "@shared/verification";
 import { buildOnboardingPath } from "@/lib/publicRoutes";
 import type {
   CustomerJobDraft,
@@ -51,6 +50,12 @@ type CategoryRecord = {
   id: string;
   name: string;
   slug: string;
+};
+
+type VerificationChallengeFeedback = {
+  deliveryMode: "PROVIDER" | "DEV_FALLBACK";
+  fallbackCode?: string;
+  maskedTarget?: string;
 };
 
 const ROLE_META: Record<
@@ -238,6 +243,10 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
   const [professionalDraft, setProfessionalDraft] = useState<ProfessionalProfileDraft | null>(null);
   const [personalDraft, setPersonalDraft] = useState<Partial<PersonalDetails>>({});
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(6).fill(""));
+  const [otpChallengeByChannel, setOtpChallengeByChannel] = useState<Record<"EMAIL" | "PHONE", VerificationChallengeFeedback | null>>({
+    EMAIL: null,
+    PHONE: null,
+  });
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -269,6 +278,8 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
   useEffect(() => {
     if (session?.currentStep === "PHONE_OTP" || session?.currentStep === "EMAIL_OTP") {
       setOtpDigits(Array(6).fill(""));
+      const activeChannel = session.currentStep === "PHONE_OTP" ? "PHONE" : "EMAIL";
+      setOtpChallengeByChannel((prev) => ({ ...prev, [activeChannel]: null }));
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
     }
   }, [session?.currentStep]);
@@ -400,15 +411,19 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
     void (async () => {
       try {
         setBusyAction(`send-${channel.toLowerCase()}`);
-        const payload = await requestJson<{ session: OnboardingSessionState }>(
+        const payload = await requestJson<{ session: OnboardingSessionState; challenge: VerificationChallengeFeedback }>(
           "POST",
           `/api/onboarding/sessions/${session.id}/otp/send`,
           { channel },
         );
         setSession(payload.session);
+        setOtpChallengeByChannel((prev) => ({ ...prev, [channel]: payload.challenge ?? null }));
         toast({
           title: `${channel === "PHONE" ? "Phone" : "Email"} code sent`,
-          description: `Demo mode — use ${DEMO_OTP_CODE} to continue.`,
+          description:
+            payload.challenge?.deliveryMode === "DEV_FALLBACK" && payload.challenge.fallbackCode
+              ? `Provider fallback is active locally. Use ${payload.challenge.fallbackCode}.`
+              : `Sent to ${payload.challenge?.maskedTarget ?? maskTarget(otpTarget, channel)}.`,
         });
       } catch (error) {
         toast({
@@ -503,13 +518,20 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
     if (!session) return;
     setBusyAction(`send-${channel.toLowerCase()}`);
     try {
-      const payload = await requestJson<{ session: OnboardingSessionState }>(
+      const payload = await requestJson<{ session: OnboardingSessionState; challenge: VerificationChallengeFeedback }>(
         "POST",
         `/api/onboarding/sessions/${session.id}/otp/send`,
         { channel },
       );
       setSession(payload.session);
-      toast({ title: "Code resent", description: `Demo mode — use ${DEMO_OTP_CODE}.` });
+      setOtpChallengeByChannel((prev) => ({ ...prev, [channel]: payload.challenge ?? null }));
+      toast({
+        title: "Code resent",
+        description:
+          payload.challenge?.deliveryMode === "DEV_FALLBACK" && payload.challenge.fallbackCode
+            ? `Provider fallback is active locally. Use ${payload.challenge.fallbackCode}.`
+            : `Sent to ${payload.challenge?.maskedTarget ?? maskTarget(otpTarget, channel)}.`,
+      });
     } catch (error) {
       toast({
         title: "Unable to resend code",
@@ -627,11 +649,6 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
     otpRefs.current[lastFilled]?.focus();
   };
 
-  const fillDemoOtp = () => {
-    setOtpDigits(DEMO_OTP_CODE.split(""));
-    otpRefs.current[5]?.focus();
-  };
-
   // ── Derived values ────────────────────────────────────────────────────────
 
   const activeRole = session?.role ?? roleParam;
@@ -644,6 +661,7 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
     session?.currentStep === "PHONE_OTP"
       ? session.payload.personalDetails.phone
       : session?.payload.personalDetails.email;
+  const currentOtpChallenge = otpChallengeByChannel[channelForOtp];
   const otpCode = otpDigits.join("");
   const pwStrength = calcPasswordStrength(password);
 
@@ -1159,12 +1177,18 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
         {/* Demo hint — clickable */}
         <button
           type="button"
-          onClick={fillDemoOtp}
+          onClick={() => {
+            if (!currentOtpChallenge?.fallbackCode) return;
+            setOtpDigits(currentOtpChallenge.fallbackCode.split(""));
+            otpRefs.current[5]?.focus();
+          }}
           className="mt-4 inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-1.5 text-xs font-semibold tracking-widest text-white transition hover:bg-slate-800"
           title="Click to autofill the demo code"
         >
-          Demo code: {DEMO_OTP_CODE}
-          <span className="text-slate-400">(click to fill)</span>
+          {currentOtpChallenge?.fallbackCode ? `Fallback code: ${currentOtpChallenge.fallbackCode}` : "Check your latest code"}
+          <span className="text-slate-400">
+            {currentOtpChallenge?.fallbackCode ? "(click to fill)" : "(provider delivery active)"}
+          </span>
         </button>
       </div>
 

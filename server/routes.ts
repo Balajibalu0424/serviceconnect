@@ -1,5 +1,7 @@
 import type { Express, Request, Response } from "express";
+import { Readable } from "stream";
 import { createServer, type Server } from "http";
+import multer from "multer";
 import { db } from "./db";
 import {
   users, userSessions, professionalProfiles, serviceCategories,
@@ -8,7 +10,7 @@ import {
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
   adminAuditLogs, platformMetrics, featureFlags, callRequests,
-  faqArticles, cannedResponses, passwordResetTokens
+  faqArticles, cannedResponses, passwordResetTokens, uploads
 } from "@shared/schema";
 import { pusher } from "./pusher";
 import {
@@ -32,19 +34,48 @@ import {
   handleOnboardingChat
 } from "./geminiService";
 import { z } from "zod";
-import Stripe from "stripe";
 import { registerOnboardingRoutes } from "./onboardingRoutes";
 import {
   normalizeNotificationPreferences,
   type NotificationCategoryKey,
   type NotificationPreferences,
 } from "@shared/notificationPreferences";
-import { DEMO_OTP_CODE } from "@shared/verification";
+import { UPLOAD_RULES, type UploadPurpose } from "@shared/uploads";
 import { issueVerificationChallenge, verifyVerificationChallenge } from "./verificationService";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder", {
-  apiVersion: "2026-02-25.clover"
-});
+import { getStripeClient, getStripePaymentConfig, getStripeWebhookSecret } from "./paymentConfig";
+import {
+  completeStripeWebhookReceipt,
+  confirmedLiveRevenueFilter,
+  createCreditPackagePaymentIntent,
+  fulfillStripePaymentIntent,
+  markStripePaymentFailed,
+  markStripePaymentRefunded,
+  PaymentConfigurationError,
+  registerStripeWebhookReceipt,
+} from "./paymentService";
+import { paymentCountsTowardsLiveRevenue } from "@shared/payments";
+import { sendNotificationEmail, sendPasswordResetEmail } from "./emailService";
+import { DeliveryConfigurationError, getAppUrl } from "./deliveryConfig";
+import {
+  createUploadRecord,
+  getActiveUpload,
+  getPrivateUploadBlob,
+  getUploadPublicUrl,
+  isPrivateUpload,
+  markUploadDeleted,
+  UploadValidationError,
+} from "./uploadService";
+import {
+  chatMessageRateLimiter,
+  forgotPasswordRateLimiter,
+  loginRateLimiter,
+  onboardingChatRateLimiter,
+  onboardingSessionRateLimiter,
+  otpSendRateLimiter,
+  otpVerifyRateLimiter,
+  quoteSubmissionRateLimiter,
+  supportTicketRateLimiter,
+} from "./rateLimit";
 
 // ─── Pusher Initialization (Imported from ./pusher) ──────────────────────────
 
@@ -143,6 +174,44 @@ function getRequestOrigin(req: Request) {
   return `${protocol}://${host}`;
 }
 
+const uploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: Math.max(...Object.values(UPLOAD_RULES).map((rule) => rule.maxBytes)),
+  },
+});
+
+function buildAppLinkFromNotification(type: string, data: Record<string, any> = {}) {
+  const base = `${getAppUrl()}/#/`;
+
+  switch (type) {
+    case "NEW_QUOTE":
+    case "JOB_QUOTE":
+      return data.jobId ? `${base}jobs/${data.jobId}` : null;
+    case "QUOTE_ACCEPTED":
+    case "QUOTE_REJECTED":
+      return data.conversationId ? `${base}pro/chat?conversationId=${data.conversationId}` : `${base}pro/leads`;
+    case "BOOKING_CREATED":
+    case "BOOKING_IN_PROGRESS":
+    case "BOOKING_COMPLETED":
+    case "BOOKING_CANCELLED":
+      return data.conversationId ? `${base}chat?conversationId=${data.conversationId}` : `${base}bookings`;
+    case "NEW_MESSAGE":
+      return data.conversationId ? `${base}chat?conversationId=${data.conversationId}` : `${base}chat`;
+    case "URGENT_JOB":
+    case "NEW_JOB_AVAILABLE":
+      return data.jobId ? `${base}pro/feed?highlight=${data.jobId}` : `${base}pro/feed`;
+    case "VERIFICATION_SUBMITTED":
+    case "VERIFICATION_APPROVED":
+    case "VERIFICATION_REJECTED":
+      return `${base}pro/verification-pending`;
+    case "PAYMENT":
+      return `${base}pro/credits`;
+    default:
+      return data.jobId ? `${base}jobs/${data.jobId}` : null;
+  }
+}
+
 function getUserNotificationPreferences(user: { notificationPreferences?: NotificationPreferences | null; role?: string | null }) {
   return normalizeNotificationPreferences(user.notificationPreferences, user.role ?? undefined);
 }
@@ -154,6 +223,18 @@ function canReceiveNotification(user: { notificationPreferences?: NotificationPr
   return getUserNotificationPreferences(user).categories[category] !== false;
 }
 
+function shouldSendEmailNotification(user: { notificationPreferences?: NotificationPreferences | null; role?: string | null }, type: string) {
+  if (!canReceiveNotification(user, type)) return false;
+  if (NON_DISABLEABLE_NOTIFICATION_TYPES.has(type)) return true;
+  return getUserNotificationPreferences(user).email !== false;
+}
+
+function shouldSendInAppNotification(user: { notificationPreferences?: NotificationPreferences | null; role?: string | null }, type: string) {
+  if (!canReceiveNotification(user, type)) return false;
+  if (NON_DISABLEABLE_NOTIFICATION_TYPES.has(type)) return true;
+  return getUserNotificationPreferences(user).push !== false;
+}
+
 async function createNotification(userIdOrRole: string, type: string, title: string, message: string, data: object = {}) {
   if (!userIdOrRole) return;
 
@@ -163,17 +244,31 @@ async function createNotification(userIdOrRole: string, type: string, title: str
       const adminUsers = await db.select().from(users).where(eq(users.role, "ADMIN"));
       if (adminUsers.length === 0) return;
 
-      const notifsToInsert = adminUsers.map(admin => ({
-        userId: admin.id,
-        type, title, message, data
-      }));
+      const notifsToInsert = adminUsers
+        .filter((admin) => shouldSendInAppNotification(admin, type))
+        .map((admin) => ({
+          userId: admin.id,
+          type, title, message, data,
+        }));
 
-      await db.insert(notifications).values(notifsToInsert);
+      if (notifsToInsert.length > 0) {
+        await db.insert(notifications).values(notifsToInsert);
+      }
 
       for (const admin of adminUsers) {
-        pusher.trigger(`private-user-${admin.id}`, "new_notification", { type, title, message, data }).catch(err => {
-          console.error("Pusher trigger error (notification) for admin:", err);
-        });
+        if (shouldSendInAppNotification(admin, type)) {
+          pusher.trigger(`private-user-${admin.id}`, "new_notification", { type, title, message, data }).catch(err => {
+            console.error("Pusher trigger error (notification) for admin:", err);
+          });
+        }
+        if (shouldSendEmailNotification(admin, type) && admin.email) {
+          void sendNotificationEmail({
+            to: admin.email,
+            title,
+            message,
+            actionUrl: buildAppLinkFromNotification(type, data as Record<string, any>),
+          }).catch(() => {});
+        }
       }
       return;
     }
@@ -181,12 +276,12 @@ async function createNotification(userIdOrRole: string, type: string, title: str
     // Otherwise, single user — deduplicate within a 5-minute window
     // Same user + same type + same jobId (when present) = skip to prevent double-fire from scheduler restarts
     const [recipient] = await db
-      .select({ id: users.id, role: users.role, notificationPreferences: users.notificationPreferences })
+      .select({ id: users.id, role: users.role, email: users.email, notificationPreferences: users.notificationPreferences })
       .from(users)
       .where(eq(users.id, userIdOrRole))
       .limit(1);
     if (!recipient) return;
-    if (!canReceiveNotification(recipient, type)) return;
+    if (!shouldSendInAppNotification(recipient, type) && !shouldSendEmailNotification(recipient, type)) return;
 
     const dataAny = data as any;
     const jobId = dataAny?.jobId;
@@ -199,19 +294,34 @@ async function createNotification(userIdOrRole: string, type: string, title: str
     if (jobId) {
       dupConditions.push(sql`${notifications.data}->>'jobId' = ${String(jobId)}`);
     }
-    const recentDup = await db.select({ id: notifications.id })
-      .from(notifications)
-      .where(and(...dupConditions))
-      .limit(1);
+    const recentDup = shouldSendInAppNotification(recipient, type)
+      ? await db.select({ id: notifications.id })
+          .from(notifications)
+          .where(and(...dupConditions))
+          .limit(1)
+      : [];
     if (recentDup.length > 0) return; // duplicate within window — skip silently
 
-    await db.insert(notifications).values({ userId: userIdOrRole, type, title, message, data });
+    if (shouldSendInAppNotification(recipient, type)) {
+      await db.insert(notifications).values({ userId: userIdOrRole, type, title, message, data });
+    }
 
     // Real-time push via Pusher
-    try {
-      await pusher.trigger(`private-user-${userIdOrRole}`, "new_notification", { type, title, message, data });
-    } catch (err) {
-      console.error("Pusher trigger error (notification):", err);
+    if (shouldSendInAppNotification(recipient, type)) {
+      try {
+        await pusher.trigger(`private-user-${userIdOrRole}`, "new_notification", { type, title, message, data });
+      } catch (err) {
+        console.error("Pusher trigger error (notification):", err);
+      }
+    }
+
+    if (shouldSendEmailNotification(recipient, type) && recipient.email) {
+      void sendNotificationEmail({
+        to: recipient.email,
+        title,
+        message,
+        actionUrl: buildAppLinkFromNotification(type, data as Record<string, any>),
+      }).catch(() => {});
     }
   } catch (err) {
     console.error("Database error creating notification:", err);
@@ -224,6 +334,103 @@ function routeParam(value: string | string[] | undefined): string {
     return value[0] ?? "";
   }
   return value ?? "";
+}
+
+function mapUploadPurpose(value: string): UploadPurpose | null {
+  switch (value) {
+    case "job-photo":
+      return "JOB_PHOTO";
+    case "portfolio-image":
+      return "PORTFOLIO_IMAGE";
+    case "verification-document":
+      return "VERIFICATION_DOCUMENT";
+    default:
+      return null;
+  }
+}
+
+function isStaffRole(role: string) {
+  return role === "ADMIN" || role === "SUPPORT";
+}
+
+function normalizeUploadIds(input: unknown) {
+  const raw = Array.isArray(input) ? input : [];
+  return Array.from(new Set(raw.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+async function resolveOwnedUploads(userId: string, purpose: UploadPurpose, uploadIds: string[]) {
+  if (uploadIds.length === 0) return [];
+
+  const records = await db.select().from(uploads).where(and(
+    inArray(uploads.id, uploadIds),
+    eq(uploads.createdBy, userId),
+    eq(uploads.purpose, purpose),
+    eq(uploads.status, "ACTIVE"),
+    isNull(uploads.deletedAt),
+  ));
+
+  if (records.length !== uploadIds.length) {
+    throw new Error("One or more uploaded files are missing or no longer available.");
+  }
+
+  const recordMap = new Map(records.map((record) => [record.id, record]));
+  return uploadIds.map((uploadId) => {
+    const record = recordMap.get(uploadId);
+    if (!record) throw new Error("Uploaded file could not be resolved.");
+    return record;
+  });
+}
+
+function mergeJobMediaUrls(existingUrls: string[], retainedUrlsInput: unknown, newUploads: Array<{ storageUrl: string }>) {
+  const retainedUrls = Array.isArray(retainedUrlsInput)
+    ? retainedUrlsInput.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+
+  const allowedRetained = retainedUrls.filter((url) => existingUrls.includes(url));
+  return Array.from(new Set([...allowedRetained, ...newUploads.map((upload) => upload.storageUrl)]));
+}
+
+function buildPortfolioEntries(
+  existingPortfolio: any[] | null | undefined,
+  portfolioInput: unknown,
+  resolvedUploads: Array<{ id: string; storageUrl: string; originalName: string; createdAt: Date }>,
+) {
+  const incomingItems = Array.isArray(portfolioInput) ? portfolioInput : [];
+  const existingByUrl = new Map(
+    (Array.isArray(existingPortfolio) ? existingPortfolio : [])
+      .filter((item) => item && typeof item === "object" && typeof item.url === "string")
+      .map((item: any) => [String(item.url), item]),
+  );
+
+  const keptLegacyItems = incomingItems
+    .filter((item) => item && typeof item === "object" && !item.id && typeof item.url === "string")
+    .map((item: any) => {
+      const original = existingByUrl.get(String(item.url));
+      return {
+        url: String(item.url),
+        caption: trimNullable(item.caption ?? original?.caption),
+      };
+    });
+
+  const uploadMap = new Map(resolvedUploads.map((upload) => [upload.id, upload]));
+  const uploadedItems = incomingItems
+    .filter((item) => item && typeof item === "object" && typeof item.id === "string")
+    .map((item: any) => {
+      const upload = uploadMap.get(String(item.id));
+      if (!upload) {
+        throw new Error("One or more portfolio images are missing.");
+      }
+
+      return {
+        id: upload.id,
+        url: upload.storageUrl,
+        caption: trimNullable(item.caption),
+        originalName: upload.originalName,
+        createdAt: upload.createdAt,
+      };
+    });
+
+  return [...keptLegacyItems, ...uploadedItems].slice(0, UPLOAD_RULES.PORTFOLIO_IMAGE.maxFiles);
 }
 
 // ─── Helper: safe pagination ────────────────────────────────────────────────
@@ -372,7 +579,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/auth/login", async (req: Request, res: Response) => {
+  app.post("/api/auth/login", loginRateLimiter, async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
       const [user] = await db.select().from(users).where(eq(users.email, email?.toLowerCase() || ""));
@@ -474,7 +681,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── Phone OTP: Send ──────────────────────────────────────────────────────
-  app.post("/api/auth/send-phone-otp", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/auth/send-phone-otp", requireAuth, otpSendRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
       const [user] = await db.select().from(users).where(eq(users.id, userId));
@@ -496,7 +703,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── Phone OTP: Verify ───────────────────────────────────────────────────
-  app.post("/api/auth/verify-phone-otp", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/auth/verify-phone-otp", requireAuth, otpVerifyRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
       const { code } = req.body;
@@ -520,12 +727,97 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.post("/api/uploads/:purpose", requireAuth, uploadMiddleware.single("file"), async (req: AuthRequest, res: Response) => {
+    try {
+      const purpose = mapUploadPurpose(routeParam(req.params.purpose));
+      if (!purpose) return res.status(404).json({ error: "Upload purpose not found" });
+
+      if (purpose === "JOB_PHOTO" && req.user!.role !== "CUSTOMER") {
+        return res.status(403).json({ error: "Only customers can upload job photos." });
+      }
+
+      if ((purpose === "PORTFOLIO_IMAGE" || purpose === "VERIFICATION_DOCUMENT") && req.user!.role !== "PROFESSIONAL") {
+        return res.status(403).json({ error: "Only professionals can upload this file type." });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "A file is required." });
+      }
+
+      const upload = await createUploadRecord({
+        createdBy: req.user!.userId,
+        purpose,
+        file: req.file,
+        entityType: trimNullable(req.body?.entityType),
+        entityId: trimNullable(req.body?.entityId),
+      });
+
+      return res.status(201).json({
+        asset: {
+          id: upload.id,
+          purpose: upload.purpose,
+          url: getUploadPublicUrl(upload),
+          originalName: upload.originalName,
+          mimeType: upload.mimeType,
+          sizeBytes: upload.sizeBytes,
+          createdAt: upload.createdAt,
+        },
+      });
+    } catch (error: any) {
+      if (error instanceof UploadValidationError || error instanceof DeliveryConfigurationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      return res.status(500).json({ error: error.message || "Upload failed" });
+    }
+  });
+
+  app.get("/api/uploads/:id/access", requireAuth, async (req: AuthRequest, res: Response) => {
+    const upload = await getActiveUpload(routeParam(req.params.id));
+    if (!upload) return res.status(404).json({ error: "File not found" });
+    if (upload.purpose === "VERIFICATION_DOCUMENT" && !isStaffRole(req.user!.role) && upload.createdBy !== req.user!.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (!isPrivateUpload(upload)) {
+      return res.redirect(upload.storageUrl);
+    }
+
+    const blobResult = await getPrivateUploadBlob(upload, req.headers["if-none-match"] as string | undefined);
+    if (!blobResult) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    if (blobResult.statusCode === 304) {
+      res.setHeader("ETag", blobResult.blob.etag);
+      res.setHeader("Cache-Control", "private, no-cache");
+      return res.status(304).end();
+    }
+
+    res.setHeader("Content-Type", blobResult.blob.contentType || upload.mimeType);
+    res.setHeader("Content-Disposition", blobResult.blob.contentDisposition || `inline; filename="${upload.originalName}"`);
+    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("ETag", blobResult.blob.etag);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    Readable.fromWeb(blobResult.stream as any).pipe(res);
+    return;
+  });
+
+  app.delete("/api/uploads/:id", requireAuth, async (req: AuthRequest, res: Response) => {
+    const upload = await getActiveUpload(routeParam(req.params.id));
+    if (!upload) return res.status(404).json({ error: "File not found" });
+    if (upload.createdBy !== req.user!.userId && !isStaffRole(req.user!.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    await markUploadDeleted(upload.id);
+    return res.json({ success: true });
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // ONBOARDING
   // ═══════════════════════════════════════════════════════════════════════════
 
   // AI chat assistant used by PostJob page (step 1) — extracts job details conversationally
-  app.post("/api/ai/onboarding-chat", async (req: Request, res: Response) => {
+  app.post("/api/ai/onboarding-chat", onboardingChatRateLimiter, async (req: Request, res: Response) => {
     try {
       const { messages, mode = "CUSTOMER", isLoggedIn = true } = req.body;
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -542,7 +834,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Legacy one-shot customer onboarding used by PostJob page for non-logged-in users
-  app.post("/api/onboarding/customer", async (req: Request, res: Response) => {
+  app.post("/api/onboarding/customer", onboardingSessionRateLimiter, async (req: Request, res: Response) => {
     try {
       const {
         firstName, lastName, email, password, phone,
@@ -598,7 +890,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }).returning();
 
       // Issue email verification challenge
-      await issueVerificationChallenge({ userId: newUser.id, channel: "EMAIL", target: normalizedEmail, purpose: "ONBOARDING" });
+      const challenge = await issueVerificationChallenge({
+        userId: newUser.id,
+        channel: "EMAIL",
+        target: normalizedEmail,
+        purpose: "ONBOARDING",
+      });
 
       // Generate tokens
       const { accessToken, refreshToken } = generateTokens(newUser.id, newUser.role);
@@ -611,7 +908,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ipAddress: req.ip || null,
       });
 
-      return res.status(201).json({ accessToken, refreshToken, jobId: newJob.id });
+      return res.status(201).json({ accessToken, refreshToken, jobId: newJob.id, challenge });
     } catch (err: any) {
       console.error("[onboarding/customer]", err);
       return res.status(500).json({ error: err.message || "Failed to create account" });
@@ -619,7 +916,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Verify email OTP and publish the user's draft job
-  app.post("/api/onboarding/customer/verify", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/onboarding/customer/verify", requireAuth, otpVerifyRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const { otp } = req.body;
       if (!otp) return res.status(400).json({ error: "OTP is required" });
@@ -628,7 +925,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const isValid = await verifyVerificationChallenge({ userId, channel: "EMAIL", code: otp });
       if (!isValid) {
-        return res.status(400).json({ error: `Invalid or expired code. Demo code: ${DEMO_OTP_CODE}` });
+        return res.status(400).json({ error: "Invalid or expired code. Please request a new verification email." });
       }
 
       // Mark user as verified + onboarding complete
@@ -654,6 +951,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       console.error("[onboarding/customer/verify]", err);
       return res.status(500).json({ error: err.message || "Verification failed" });
+    }
+  });
+
+  app.post("/api/onboarding/customer/resend", requireAuth, otpSendRateLimiter, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const [user] = await db.select({ email: users.email, emailVerified: users.emailVerified })
+        .from(users)
+        .where(eq(users.id, userId));
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (user.emailVerified) {
+        return res.json({ success: true, alreadyVerified: true });
+      }
+
+      const challenge = await issueVerificationChallenge({
+        userId,
+        channel: "EMAIL",
+        target: user.email,
+        purpose: "ONBOARDING",
+      });
+
+      return res.json({ success: true, challenge });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Unable to resend verification email" });
     }
   });
 
@@ -690,8 +1015,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/jobs", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const { title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate } = req.body;
+      const { title, description, categoryId, budgetMin, budgetMax, urgency, locationText, preferredDate, mediaUploadIds } = req.body;
       const userId = req.user!.userId;
+      const resolvedMediaUploads = await resolveOwnedUploads(userId, "JOB_PHOTO", normalizeUploadIds(mediaUploadIds));
 
       // ── Input validation ──────────────────────────────────────────────────
       if (!title || typeof title !== "string" || !title.trim()) {
@@ -782,6 +1108,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         locationTown: req.body.locationTown || null,
         locationEircode: req.body.locationEircode || null,
         preferredDate: preferredDate ? new Date(preferredDate) : null,
+        mediaUrls: resolvedMediaUploads.map((upload) => upload.storageUrl),
         // AI columns
         aiQualityScore: qualityResult.score,
         aiQualityPrompt: qualityResult.prompt,
@@ -1047,7 +1374,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ error: `Cannot edit a job with status '${job.status}'. Only draft, live, or in-discussion jobs can be modified.` });
     }
 
-    const { title, description, budgetMin, budgetMax, urgency, locationText, locationTown, locationEircode } = req.body;
+    const {
+      title,
+      description,
+      budgetMin,
+      budgetMax,
+      urgency,
+      locationText,
+      locationTown,
+      locationEircode,
+      mediaUrls,
+      mediaUploadIds,
+    } = req.body;
+    const resolvedMediaUploads = await resolveOwnedUploads(req.user!.userId, "JOB_PHOTO", normalizeUploadIds(mediaUploadIds));
     const updates: any = { updatedAt: new Date() };
     if (title !== undefined) updates.title = title;
     if (description !== undefined) updates.description = description;
@@ -1057,6 +1396,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (locationText !== undefined) updates.locationText = locationText;
     if (locationTown !== undefined) updates.locationTown = locationTown;
     if (locationEircode !== undefined) updates.locationEircode = locationEircode;
+    if (mediaUrls !== undefined || mediaUploadIds !== undefined) {
+      updates.mediaUrls = mergeJobMediaUrls(job.mediaUrls ?? [], mediaUrls, resolvedMediaUploads);
+    }
 
     const [updated] = await db.update(jobs)
       .set(updates)
@@ -1483,7 +1825,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   // QUOTES
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post("/api/quotes", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
+  app.post("/api/quotes", requireAuth, requireRole("PROFESSIONAL"), quoteSubmissionRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const { jobId, amount, message, estimatedDuration, validUntil } = req.body;
       const proId = req.user!.userId;
@@ -2193,7 +2535,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/chat/conversations/:id/messages", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/chat/conversations/:id/messages", requireAuth, chatMessageRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
       const convId = req.params.id as string;
@@ -2423,47 +2765,138 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(txs);
   });
 
-  app.post("/api/credits/purchase", requireAuth, async (req: AuthRequest, res: Response) => {
-    try {
-      const { packageId } = req.body;
-      const [pkg] = await db.select().from(creditPackages).where(eq(creditPackages.id, packageId));
-      if (!pkg) return res.status(404).json({ error: "Package not found" });
+  app.get("/api/payments/config", requireAuth, async (_req: AuthRequest, res: Response) => {
+    return res.json(getStripePaymentConfig());
+  });
 
-      const totalCredits = pkg.credits + pkg.bonusCredits;
-
-      // In test mode, simulate successful payment
-      const [payment] = await db.insert(payments).values({
-        userId: req.user!.userId, amount: String(pkg.price), currency: "EUR",
-        status: "COMPLETED", paymentMethod: "stripe",
-        stripePaymentId: `pi_test_${Date.now()}`,
-        description: `Purchased ${pkg.name}: ${totalCredits} credits`,
-        referenceType: "CREDIT_PACKAGE", referenceId: packageId
-      }).returning();
-
-      const newBalance = await addCredits(req.user!.userId, totalCredits, "PURCHASE",
-        `Purchased ${pkg.name}: ${totalCredits} credits`, "PAYMENT", payment.id);
-
-      return res.json({ success: true, creditsAdded: totalCredits, newBalance });
-    } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+  app.get("/api/payments/:id", requireAuth, async (req: AuthRequest, res: Response) => {
+    const paymentId = routeParam(req.params.id);
+    const [payment] = await db.select().from(payments).where(eq(payments.id, paymentId));
+    if (!payment) return res.status(404).json({ error: "Payment not found" });
+    if (payment.userId !== req.user!.userId && req.user!.role !== "ADMIN") {
+      return res.status(403).json({ error: "Access denied" });
     }
+
+    return res.json({
+      id: payment.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: payment.status,
+      provider: payment.provider,
+      mode: payment.mode,
+      paymentMethod: payment.paymentMethod,
+      stripePaymentId: payment.stripePaymentId,
+      description: payment.description,
+      fulfilledAt: payment.fulfilledAt,
+      failedAt: payment.failedAt,
+      failureReason: payment.failureReason,
+      metadata: payment.metadata,
+      createdAt: payment.createdAt,
+    });
+  });
+
+  app.post("/api/credits/purchase", requireAuth, async (req: AuthRequest, res: Response) => {
+    return res.status(410).json({
+      error: "Direct credit purchase has been disabled. Use the payment intent flow instead.",
+      code: "DIRECT_PURCHASE_DISABLED",
+    });
   });
 
   app.post("/api/credits/stripe/payment-intent", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { packageId } = req.body;
-      const [pkg] = await db.select().from(creditPackages).where(eq(creditPackages.id, packageId));
-      if (!pkg) return res.status(404).json({ error: "Package not found" });
+      if (!packageId || typeof packageId !== "string") {
+        return res.status(400).json({ error: "Package id is required" });
+      }
 
-      const intent = await stripe.paymentIntents.create({
-        amount: Math.round(parseFloat(pkg.price) * 100),
-        currency: "eur",
-        metadata: { userId: req.user!.userId, packageId }
-      });
-
-      return res.json({ clientSecret: intent.client_secret });
+      const paymentIntent = await createCreditPackagePaymentIntent(req.user!.userId, packageId);
+      return res.status(201).json(paymentIntent);
     } catch (e: any) {
+      if (e instanceof PaymentConfigurationError) {
+        return res.status(503).json({
+          error: e.message,
+          code: e.code,
+          config: getStripePaymentConfig(),
+        });
+      }
+      if (e?.message === "Package not found") {
+        return res.status(404).json({ error: e.message });
+      }
       return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/webhooks/stripe", async (req: Request, res: Response) => {
+    const stripe = getStripeClient();
+    const webhookSecret = getStripeWebhookSecret();
+    if (!stripe || !webhookSecret) {
+      return res.status(503).json({ error: "Stripe webhook is not configured." });
+    }
+
+    const signature = req.headers["stripe-signature"];
+    if (typeof signature !== "string") {
+      return res.status(400).json({ error: "Missing Stripe signature header." });
+    }
+
+    const rawBody =
+      Buffer.isBuffer(req.rawBody)
+        ? req.rawBody
+        : Buffer.from(typeof req.rawBody === "string" ? req.rawBody : JSON.stringify(req.body ?? {}));
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    } catch (error: any) {
+      return res.status(400).json({ error: `Webhook signature verification failed: ${error.message}` });
+    }
+
+    const receipt = await registerStripeWebhookReceipt(event);
+    if (receipt.duplicate) {
+      return res.json({ received: true, duplicate: true });
+    }
+
+    try {
+      switch (event.type) {
+        case "payment_intent.succeeded": {
+          const paymentIntent = event.data.object;
+          const result = await fulfillStripePaymentIntent(paymentIntent);
+          await completeStripeWebhookReceipt(receipt.receipt!.id, "PROCESSED", { paymentId: result.paymentId });
+          if (!result.alreadyFulfilled) {
+            await createNotification(
+              result.userId,
+              "PAYMENT",
+              "Credits added",
+              `${result.creditsAdded} credits have been added to your balance.`,
+              { paymentId: result.paymentId, creditsAdded: result.creditsAdded },
+            );
+          }
+          break;
+        }
+        case "payment_intent.payment_failed": {
+          const paymentIntent = event.data.object;
+          const updated = await markStripePaymentFailed(
+            paymentIntent.id,
+            paymentIntent.last_payment_error?.message ?? "Payment failed",
+          );
+          await completeStripeWebhookReceipt(receipt.receipt!.id, "PROCESSED", { paymentId: updated?.id ?? null });
+          break;
+        }
+        case "charge.refunded": {
+          const charge = event.data.object;
+          const updated = await markStripePaymentRefunded(charge.payment_intent as string, charge.id);
+          await completeStripeWebhookReceipt(receipt.receipt!.id, "PROCESSED", { paymentId: updated?.id ?? null });
+          break;
+        }
+        default:
+          await completeStripeWebhookReceipt(receipt.receipt!.id, "IGNORED");
+      }
+
+      return res.json({ received: true });
+    } catch (error: any) {
+      await completeStripeWebhookReceipt(receipt.receipt!.id, "FAILED", {
+        errorMessage: error.message ?? "Webhook processing failed",
+      });
+      return res.status(500).json({ error: error.message ?? "Webhook processing failed" });
     }
   });
 
@@ -2616,7 +3049,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   // Create support ticket
-  app.post("/api/support/tickets", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/support/tickets", requireAuth, supportTicketRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const { subject, description, message, category, priority } = req.body;
       if (!subject) return res.status(400).json({ error: "Subject is required" });
@@ -3038,6 +3471,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       lat,
       lng,
       radiusKm,
+      portfolio,
     } = req.body;
 
     const profileUpdate: Record<string, unknown> = {
@@ -3061,6 +3495,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       profileUpdate.radiusKm = parsedRadius === null || Number.isFinite(parsedRadius) ? parsedRadius : null;
     }
 
+    const [existingProfile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, req.user!.userId));
+    if (!existingProfile) {
+      return res.status(404).json({ error: "Professional profile not found" });
+    }
+    if (portfolio !== undefined) {
+      const uploadIds = normalizeUploadIds(
+        Array.isArray(portfolio)
+          ? portfolio.map((item) => (item && typeof item === "object" ? (item as any).id : null))
+          : [],
+      );
+      const resolvedPortfolioUploads = await resolveOwnedUploads(req.user!.userId, "PORTFOLIO_IMAGE", uploadIds);
+      profileUpdate.portfolio = buildPortfolioEntries(existingProfile.portfolio as any[] | undefined, portfolio, resolvedPortfolioUploads);
+    }
+
     const [profile] = await db.update(professionalProfiles).set(profileUpdate)
       .where(eq(professionalProfiles.userId, req.user!.userId)).returning();
 
@@ -3079,18 +3527,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/pro/verification/submit", requireAuth, requireRole("PROFESSIONAL"), async (req: AuthRequest, res: Response) => {
     try {
       const proId = req.user!.userId;
-      const { documentUrl, licenseNumber } = req.body;
-      if (!documentUrl) return res.status(400).json({ error: "Document URL is required" });
+      const { uploadId, licenseNumber } = req.body;
+      if (!uploadId || typeof uploadId !== "string") {
+        return res.status(400).json({ error: "A verification document upload is required" });
+      }
 
       const [profile] = await db.select().from(professionalProfiles).where(eq(professionalProfiles.userId, proId));
       if (!profile) return res.status(404).json({ error: "Professional profile not found" });
       if (profile.verificationStatus === "APPROVED") return res.status(409).json({ error: "Already verified" });
 
+      const [verificationUpload] = await resolveOwnedUploads(proId, "VERIFICATION_DOCUMENT", [uploadId]);
+
       await db.update(professionalProfiles).set({
         verificationStatus: "PENDING",
         verificationLevel: "SELF_DECLARED",
-        verificationDocumentUrl: documentUrl,
+        verificationDocumentUploadId: verificationUpload.id,
+        verificationDocumentUrl: getUploadPublicUrl(verificationUpload),
         verificationSubmittedAt: new Date(),
+        verificationReviewedAt: null,
+        verificationReviewNote: null,
         licenseNumber: licenseNumber || profile.licenseNumber,
         updatedAt: new Date()
       } as any).where(eq(professionalProfiles.userId, proId));
@@ -3098,7 +3553,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await createNotification(proId, "VERIFICATION_SUBMITTED", "Verification submitted",
         "Your verification documents have been submitted and are pending admin review.", {});
 
-      return res.json({ success: true, verificationStatus: "PENDING" });
+      return res.json({
+        success: true,
+        verificationStatus: "PENDING",
+        verificationDocumentUrl: getUploadPublicUrl(verificationUpload),
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -3242,7 +3701,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const [totalUsers] = await db.select({ c: count() }).from(users).where(isNull(users.deletedAt));
     const [totalJobs] = await db.select({ c: count() }).from(jobs);
     const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"))!);
-    const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+    const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(confirmedLiveRevenueFilter());
     const [totalBookings] = await db.select({ c: count() }).from(bookings);
     const [completedBookings] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "COMPLETED"));
     const [openTickets] = await db.select({ c: count() }).from(supportTickets).where(or(eq(supportTickets.status, "OPEN"), eq(supportTickets.status, "IN_PROGRESS"))!);
@@ -3503,8 +3962,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Daily revenue (last 30 days)
       const dailyRevenue = await db.execute(sql`
-        SELECT date_trunc('day', created_at)::date as day, sum(amount::numeric)::float as total
-        FROM payments WHERE status = 'COMPLETED' AND created_at >= ${thirtyDaysAgo}
+        SELECT date_trunc('day', fulfilled_at)::date as day, sum(amount::numeric)::float as total
+        FROM payments
+        WHERE status = 'COMPLETED'
+          AND mode = 'LIVE'
+          AND fulfilled_at IS NOT NULL
+          AND fulfilled_at >= ${thirtyDaysAgo}
         GROUP BY 1 ORDER BY 1
       `);
 
@@ -3519,7 +3982,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [totalUsers] = await db.select({ c: count() }).from(users);
       const [totalJobs] = await db.select({ c: count() }).from(jobs);
       const [totalBookings] = await db.select({ c: count() }).from(bookings);
-      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(confirmedLiveRevenueFilter());
       const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"))!);
       const [totalUnlocks] = await db.select({ c: count() }).from(jobUnlocks);
 
@@ -3555,12 +4018,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let conditions: any[] = [];
       if (from) conditions.push(gte(payments.createdAt, new Date(from)));
       if (to) conditions.push(lte(payments.createdAt, new Date(to + 'T23:59:59Z')));
-      if (type) conditions.push(eq(payments.paymentMethod, type));
+      if (type && type !== "all") conditions.push(eq(payments.paymentMethod, type));
 
       const result = await db.select({
         id: payments.id, userId: payments.userId, amount: payments.amount,
         currency: payments.currency, status: payments.status, paymentMethod: payments.paymentMethod,
         description: payments.description, stripePaymentId: payments.stripePaymentId,
+        provider: payments.provider, mode: payments.mode, providerChargeId: payments.providerChargeId,
+        fulfilledAt: payments.fulfilledAt, failedAt: payments.failedAt, failureReason: payments.failureReason,
         createdAt: payments.createdAt,
         userName: sql<string>`(select concat(first_name, ' ', last_name) from users where id = ${payments.userId})`,
         userEmail: sql<string>`(select email from users where id = ${payments.userId})`,
@@ -3906,7 +4371,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   // FORGOT PASSWORD — request a reset link
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+  app.post("/api/auth/forgot-password", forgotPasswordRateLimiter, async (req: Request, res: Response) => {
     try {
       const { email } = req.body;
       if (!email || typeof email !== "string") {
@@ -3942,13 +4407,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         expiresAt,
       });
 
-      // In production this would send an email via a mail provider.
-      // For now we log the link so developers can test without SMTP configured.
       const resetLink = `${getRequestOrigin(req)}/#/reset-password/${rawToken}`;
-      console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
-
-      // TODO: replace console.log with actual email send, e.g.:
-      // await sendEmail({ to: user.email, subject: "Reset your ServiceConnect password", body: `Click here: ${resetLink}` });
+      try {
+        await sendPasswordResetEmail({
+          to: user.email,
+          firstName: user.firstName,
+          resetToken: rawToken,
+          resetUrl: resetLink,
+        });
+      } catch (error) {
+        if (!(error instanceof DeliveryConfigurationError)) {
+          throw error;
+        }
+      }
 
       return res.json({ message: "If that email is registered you will receive a reset link shortly." });
     } catch (err: any) {
@@ -4139,7 +4610,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [totalJobs] = await db.select({ count: count() }).from(jobs);
       const [totalBookings] = await db.select({ count: count() }).from(bookings);
       const [totalRevenue] = await db.select({ total: sum(payments.amount) }).from(payments)
-        .where(eq(payments.status, "COMPLETED"));
+        .where(confirmedLiveRevenueFilter());
       return res.json({
         totalUsers: totalUsers.count,
         totalJobs: totalJobs.count,
@@ -4506,7 +4977,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const [activeJobs] = await db.select({ c: count() }).from(jobs).where(or(eq(jobs.status, "LIVE"), eq(jobs.status, "BOOSTED"))!);
       const [totalBookings] = await db.select({ c: count() }).from(bookings);
       const [completedBookings] = await db.select({ c: count() }).from(bookings).where(eq(bookings.status, "COMPLETED"));
-      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(eq(payments.status, "COMPLETED"));
+      const [totalRevenue] = await db.select({ s: sum(payments.amount) }).from(payments).where(confirmedLiveRevenueFilter());
       const [totalQuotes] = await db.select({ c: count() }).from(quotes);
       const [acceptedQuotes] = await db.select({ c: count() }).from(quotes).where(eq(quotes.status, "ACCEPTED"));
       const [totalUnlocks] = await db.select({ c: count() }).from(jobUnlocks);

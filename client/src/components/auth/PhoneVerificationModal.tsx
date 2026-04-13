@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { Phone, ShieldCheck } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { DEMO_OTP_CODE } from "@shared/verification";
 
 interface PhoneVerificationModalProps {
   open: boolean;
@@ -23,6 +22,7 @@ export default function PhoneVerificationModal({
 }: PhoneVerificationModalProps) {
   const [step, setStep] = useState<"send" | "verify">("send");
   const [code, setCode] = useState("");
+  const [fallbackCode, setFallbackCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -36,8 +36,15 @@ export default function PhoneVerificationModal({
         onVerified();
         return;
       }
+      setFallbackCode(data.deliveryMode === "DEV_FALLBACK" ? data.fallbackCode ?? null : null);
       setStep("verify");
-      toast({ title: "Code sent", description: "Check your phone for the 6-digit verification code." });
+      toast({
+        title: "Code sent",
+        description:
+          data.deliveryMode === "DEV_FALLBACK" && data.fallbackCode
+            ? `Provider fallback is active locally. Use ${data.fallbackCode}.`
+            : "Check your phone for the 6-digit verification code.",
+      });
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
@@ -115,13 +122,18 @@ export default function PhoneVerificationModal({
                 id="otp-input"
                 value={code}
                 onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder={DEMO_OTP_CODE}
+                placeholder="123456"
                 maxLength={6}
                 className="text-center text-xl tracking-[0.3em] font-mono h-12"
                 onKeyDown={e => e.key === "Enter" && verifyOtp()}
                 autoComplete="one-time-code"
                 inputMode="numeric"
               />
+              {fallbackCode && (
+                <p className="text-xs rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+                  Provider fallback is active locally. Use <span className="font-mono">{fallbackCode}</span>.
+                </p>
+              )}
             </div>
             <Button onClick={verifyOtp} disabled={loading || code.length !== 6} className="w-full">
               {loading ? "Verifying..." : "Confirm code"}
@@ -129,7 +141,7 @@ export default function PhoneVerificationModal({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { setStep("send"); setCode(""); }}
+              onClick={() => { setCode(""); void sendOtp(); }}
               className="text-gray-400 text-xs"
             >
               Resend code

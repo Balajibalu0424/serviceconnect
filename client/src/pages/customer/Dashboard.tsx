@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { DEMO_OTP_CODE } from "@shared/verification";
 import {
   PlusCircle, Briefcase, MessageSquare, CheckCircle, AlertCircle,
   TrendingUp, ThumbsUp, ThumbsDown, Zap, ChevronRight, Clock,
@@ -254,7 +253,7 @@ export default function CustomerDashboard() {
                 <div>
                   <h3 className="font-semibold text-blue-900 dark:text-blue-100 text-base font-outfit">Verify your email to publish your job</h3>
                   <p className="text-sm text-blue-700 dark:text-blue-400/80 mt-0.5">
-                    Enter the 6-digit code we sent to <strong>{user.email}</strong>. Demo code: <strong className="font-mono">{DEMO_OTP_CODE}</strong>
+                    Enter the 6-digit code we sent to <strong>{user.email}</strong> to publish your job.
                   </p>
                 </div>
               </div>

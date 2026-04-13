@@ -1,9 +1,13 @@
+import { randomBytes, randomInt } from "crypto";
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { verificationChallenges } from "@shared/schema";
 import { comparePassword, hashPassword } from "./auth";
-import { DEMO_OTP_CODE, VERIFICATION_CODE_TTL_MINUTES, VERIFICATION_MAX_ATTEMPTS } from "@shared/verification";
+import { VERIFICATION_CODE_TTL_MINUTES, VERIFICATION_MAX_ATTEMPTS } from "@shared/verification";
 import type { VerificationChannel } from "@shared/onboarding";
+import { canUseOtpFallback } from "./deliveryConfig";
+import { sendOtpEmail } from "./emailService";
+import { checkPhoneVerificationCode, normalizePhoneNumber, sendPhoneVerificationCode } from "./smsVerifyService";
 
 type VerificationScope =
   | { sessionId: string; userId?: undefined }
@@ -23,8 +27,10 @@ type VerifyChallengeInput = VerificationScope & {
 export interface VerificationResult {
   success: boolean;
   expiresAt: string;
-  demoCode?: string;
   message: string;
+  deliveryMode: "PROVIDER" | "DEV_FALLBACK";
+  fallbackCode?: string;
+  maskedTarget: string;
 }
 
 function buildScopeCondition(scope: VerificationScope) {
@@ -48,6 +54,47 @@ function buildActiveCondition(scope: VerificationScope, channel: VerificationCha
   )!;
 }
 
+function maskTarget(target: string, channel: VerificationChannel) {
+  if (channel === "EMAIL") {
+    const [name, domain] = target.split("@");
+    if (!name || !domain) return target;
+    return `${name.slice(0, 2)}***@${domain}`;
+  }
+
+  const compact = target.replace(/\s+/g, "");
+  return `${compact.slice(0, 4)}***${compact.slice(-2)}`;
+}
+
+function generateOtpCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+function normalizeTarget(channel: VerificationChannel, target: string) {
+  const trimmed = target.trim();
+  return channel === "PHONE" ? normalizePhoneNumber(trimmed) : trimmed.toLowerCase();
+}
+
+async function deliverChallenge(channel: VerificationChannel, target: string, code: string) {
+  if (channel === "EMAIL") {
+    await sendOtpEmail({ to: target, code, expiresInMinutes: VERIFICATION_CODE_TTL_MINUTES });
+    return "PROVIDER" as const;
+  }
+
+  await sendPhoneVerificationCode(target);
+  return "PROVIDER" as const;
+}
+
+async function markChallengeFailed(challengeId: string, attempts: number, maxAttempts: number) {
+  await db
+    .update(verificationChallenges)
+    .set({
+      attempts,
+      invalidatedAt: attempts >= maxAttempts ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(verificationChallenges.id, challengeId));
+}
+
 export async function invalidateVerificationChallenges(
   scope: VerificationScope,
   channel?: VerificationChannel,
@@ -67,17 +114,31 @@ export async function invalidateVerificationChallenges(
 }
 
 export async function issueVerificationChallenge(input: IssueChallengeInput): Promise<VerificationResult> {
+  const normalizedTarget = normalizeTarget(input.channel, input.target);
   const expiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MINUTES * 60 * 1000);
-  const hashedCode = await hashPassword(DEMO_OTP_CODE);
+  const fallbackCode = generateOtpCode();
+  let deliveryMode: VerificationResult["deliveryMode"] = "DEV_FALLBACK";
+  let hashedCode = await hashPassword(fallbackCode);
 
   await invalidateVerificationChallenges(input, input.channel);
+
+  try {
+    deliveryMode = await deliverChallenge(input.channel, normalizedTarget, fallbackCode);
+    if (input.channel === "PHONE") {
+      hashedCode = await hashPassword(randomBytes(32).toString("hex"));
+    }
+  } catch (error) {
+    if (!canUseOtpFallback()) {
+      throw error;
+    }
+  }
 
   await db.insert(verificationChallenges).values({
     sessionId: input.sessionId,
     userId: input.userId,
     channel: input.channel,
     purpose: input.purpose ?? (input.sessionId ? "ONBOARDING" : "PHONE_UPDATE"),
-    target: input.target,
+    target: normalizedTarget,
     hashedCode,
     attempts: 0,
     maxAttempts: VERIFICATION_MAX_ATTEMPTS,
@@ -86,13 +147,13 @@ export async function issueVerificationChallenge(input: IssueChallengeInput): Pr
     lastSentAt: new Date(),
   });
 
-  console.log(`[Verification] ${input.channel} demo OTP issued for ${input.target}: ${DEMO_OTP_CODE}`);
-
   return {
     success: true,
     expiresAt: expiresAt.toISOString(),
-    demoCode: DEMO_OTP_CODE,
-    message: `Verification code sent to your ${input.channel.toLowerCase()}.`,
+    message: `Verification code sent to your ${input.channel === "EMAIL" ? "email address" : "phone number"}.`,
+    deliveryMode,
+    fallbackCode: deliveryMode === "DEV_FALLBACK" ? fallbackCode : undefined,
+    maskedTarget: maskTarget(normalizedTarget, input.channel),
   };
 }
 
@@ -113,21 +174,20 @@ export async function verifyVerificationChallenge(input: VerifyChallengeInput): 
     return false;
   }
 
-  const isValid =
-    input.code === DEMO_OTP_CODE ||
-    (await comparePassword(input.code, challenge.hashedCode));
+  let isValid = false;
+  if (input.channel === "PHONE") {
+    try {
+      isValid = await checkPhoneVerificationCode(challenge.target, input.code);
+    } catch {
+      isValid = await comparePassword(input.code, challenge.hashedCode);
+    }
+  } else {
+    isValid = await comparePassword(input.code, challenge.hashedCode);
+  }
 
   if (!isValid) {
     const nextAttempts = challenge.attempts + 1;
-    await db
-      .update(verificationChallenges)
-      .set({
-        attempts: nextAttempts,
-        invalidatedAt: nextAttempts >= challenge.maxAttempts ? new Date() : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(verificationChallenges.id, challenge.id));
-
+    await markChallengeFailed(challenge.id, nextAttempts, challenge.maxAttempts);
     return false;
   }
 

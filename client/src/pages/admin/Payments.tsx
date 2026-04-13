@@ -15,19 +15,26 @@ import {
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
+import { paymentCountsTowardsLiveRevenue } from "@shared/payments";
 
 interface Payment {
-  id: number;
-  userId: number;
+  id: string;
+  userId: string;
   amount: string;
   currency: string;
   status: "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
   paymentMethod: string;
-  description: string;
-  stripePaymentId: string;
+  description: string | null;
+  stripePaymentId: string | null;
+  provider: string | null;
+  mode: "LIVE" | "TEST" | "DEMO";
+  providerChargeId: string | null;
+  fulfilledAt: string | null;
+  failedAt: string | null;
+  failureReason: string | null;
   createdAt: string;
-  userName: string;
-  userEmail: string;
+  userName: string | null;
+  userEmail: string | null;
 }
 
 const PAGE_SIZE = 25;
@@ -45,13 +52,21 @@ const METHOD_COLORS: Record<string, string> = {
   manual:  "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300",
 };
 
+const MODE_COLORS: Record<string, string> = {
+  LIVE: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+  TEST: "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300",
+  DEMO: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
+};
+
 function exportCSV(payments: Payment[]) {
-  const headers = ["ID", "User", "Email", "Amount", "Currency", "Method", "Description", "Status", "Stripe ID", "Date"];
+  const headers = ["ID", "User", "Email", "Amount", "Currency", "Method", "Mode", "Description", "Status", "Stripe ID", "Charge ID", "Fulfilled At", "Date"];
   const rows = payments.map((p) => [
     p.id, p.userName || "", p.userEmail || "",
     parseFloat(p.amount).toFixed(2), p.currency || "EUR",
-    p.paymentMethod, p.description || "", p.status,
+    p.paymentMethod, p.mode, p.description || "", p.status,
     p.stripePaymentId || "",
+    p.providerChargeId || "",
+    p.fulfilledAt ? format(new Date(p.fulfilledAt), "yyyy-MM-dd HH:mm") : "",
     format(new Date(p.createdAt), "yyyy-MM-dd HH:mm"),
   ]);
   const csv = [headers, ...rows]
@@ -108,23 +123,27 @@ export default function AdminPayments() {
   const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // KPI computations
-  const completed = useMemo(() => payments.filter((p) => p.status === "COMPLETED"), [payments]);
-  const totalRevenue = useMemo(() => completed.reduce((s, p) => s + parseFloat(p.amount || "0"), 0), [completed]);
+  const fulfilledLivePayments = useMemo(
+    () => payments.filter((p) => paymentCountsTowardsLiveRevenue(p)),
+    [payments],
+  );
+  const totalRevenue = useMemo(
+    () => fulfilledLivePayments.reduce((sum, payment) => sum + parseFloat(payment.amount || "0"), 0),
+    [fulfilledLivePayments],
+  );
   const pendingCount = useMemo(() => payments.filter((p) => p.status === "PENDING").length, [payments]);
   const failedCount = useMemo(() => payments.filter((p) => p.status === "FAILED").length, [payments]);
-  const avgTransaction = payments.length > 0
-    ? payments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0) / payments.length
-    : 0;
+  const testOrDemoCount = useMemo(() => payments.filter((p) => p.mode !== "LIVE").length, [payments]);
 
   // Revenue breakdown by method
   const byMethod = useMemo(() => {
     const map: Record<string, number> = {};
-    completed.forEach((p) => {
+    fulfilledLivePayments.forEach((p) => {
       const key = p.paymentMethod || "other";
       map[key] = (map[key] || 0) + parseFloat(p.amount || "0");
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [completed]);
+  }, [fulfilledLivePayments]);
   const maxMethodRevenue = byMethod.length > 0 ? byMethod[0][1] : 1;
 
   const glass = "bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm";
@@ -139,11 +158,11 @@ export default function AdminPayments() {
   }
 
   const kpis = [
-    { label: "Total Revenue", value: `\u20AC${totalRevenue.toFixed(2)}`, icon: DollarSign, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-    { label: "Completed", value: completed.length, icon: CheckCircle, color: "text-green-500", bg: "bg-green-500/10" },
+    { label: "Live Revenue", value: `\u20AC${totalRevenue.toFixed(2)}`, icon: DollarSign, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+    { label: "Fulfilled Live", value: fulfilledLivePayments.length, icon: CheckCircle, color: "text-green-500", bg: "bg-green-500/10" },
     { label: "Pending", value: pendingCount, icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
     { label: "Failed", value: failedCount, icon: AlertCircle, color: "text-red-500", bg: "bg-red-500/10" },
-    { label: "Avg Transaction", value: `\u20AC${avgTransaction.toFixed(2)}`, icon: TrendingUp, color: "text-violet-500", bg: "bg-violet-500/10" },
+    { label: "Test / Demo", value: testOrDemoCount, icon: CreditCard, color: "text-violet-500", bg: "bg-violet-500/10" },
   ];
 
   return (
@@ -208,7 +227,7 @@ export default function AdminPayments() {
           <Card className={cn(glass, "overflow-hidden")}>
             <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
               <CardTitle className="text-sm font-heading font-semibold text-foreground/80 flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" /> Revenue by Payment Method
+                <TrendingUp className="w-4 h-4" /> Live Revenue by Payment Method
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-5 space-y-3">
@@ -308,27 +327,33 @@ export default function AdminPayments() {
                         <StatusIcon className={cn("w-4 h-4", cfg.color)} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-bold text-sm">{"\u20AC"}{parseFloat(p.amount).toFixed(2)}</p>
-                          <Badge className={cn("text-xs border-0 font-medium", cfg.bg, cfg.color)}>
-                            {p.status}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-bold text-sm">{"\u20AC"}{parseFloat(p.amount).toFixed(2)}</p>
+                        <Badge className={cn("text-xs border-0 font-medium", cfg.bg, cfg.color)}>
+                          {p.status}
+                        </Badge>
+                        <Badge className={cn("text-xs border-0 font-medium", MODE_COLORS[p.mode] || "bg-muted text-muted-foreground")}>
+                          {p.mode}
+                        </Badge>
+                        {p.paymentMethod && (
+                          <Badge className={cn("text-xs border-0 font-medium", METHOD_COLORS[p.paymentMethod] || "bg-muted text-muted-foreground")}>
+                            {p.paymentMethod}
                           </Badge>
-                          {p.paymentMethod && (
-                            <Badge className={cn("text-xs border-0 font-medium", METHOD_COLORS[p.paymentMethod] || "bg-muted text-muted-foreground")}>
-                              {p.paymentMethod}
-                            </Badge>
-                          )}
-                        </div>
+                        )}
+                      </div>
                         <p className="text-xs text-muted-foreground truncate mt-0.5">
                           {p.userName || p.userEmail || `User #${p.userId}`}
                           {p.description ? ` \u00B7 ${p.description}` : ""}
                         </p>
+                        {p.failureReason && (
+                          <p className="mt-1 text-xs text-destructive truncate">{p.failureReason}</p>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground flex-shrink-0 text-right hidden sm:block">
-                        {format(new Date(p.createdAt), "d MMM yyyy, HH:mm")}
+                        {format(new Date(p.fulfilledAt || p.createdAt), "d MMM yyyy, HH:mm")}
                         <br />
                         <span className="text-[11px] opacity-70">
-                          {formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })}
+                          {formatDistanceToNow(new Date(p.fulfilledAt || p.createdAt), { addSuffix: true })}
                         </span>
                       </p>
                     </div>

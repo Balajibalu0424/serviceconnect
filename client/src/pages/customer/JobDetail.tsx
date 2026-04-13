@@ -10,10 +10,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { MapPin, Clock, DollarSign, Zap, CheckCircle2, XCircle, Star, AlertTriangle, MessageCircle, Pencil, Hash, Sparkles, ArrowRight, MessageSquare, SortAsc, TrendingDown, Award } from "lucide-react";
+import { BookingTimeline } from "@/components/bookings/BookingTimeline";
+import { formatFileSize, uploadAsset } from "@/lib/uploads";
+import { MapPin, Clock, DollarSign, Zap, CheckCircle2, XCircle, Star, AlertTriangle, MessageCircle, Pencil, Hash, Sparkles, ArrowRight, ArrowLeft, MessageSquare, TrendingDown, Award, ImageIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import type { UploadedAsset } from "@shared/uploads";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "secondary", LIVE: "default", IN_DISCUSSION: "secondary",
@@ -40,6 +43,9 @@ export default function JobDetail() {
   const [showReview, setShowReview] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({ title: "", description: "", locationText: "", locationTown: "", locationEircode: "", budgetMin: "", budgetMax: "", urgency: "NORMAL" });
+  const [editExistingMediaUrls, setEditExistingMediaUrls] = useState<string[]>([]);
+  const [editNewMediaAssets, setEditNewMediaAssets] = useState<UploadedAsset[]>([]);
+  const [uploadingEditMedia, setUploadingEditMedia] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [quoteSortBy, setQuoteSortBy] = useState<"amount" | "date">("amount");
 
@@ -64,6 +70,7 @@ export default function JobDetail() {
   const pendingQuotesCount = jobQuotes.filter((q: any) => q.status === "PENDING").length;
   const jobBooking = (jobBookings as any[])[0];
   const hasReview = jobBooking?.hasReview ?? false;
+  const jobMediaUrls = Array.isArray(job?.mediaUrls) ? job.mediaUrls.filter((url: unknown) => typeof url === "string" && url.trim().length > 0) : [];
 
   const acceptQuote = useMutation({
     mutationFn: async (quoteId: string) => {
@@ -137,6 +144,7 @@ export default function JobDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [`/api/jobs/${params?.id}`] });
       setShowEditDialog(false);
+      setEditNewMediaAssets([]);
       toast({ title: "Job updated", description: "Your changes have been saved." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -250,11 +258,67 @@ export default function JobDetail() {
       budgetMax: job.budgetMax || "",
       urgency: job.urgency || "NORMAL",
     });
+    setEditExistingMediaUrls(jobMediaUrls);
+    setEditNewMediaAssets([]);
     setShowEditDialog(true);
   };
 
+  const handleEditMediaUpload = async (files: FileList | null) => {
+    if (!files?.length) return;
+
+    const remainingSlots = Math.max(0, 5 - (editExistingMediaUrls.length + editNewMediaAssets.length));
+    const nextFiles = Array.from(files).slice(0, remainingSlots);
+    if (nextFiles.length === 0) {
+      toast({ title: "Photo limit reached", description: "You can attach up to 5 job photos.", variant: "destructive" });
+      return;
+    }
+
+    setUploadingEditMedia(true);
+    try {
+      const uploaded = await Promise.all(
+        nextFiles.map((file) => uploadAsset("job-photo", file, { entityType: "job", entityId: job.id })),
+      );
+      setEditNewMediaAssets((prev) => [...prev, ...uploaded].slice(0, 5));
+      toast({ title: "Photos uploaded", description: `${uploaded.length} file${uploaded.length === 1 ? "" : "s"} ready to save.` });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingEditMedia(false);
+    }
+  };
+
   if (isLoading) return <DashboardLayout><div className="p-6 text-muted-foreground">Loading...</div></DashboardLayout>;
-  if (!job) return <DashboardLayout><div className="p-6">Job not found</div></DashboardLayout>;
+  if (!job) {
+    return (
+      <DashboardLayout>
+        <div className="p-4 md:p-6 max-w-3xl mx-auto">
+          <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm">
+            <CardContent className="py-10 text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-muted/40 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6 text-muted-foreground" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold">This job is no longer available</h1>
+                <p className="text-sm text-muted-foreground mt-1">
+                  The link may be stale, or the job was closed or removed.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <Button variant="outline" onClick={() => navigate("/dashboard")}>
+                  <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
+                </Button>
+                <Button onClick={() => navigate("/jobs")}>View My Jobs</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   const isAftercare = ["AFTERCARE_2D", "AFTERCARE_5D"].includes(job.status);
   const canBoost = ["LIVE", "IN_DISCUSSION", "BOOSTED"].includes(job.status) && !job.isBoosted && job.customerId === user?.id;
@@ -295,6 +359,34 @@ export default function JobDetail() {
           </div>
         </div>
 
+        {jobMediaUrls.length > 0 && (
+          <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <CardTitle className="flex items-center gap-2 text-base font-heading font-semibold text-foreground/80">
+                <ImageIcon className="w-4 h-4 text-primary/70" />
+                Job photos
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {jobMediaUrls.map((url: string, index: number) => (
+                  <a
+                    key={`${url}-${index}`}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group overflow-hidden rounded-2xl border border-border/50 bg-background"
+                  >
+                    <div className="aspect-[4/3] bg-muted">
+                      <img src={url} alt={`Job photo ${index + 1}`} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Matched / booking confirmed banner */}
         {isMatched && acceptedQuote && (
           <Card className="border-green-400/60 bg-green-50/60 dark:bg-green-950/20">
@@ -318,6 +410,17 @@ export default function JobDetail() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {jobBooking && (
+          <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <CardTitle className="text-base font-heading font-semibold text-foreground/80">Booking timeline</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <BookingTimeline booking={jobBooking} />
             </CardContent>
           </Card>
         )}
@@ -736,10 +839,72 @@ export default function JobDetail() {
                 <Input type="number" placeholder="0" value={editForm.budgetMax} onChange={e => setEditForm(f => ({ ...f, budgetMax: e.target.value }))} />
               </div>
             </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <label className="text-sm font-medium">Job photos</label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Keep or remove existing photos, and upload new ones before saving.</p>
+                </div>
+                <Input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                  multiple
+                  className="max-w-[220px]"
+                  onChange={(e) => {
+                    void handleEditMediaUpload(e.target.files);
+                    e.currentTarget.value = "";
+                  }}
+                  disabled={uploadingEditMedia || editExistingMediaUrls.length + editNewMediaAssets.length >= 5}
+                />
+              </div>
+
+              {(editExistingMediaUrls.length > 0 || editNewMediaAssets.length > 0) ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {editExistingMediaUrls.map((url) => (
+                    <div key={url} className="rounded-xl border border-border/50 overflow-hidden bg-background">
+                      <div className="aspect-[4/3] bg-muted">
+                        <img src={url} alt="Existing job photo" className="w-full h-full object-cover" />
+                      </div>
+                      <div className="p-2 space-y-1">
+                        <p className="text-[11px] text-muted-foreground">Existing photo</p>
+                        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs w-full" onClick={() => setEditExistingMediaUrls((prev) => prev.filter((entry) => entry !== url))}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  {editNewMediaAssets.map((asset) => (
+                    <div key={asset.id} className="rounded-xl border border-border/50 overflow-hidden bg-background">
+                      <div className="aspect-[4/3] bg-muted">
+                        <img src={asset.url} alt={asset.originalName} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="p-2 space-y-1">
+                        <p className="text-xs font-medium truncate">{asset.originalName}</p>
+                        <p className="text-[11px] text-muted-foreground">{formatFileSize(asset.sizeBytes)}</p>
+                        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs w-full" onClick={() => setEditNewMediaAssets((prev) => prev.filter((entry) => entry.id !== asset.id))}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No photos attached to this job yet.</p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditDialog(false)}>Cancel</Button>
-            <Button onClick={() => editJob.mutate(editForm)} disabled={editJob.isPending}>
+            <Button
+              onClick={() =>
+                editJob.mutate({
+                  ...editForm,
+                  mediaUrls: editExistingMediaUrls,
+                  mediaUploadIds: editNewMediaAssets.map((asset) => asset.id),
+                })
+              }
+              disabled={editJob.isPending || uploadingEditMedia}
+            >
               {editJob.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>

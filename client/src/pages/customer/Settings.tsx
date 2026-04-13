@@ -34,6 +34,12 @@ const PROFESSIONAL_NOTIFICATION_OPTIONS: Array<{ key: NotificationCategoryKey; l
   { key: "reviews", label: "Reviews", description: "New customer reviews and replies." },
 ];
 
+const CHANNEL_OPTIONS: Array<{ key: "push" | "email" | "sms"; label: string; description: string }> = [
+  { key: "push", label: "In-app alerts", description: "Show notifications inside ServiceConnect." },
+  { key: "email", label: "Email alerts", description: "Send notification emails when categories are enabled." },
+  { key: "sms", label: "SMS alerts", description: "Reserved for SMS notification delivery once enabled on your account." },
+];
+
 export default function Settings() {
   const { user, refreshUser } = useAuth();
   const { toast } = useToast();
@@ -141,6 +147,25 @@ export default function Settings() {
     setNotificationPreferences(newPrefs);
     
     // Auto-save notification preference immediately
+    try {
+      const res = await apiRequest("PATCH", "/api/auth/profile", { notificationPreferences: newPrefs });
+      if (!res.ok) throw new Error((await res.json()).error);
+      await refreshUser();
+      toast({ title: "Preferences updated" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+      setNotificationPreferences(previousPrefs);
+    }
+  };
+
+  const updateChannelPreference = async (key: "push" | "email" | "sms", checked: boolean) => {
+    const previousPrefs = notificationPreferences;
+    const newPrefs = {
+      ...notificationPreferences,
+      [key]: checked,
+    };
+    setNotificationPreferences(newPrefs);
+
     try {
       const res = await apiRequest("PATCH", "/api/auth/profile", { notificationPreferences: newPrefs });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -396,7 +421,22 @@ export default function Settings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-5 pb-4 space-y-3">
-            <p className="text-sm text-muted-foreground mb-4">Choose which in-app notification categories you want to receive. Changes are saved immediately.</p>
+            <p className="text-sm text-muted-foreground mb-4">Choose which notification channels and categories you want to receive. Changes are saved immediately.</p>
+
+            <div className="space-y-3">
+              {CHANNEL_OPTIONS.map((option) => (
+                <div key={option.key} className="flex items-center justify-between gap-4 py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">
+                  <div className="space-y-0.5 flex-1 min-w-0">
+                    <Label className="text-base">{option.label}</Label>
+                    <p className="text-xs text-muted-foreground">{option.description}</p>
+                  </div>
+                  <Switch
+                    checked={notificationPreferences[option.key]}
+                    onCheckedChange={(checked) => updateChannelPreference(option.key, checked)}
+                  />
+                </div>
+              ))}
+            </div>
 
             {notificationOptions.map((option) => (
               <div key={option.key} className="flex items-center justify-between gap-4 py-3 px-4 bg-white/50 dark:bg-black/20 rounded-xl border border-border/40">

@@ -1,7 +1,6 @@
 /* @vitest-environment node */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEMO_OTP_CODE } from "@shared/verification";
 
 const insertedValues = vi.fn();
 const updateSet = vi.fn();
@@ -11,6 +10,10 @@ const orderByMock = vi.fn();
 const whereMock = vi.fn();
 const fromMock = vi.fn();
 const selectMock = vi.fn();
+const sendOtpEmail = vi.fn();
+const sendPhoneVerificationCode = vi.fn();
+const checkPhoneVerificationCode = vi.fn();
+const canUseOtpFallback = vi.fn();
 
 vi.mock("./db", () => ({
   db: {
@@ -29,8 +32,24 @@ vi.mock("./auth", () => ({
   comparePassword: vi.fn(async (value: string, hash: string) => hash === `hashed:${value}`),
 }));
 
+vi.mock("./deliveryConfig", () => ({
+  canUseOtpFallback,
+}));
+
+vi.mock("./emailService", () => ({
+  sendOtpEmail,
+}));
+
+vi.mock("./smsVerifyService", () => ({
+  sendPhoneVerificationCode,
+  checkPhoneVerificationCode,
+  normalizePhoneNumber: vi.fn((value: string) => value),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.resetModules();
+
   updateSet.mockReturnValue({ where: updateWhere });
   insertedValues.mockResolvedValue([]);
   updateWhere.mockResolvedValue([]);
@@ -39,11 +58,15 @@ beforeEach(() => {
   whereMock.mockReturnValue({ orderBy: orderByMock, limit: limitMock });
   orderByMock.mockReturnValue({ limit: limitMock });
   limitMock.mockResolvedValue([]);
-  vi.spyOn(console, "log").mockImplementation(() => {});
+
+  canUseOtpFallback.mockReturnValue(true);
+  sendOtpEmail.mockResolvedValue(undefined);
+  sendPhoneVerificationCode.mockResolvedValue("+353871234567");
+  checkPhoneVerificationCode.mockResolvedValue(false);
 });
 
 describe("verificationService", () => {
-  it("issues centralized demo OTP challenges", async () => {
+  it("issues provider-backed email OTP challenges when delivery is configured", async () => {
     const { issueVerificationChallenge } = await import("./verificationService");
 
     const result = await issueVerificationChallenge({
@@ -54,37 +77,76 @@ describe("verificationService", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.demoCode).toBe(DEMO_OTP_CODE);
-    expect(insertedValues).toHaveBeenCalledWith(expect.objectContaining({
-      sessionId: "session-1",
-      channel: "EMAIL",
-      target: "jane@example.com",
-      purpose: "ONBOARDING",
-    }));
+    expect(result.deliveryMode).toBe("PROVIDER");
+    expect(result.fallbackCode).toBeUndefined();
+    expect(result.maskedTarget).toBe("ja***@example.com");
+    expect(sendOtpEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "jane@example.com",
+        expiresInMinutes: expect.any(Number),
+      }),
+    );
+    expect(insertedValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        channel: "EMAIL",
+        target: "jane@example.com",
+        purpose: "ONBOARDING",
+        hashedCode: expect.stringMatching(/^hashed:\d{6}$/),
+      }),
+    );
   });
 
-  it("verifies phone challenges with the shared demo code", async () => {
+  it("returns a development fallback code when provider delivery fails but fallback is allowed", async () => {
+    sendOtpEmail.mockRejectedValueOnce(new Error("resend unavailable"));
+
+    const { issueVerificationChallenge } = await import("./verificationService");
+
+    const result = await issueVerificationChallenge({
+      sessionId: "session-2",
+      channel: "EMAIL",
+      target: "builder@example.com",
+      purpose: "ONBOARDING",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.deliveryMode).toBe("DEV_FALLBACK");
+    expect(result.fallbackCode).toMatch(/^\d{6}$/);
+    expect(insertedValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "builder@example.com",
+        hashedCode: `hashed:${result.fallbackCode}`,
+      }),
+    );
+  });
+
+  it("verifies phone challenges through the provider check when available", async () => {
     const { verifyVerificationChallenge } = await import("./verificationService");
 
     limitMock.mockResolvedValueOnce([
       {
         id: "challenge-1",
-        hashedCode: "hashed:anything",
+        target: "+353871234567",
+        hashedCode: "hashed:000000",
         attempts: 0,
         maxAttempts: 5,
       },
     ]);
+    checkPhoneVerificationCode.mockResolvedValueOnce(true);
 
     const isValid = await verifyVerificationChallenge({
       userId: "user-1",
       channel: "PHONE",
-      code: DEMO_OTP_CODE,
+      code: "654321",
     });
 
     expect(isValid).toBe(true);
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
-      verifiedAt: expect.any(Date),
-    }));
+    expect(checkPhoneVerificationCode).toHaveBeenCalledWith("+353871234567", "654321");
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verifiedAt: expect.any(Date),
+      }),
+    );
   });
 
   it("increments attempts for invalid codes", async () => {
@@ -93,6 +155,7 @@ describe("verificationService", () => {
     limitMock.mockResolvedValueOnce([
       {
         id: "challenge-2",
+        target: "jane@example.com",
         hashedCode: "hashed:not-demo",
         attempts: 0,
         maxAttempts: 5,
@@ -106,8 +169,10 @@ describe("verificationService", () => {
     });
 
     expect(isValid).toBe(false);
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
-      attempts: 1,
-    }));
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempts: 1,
+      }),
+    );
   });
 });

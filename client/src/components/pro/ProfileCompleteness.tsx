@@ -12,6 +12,7 @@ export interface ProfileCompletenessProps {
     credentials?: string | null;
     serviceCategories?: string[] | null;
     serviceAreas?: string[] | null;
+    verificationStatus?: string | null;
     yearsExperience?: number | null;
     website?: string | null;
     lat?: number | string | null;
@@ -22,6 +23,7 @@ export interface ProfileCompletenessProps {
 }
 
 export function ProfileCompleteness({ user, profile, compact = false }: ProfileCompletenessProps) {
+  const verificationComplete = ["PENDING", "APPROVED"].includes(profile?.verificationStatus ?? "");
   const checks = [
     { id: "avatar", label: "Profile Photo", done: !!user?.avatarUrl },
     { id: "bio", label: "About You / Bio", done: !!user?.bio && user.bio.length > 10 },
@@ -33,6 +35,7 @@ export function ProfileCompleteness({ user, profile, compact = false }: ProfileC
     { id: "website", label: "Website", done: !!profile?.website },
     { id: "credentials", label: "Credentials & Certifications", done: !!profile?.credentials && profile.credentials.length > 5 },
     { id: "portfolio", label: "Portfolio Examples", done: !!profile?.portfolio?.length },
+    { id: "verification", label: "Verification Submitted", done: verificationComplete },
   ];
 
   const completedCount = checks.filter((c) => c.done).length;

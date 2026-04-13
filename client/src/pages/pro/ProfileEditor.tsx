@@ -16,6 +16,8 @@ import { Star, Briefcase, TrendingUp, CheckCircle2, Wrench, ExternalLink, MapPin
 import { formatDistanceToNow } from "date-fns";
 import { ReviewReplyForm } from "@/components/reviews/ReviewReplyForm";
 import { ProfileCompleteness } from "@/components/pro/ProfileCompleteness";
+import { formatFileSize, uploadAsset } from "@/lib/uploads";
+import type { UploadedAsset } from "@shared/uploads";
 
 function parseServiceAreas(value: string) {
   return value
@@ -45,6 +47,8 @@ export default function ProProfileEditor() {
     lng: "",
   });
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [portfolioItems, setPortfolioItems] = useState<Array<UploadedAsset & { caption?: string | null }>>([]);
+  const [uploadingPortfolio, setUploadingPortfolio] = useState(false);
 
   // Pre-populate form when profile loads
   useEffect(() => {
@@ -63,8 +67,49 @@ export default function ProProfileEditor() {
       });
       // Pre-populate selected categories (stored as UUID array)
       setSelectedCategories(profile.serviceCategories || []);
+      setPortfolioItems(
+        Array.isArray(profile.portfolio)
+          ? profile.portfolio.map((item: any, index: number) => ({
+              id: item.id || item.url || `legacy-${index}`,
+              purpose: "PORTFOLIO_IMAGE" as const,
+              url: item.url,
+              originalName: item.originalName || item.caption || `Portfolio image ${index + 1}`,
+              mimeType: item.mimeType || "image/*",
+              sizeBytes: item.sizeBytes || 0,
+              createdAt: item.createdAt,
+              caption: item.caption || null,
+            }))
+          : [],
+      );
     }
   }, [profile, user?.bio]);
+
+  const handlePortfolioUpload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const availableSlots = Math.max(0, 6 - portfolioItems.length);
+    const nextFiles = Array.from(files).slice(0, availableSlots);
+    if (nextFiles.length === 0) {
+      toast({ title: "Portfolio limit reached", description: "You can upload up to 6 portfolio images.", variant: "destructive" });
+      return;
+    }
+
+    setUploadingPortfolio(true);
+    try {
+      const uploaded = await Promise.all(
+        nextFiles.map((file) => uploadAsset("portfolio-image", file, { entityType: "professional_portfolio" })),
+      );
+      setPortfolioItems((prev) => [...prev, ...uploaded].slice(0, 6));
+      toast({ title: "Portfolio updated", description: `${uploaded.length} image${uploaded.length === 1 ? "" : "s"} uploaded.` });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingPortfolio(false);
+    }
+  };
 
   const updateProfile = useMutation({
     mutationFn: async () => {
@@ -80,6 +125,11 @@ export default function ProProfileEditor() {
         radiusKm: form.radiusKm ? parseInt(form.radiusKm) : 25,
         lat: form.lat ? parseFloat(form.lat) : null,
         lng: form.lng ? parseFloat(form.lng) : null,
+        portfolio: portfolioItems.map((item) => ({
+          id: item.id.startsWith("legacy-") ? undefined : item.id,
+          url: item.url,
+          caption: item.caption || null,
+        })),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       return res.json();
@@ -137,6 +187,8 @@ export default function ProProfileEditor() {
     credentials: form.credentials || null,
     lat: form.lat || null,
     lng: form.lng || null,
+    portfolio: portfolioItems,
+    verificationStatus: profile?.verificationStatus || null,
   };
 
   return (
@@ -377,6 +429,56 @@ export default function ProProfileEditor() {
               data-testid="button-save-categories"
             >
               {updateProfile.isPending ? "Saving..." : "Save Categories"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm overflow-hidden">
+          <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+            <CardTitle className="text-base font-heading font-semibold text-foreground/80">Portfolio</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">Show examples of recent work. These images appear on your public profile.</p>
+          </CardHeader>
+          <CardContent className="pt-5 space-y-4">
+            <Input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              multiple
+              onChange={(e) => {
+                void handlePortfolioUpload(e.target.files);
+                e.currentTarget.value = "";
+              }}
+              disabled={uploadingPortfolio || portfolioItems.length >= 6}
+            />
+
+            {portfolioItems.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {portfolioItems.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-border/50 overflow-hidden bg-background">
+                    <div className="aspect-square bg-muted">
+                      <img src={item.url} alt={item.originalName} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="p-2 space-y-2">
+                      <p className="text-xs font-medium truncate">{item.originalName}</p>
+                      <p className="text-[11px] text-muted-foreground">{item.sizeBytes > 0 ? formatFileSize(item.sizeBytes) : "Existing portfolio item"}</p>
+                      <Input
+                        value={item.caption || ""}
+                        onChange={(e) => setPortfolioItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, caption: e.target.value } : entry))}
+                        placeholder="Optional caption"
+                        className="h-8 text-xs"
+                      />
+                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs w-full" onClick={() => setPortfolioItems((prev) => prev.filter((entry) => entry.id !== item.id))}>
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No portfolio images yet. Add a few examples to improve trust and profile completeness.</p>
+            )}
+
+            <Button onClick={() => updateProfile.mutate()} disabled={updateProfile.isPending} className="rounded-xl px-6 h-11 w-full sm:w-auto shadow-[0_4px_14px_0_rgba(var(--primary),0.39)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.23)] hover:-translate-y-0.5 transition-all">
+              {updateProfile.isPending ? "Saving..." : "Save Portfolio"}
             </Button>
           </CardContent>
         </Card>

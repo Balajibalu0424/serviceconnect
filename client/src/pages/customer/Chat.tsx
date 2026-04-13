@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Send, Loader2, ArrowLeft, Phone, CheckCircle2, Lock, Archive } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 
 const TERMINAL_JOB_STATUSES = ["COMPLETED", "CLOSED"];
 
@@ -44,9 +44,11 @@ export default function Chat() {
   const { user } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [pathname, setLocation] = useLocation();
   const searchString = useSearch();
   const searchParams = new URLSearchParams(searchString);
   const urlConvId = searchParams.get("conversationId");
+  const chatBase = pathname.startsWith("/pro") ? "/pro/chat" : "/chat";
 
   const [activeConvId, setActiveConvId] = useState<string | null>(urlConvId);
   const [message, setMessage] = useState("");
@@ -56,7 +58,10 @@ export default function Chat() {
     if (urlConvId && urlConvId !== activeConvId) {
       setActiveConvId(urlConvId);
     }
-  }, [urlConvId]);
+    if (!urlConvId && activeConvId) {
+      setActiveConvId(null);
+    }
+  }, [activeConvId, urlConvId]);
 
   const { data: allConversations = [], isLoading: loadingConvs } = useQuery<any[]>({
     queryKey: ["/api/chat/conversations"],
@@ -141,10 +146,16 @@ export default function Chat() {
   const activeConv = (conversations as any[]).find((c: any) => c.id === activeConvId);
   const isActiveConvFinished = activeConv ? isFinishedConv(activeConv) : false;
   const activeJobStatus = activeConv?.job?.status;
+  const missingConversation = !!urlConvId && !loadingConvs && !(conversations as any[]).some((c: any) => c.id === urlConvId);
 
   // Group conversations for sidebar
   const activeConvs = (conversations as any[]).filter(c => !isFinishedConv(c));
   const archivedConvs = (conversations as any[]).filter(c => isFinishedConv(c));
+
+  const selectConversation = (conversationId: string) => {
+    setActiveConvId(conversationId);
+    setLocation(`${chatBase}?conversationId=${conversationId}`);
+  };
 
   return (
     <DashboardLayout>
@@ -177,7 +188,7 @@ export default function Chat() {
               <>
                 {/* Active conversations */}
                 {activeConvs.map((conv: any) => (
-                  <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => setActiveConvId(conv.id)} finished={false} />
+                  <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => selectConversation(conv.id)} finished={false} />
                 ))}
 
                 {/* Archived/finished conversations */}
@@ -190,7 +201,7 @@ export default function Chat() {
                       </div>
                     )}
                     {archivedConvs.map((conv: any) => (
-                      <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => setActiveConvId(conv.id)} finished={true} />
+                      <ConvRow key={conv.id} conv={conv} user={user} activeConvId={activeConvId} onClick={() => selectConversation(conv.id)} finished={true} />
                     ))}
                   </>
                 )}
@@ -207,7 +218,16 @@ export default function Chat() {
           {!activeConvId ? (
             <div className="text-center text-muted-foreground">
               <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-20" />
-              <p>Select a conversation to start messaging</p>
+              {missingConversation ? (
+                <>
+                  <p>This conversation is no longer available.</p>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => setLocation(chatBase)}>
+                    Back to inbox
+                  </Button>
+                </>
+              ) : (
+                <p>Select a conversation to start messaging</p>
+              )}
             </div>
           ) : (
             <>
@@ -218,7 +238,10 @@ export default function Chat() {
               )}>
                 <button
                   className="md:hidden text-muted-foreground hover:text-foreground"
-                  onClick={() => setActiveConvId(null)}
+                  onClick={() => {
+                    setActiveConvId(null);
+                    setLocation(chatBase);
+                  }}
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>

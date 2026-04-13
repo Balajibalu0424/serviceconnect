@@ -14,6 +14,8 @@ import { buildOnboardingPath } from "@/lib/publicRoutes";
 import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, Lightbulb, Flame, Clock, Users, Star, Shield, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { formatFileSize, uploadAsset } from "@/lib/uploads";
+import type { UploadedAsset } from "@shared/uploads";
 
 /**
  * ARCHITECTURAL NOTE:
@@ -25,7 +27,6 @@ import { cn } from "@/lib/utils";
  */
 import AiOnboardingFlow, { type AiOnboardingData } from "@/components/onboarding/AiOnboardingFlow";
 import PhoneVerificationModal from "@/components/auth/PhoneVerificationModal";
-import { DEMO_OTP_CODE } from "@shared/verification";
 const ICON_MAP: Record<string, any> = { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator };
 
 type Step = 1 | 1.5 | 2 | 2.5 | 3 | 4;
@@ -207,9 +208,9 @@ function ProcessingScreen({ categorySlug }: { categorySlug: string }) {
   );
 }
 
-function OtpStep({ email, otp, setOtp, onVerify, loading }: {
+function OtpStep({ email, otp, setOtp, onVerify, onResend, loading, fallbackCode }: {
   email: string; otp: string; setOtp: (v: string) => void;
-  onVerify: () => void; loading: boolean;
+  onVerify: () => void; onResend: () => Promise<void> | void; loading: boolean; fallbackCode?: string | null;
 }) {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resending, setResending] = useState(false);
@@ -225,9 +226,18 @@ function OtpStep({ email, otp, setOtp, onVerify, loading }: {
     // NOTE: Real email OTP delivery is deferred (requires SendGrid/Resend integration).
     // This button shows UI readiness — in demo mode the code remains centralized.
     setResending(true);
-    setResendCooldown(60);
-    setResending(false);
-    toast({ title: "Code resent", description: `Demo mode: use code ${DEMO_OTP_CODE}.` });
+    try {
+      await onResend();
+      setResendCooldown(60);
+    } catch (error) {
+      toast({
+        title: "Unable to resend code",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
@@ -235,15 +245,17 @@ function OtpStep({ email, otp, setOtp, onVerify, loading }: {
       <div>
         <h1 className="text-2xl font-bold mb-1">Verify your email</h1>
         <p className="text-muted-foreground">Enter the 6-digit code sent to <strong>{email}</strong></p>
-        <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mt-1 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-3 py-1.5 inline-block">
-          Demo mode — use code: <strong className="font-mono tracking-widest">{DEMO_OTP_CODE}</strong>
-        </p>
+        {fallbackCode && (
+          <p className="text-xs text-amber-700 dark:text-amber-300 font-medium mt-1 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-3 py-1.5 inline-block">
+            Provider fallback is active locally. Use code <strong className="font-mono tracking-widest">{fallbackCode}</strong>
+          </p>
+        )}
       </div>
       <div className="max-w-xs mx-auto space-y-3">
         <Input
           type="text" maxLength={6} value={otp}
           onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
-          placeholder={DEMO_OTP_CODE}
+          placeholder="123456"
           className="text-center text-2xl tracking-widest h-14 font-mono"
           data-testid="input-otp"
         />
@@ -292,11 +304,14 @@ export default function PostJob() {
   const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(user?.firstJobId || null);
   const [otp, setOtp] = useState("");
+  const [emailFallbackCode, setEmailFallbackCode] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState(verifyMode && user && !user.emailVerified ? true : false);
   const [showPhoneVerify, setShowPhoneVerify] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [showProcessing, setShowProcessing] = useState(false);
+  const [jobPhotos, setJobPhotos] = useState<UploadedAsset[]>([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
   // Category questionnaire answers
   const [catAnswers, setCatAnswers] = useState<Record<string, string | string[]>>({});
@@ -350,6 +365,51 @@ export default function PostJob() {
   const debouncedTitle = useDebounce(job.title, 600);
   const debouncedDescription = useDebounce(job.description, 600);
   const debouncedLocation = useDebounce(job.locationText, 600);
+
+  const handlePhotoUpload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const availableSlots = Math.max(0, 5 - jobPhotos.length);
+    const nextFiles = Array.from(files).slice(0, availableSlots);
+    if (nextFiles.length === 0) {
+      toast({ title: "Photo limit reached", description: "You can attach up to 5 job photos.", variant: "destructive" });
+      return;
+    }
+
+    setUploadingPhotos(true);
+    try {
+      const uploaded = await Promise.all(
+        nextFiles.map((file) => uploadAsset("job-photo", file, { entityType: "job" })),
+      );
+      setJobPhotos((prev) => [...prev, ...uploaded].slice(0, 5));
+      toast({ title: "Photos uploaded", description: `${uploaded.length} file${uploaded.length === 1 ? "" : "s"} ready to attach.` });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingPhotos(false);
+    }
+  };
+
+  const removePhoto = (assetId: string) => {
+    setJobPhotos((prev) => prev.filter((asset) => asset.id !== assetId));
+  };
+
+  const handleOtpResend = async () => {
+    const res = await apiRequest("POST", "/api/onboarding/customer/resend", {});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    setEmailFallbackCode(data.challenge?.deliveryMode === "DEV_FALLBACK" ? data.challenge.fallbackCode ?? null : null);
+    toast({
+      title: data.alreadyVerified ? "Already verified" : "Code resent",
+      description:
+        data.challenge?.deliveryMode === "DEV_FALLBACK" && data.challenge.fallbackCode
+          ? `Provider fallback is active locally. Use ${data.challenge.fallbackCode}.`
+          : "Check your email for the latest code.",
+    });
+  };
 
   const handleAiOnboardingComplete = (data: AiOnboardingData) => {
     setJob({
@@ -424,7 +484,11 @@ export default function PostJob() {
         if (hiringIntent) extras.push(`Timeline: ${hiringIntent}`);
         enrichedDescription += "\n\n[Additional details]\n" + extras.join("\n");
       }
-      const jobPayload = { ...job, description: enrichedDescription };
+      const jobPayload = {
+        ...job,
+        description: enrichedDescription,
+        mediaUploadIds: jobPhotos.map((asset) => asset.id),
+      };
 
       if (isLoggedIn) {
         // Gate: verified phone required to publish — one-time, skipped once verified
@@ -472,6 +536,7 @@ export default function PostJob() {
       setTokens(data.accessToken, data.refreshToken);
       setJobId(data.jobId);
       setNeedsVerify(true);
+      setEmailFallbackCode(data.challenge?.deliveryMode === "DEV_FALLBACK" ? data.challenge.fallbackCode ?? null : null);
       await refreshUser();
       // Invalidate jobs cache so dashboard shows the new DRAFT job immediately
       await queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
@@ -490,6 +555,7 @@ export default function PostJob() {
       const res = await apiRequest("POST", "/api/onboarding/customer/verify", { otp });
       if (!res.ok) throw new Error((await res.json()).error);
       await refreshUser();
+      setEmailFallbackCode(null);
       // Invalidate jobs cache so dashboard reflects DRAFT→LIVE transition immediately
       await queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       setStep(4);
@@ -610,6 +676,49 @@ export default function PostJob() {
               )}
             </div>
 
+            {isLoggedIn && (
+              <div className="space-y-3 rounded-2xl border border-border/50 bg-card/60 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label className="text-sm font-medium">Job photos</Label>
+                    <p className="text-xs text-muted-foreground mt-1">Optional. Add up to 5 images to help professionals quote accurately.</p>
+                  </div>
+                  <Input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    multiple
+                    className="max-w-[220px]"
+                    onChange={(e) => {
+                      void handlePhotoUpload(e.target.files);
+                      e.currentTarget.value = "";
+                    }}
+                    disabled={uploadingPhotos || jobPhotos.length >= 5}
+                  />
+                </div>
+
+                {jobPhotos.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {jobPhotos.map((asset) => (
+                      <div key={asset.id} className="rounded-xl border border-border/50 overflow-hidden bg-background">
+                        <div className="aspect-[4/3] bg-muted">
+                          <img src={asset.url} alt={asset.originalName} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="p-2 space-y-1">
+                          <p className="text-xs font-medium truncate">{asset.originalName}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] text-muted-foreground">{formatFileSize(asset.sizeBytes)}</p>
+                            <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => removePhoto(asset.id)}>
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {!isLoggedIn && (
               <>
                 <div className="grid grid-cols-2 gap-3">
@@ -706,7 +815,9 @@ export default function PostJob() {
             otp={otp}
             setOtp={setOtp}
             onVerify={handleOtpVerify}
+            onResend={handleOtpResend}
             loading={loading}
+            fallbackCode={emailFallbackCode}
           />
         )}
 
@@ -746,10 +857,12 @@ export default function PostJob() {
                 setStep(1);
                 setJobId(null);
                 setOtp("");
+                setEmailFallbackCode(null);
                 setNeedsVerify(false);
                 setAiAnalysis(null);
                 setAnalyzing(false);
                 setShowProcessing(false);
+                setJobPhotos([]);
                 setCatAnswers({});
                 setHiringIntent("");
                 setJob({ categoryId: "", title: "", description: "", budgetMin: "", budgetMax: "", urgency: "NORMAL", locationText: "", preferredDate: "" });

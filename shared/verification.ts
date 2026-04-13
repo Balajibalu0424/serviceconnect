@@ -1,5 +1,3 @@
-export const DEMO_OTP_CODE = "123456";
 export const VERIFICATION_CODE_TTL_MINUTES = 10;
 export const VERIFICATION_MAX_ATTEMPTS = 5;
 export const VERIFICATION_SESSION_TTL_HOURS = 24;
-
