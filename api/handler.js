@@ -53435,6 +53435,18 @@ function parseServiceAreasInput(value) {
   }
   return [];
 }
+function getRequestOrigin(req) {
+  const forwardedHostHeader = req.headers["x-forwarded-host"];
+  const forwardedProtoHeader = req.headers["x-forwarded-proto"];
+  const forwardedHost = Array.isArray(forwardedHostHeader) ? forwardedHostHeader[0] : forwardedHostHeader?.split(",")[0]?.trim();
+  const forwardedProto = Array.isArray(forwardedProtoHeader) ? forwardedProtoHeader[0] : forwardedProtoHeader?.split(",")[0]?.trim();
+  const host = forwardedHost || req.get("host");
+  if (!host) {
+    return process.env.APP_URL || "https://codebasefull.vercel.app";
+  }
+  const protocol = forwardedProto || (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+  return `${protocol}://${host}`;
+}
 function getUserNotificationPreferences(user) {
   return normalizeNotificationPreferences(user.notificationPreferences, user.role ?? void 0);
 }
@@ -56581,7 +56593,7 @@ async function registerRoutes(httpServer, app2) {
         tokenHash,
         expiresAt
       });
-      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password/${rawToken}`;
+      const resetLink = `${getRequestOrigin(req)}/#/reset-password/${rawToken}`;
       console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
       return res.json({ message: "If that email is registered you will receive a reset link shortly." });
     } catch (err) {

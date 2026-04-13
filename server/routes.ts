@@ -121,6 +121,28 @@ function parseServiceAreasInput(value: unknown): string[] | undefined {
   return [];
 }
 
+function getRequestOrigin(req: Request) {
+  const forwardedHostHeader = req.headers["x-forwarded-host"];
+  const forwardedProtoHeader = req.headers["x-forwarded-proto"];
+  const forwardedHost = Array.isArray(forwardedHostHeader)
+    ? forwardedHostHeader[0]
+    : forwardedHostHeader?.split(",")[0]?.trim();
+  const forwardedProto = Array.isArray(forwardedProtoHeader)
+    ? forwardedProtoHeader[0]
+    : forwardedProtoHeader?.split(",")[0]?.trim();
+  const host = forwardedHost || req.get("host");
+
+  if (!host) {
+    return process.env.APP_URL || "https://codebasefull.vercel.app";
+  }
+
+  const protocol =
+    forwardedProto ||
+    (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+
+  return `${protocol}://${host}`;
+}
+
 function getUserNotificationPreferences(user: { notificationPreferences?: NotificationPreferences | null; role?: string | null }) {
   return normalizeNotificationPreferences(user.notificationPreferences, user.role ?? undefined);
 }
@@ -3922,7 +3944,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // In production this would send an email via a mail provider.
       // For now we log the link so developers can test without SMTP configured.
-      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password/${rawToken}`;
+      const resetLink = `${getRequestOrigin(req)}/#/reset-password/${rawToken}`;
       console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
 
       // TODO: replace console.log with actual email send, e.g.:
