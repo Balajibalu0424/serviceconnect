@@ -1794,7 +1794,7 @@ Compatibility fallback retained for older local setups only:
 - Updated customer/pro/dashboard/booking/notification/job-feed deep links to use route-based conversation URLs.
 - Hardened `highlight` query handling in `client/src/pages/pro/JobFeed.tsx` for hash-path deep links.
 - Fixed the customer missing-job fallback CTA to route back to `/my-jobs` instead of the invalid `/jobs`.
-- Fixed the missing-conversation state race in `client/src/pages/customer/Chat.tsx`.
+- Fixed the missing-conversation state race in `client/src/pages/customer/Chat.tsx` by deriving the selected thread directly from the route instead of keeping a second local selection state.
 - Added `client/src/pages/customer/Chat.test.tsx` to lock the invalid-conversation fallback behavior.
 
 ### Schema / API Updates
@@ -1886,7 +1886,7 @@ All secrets remain env-only. No credentials are stored in source.
 - Customer booking detail still rendered the verified booking timeline on production.
 - Customer chat selection now keeps the URL in sync as `#/chat/<conversationId>` and browser back navigation returns cleanly to `#/chat`.
 - Missing job deep link now resolves to the graceful fallback screen with a valid return path.
-- Missing conversation deep-link fallback was fixed after the first live pass exposed the route-state race; final production verification for that exact route was rerun on the follow-up deploy.
+- Missing conversation deep-link fallback now renders the correct production empty-state (`This conversation is no longer available.` + `Back to inbox`) on the final follow-up deploy after the route-derived selection fix.
 
 ### Remaining Limitations
 
