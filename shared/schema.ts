@@ -56,7 +56,6 @@ export const verificationChannelEnum = pgEnum("verification_channel", ["EMAIL", 
 export const verificationPurposeEnum = pgEnum("verification_purpose", ["ONBOARDING", "PHONE_UPDATE"]);
 export const uploadPurposeEnum = pgEnum("upload_purpose", ["JOB_PHOTO", "PORTFOLIO_IMAGE", "VERIFICATION_DOCUMENT"]);
 export const uploadStatusEnum = pgEnum("upload_status", ["ACTIVE", "DELETED"]);
-export const authSourceEnum = pgEnum("auth_source", ["LEGACY", "CLERK_BRIDGE", "CLERK_NATIVE"]);
 
 // ─── Users & Auth ─────────────────────────────────────────────────────────────
 export const users = pgTable("users", {
@@ -64,9 +63,6 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   phone: text("phone"),
   passwordHash: text("password_hash").notNull(),
-  clerkUserId: text("clerk_user_id"),
-  authSource: authSourceEnum("auth_source").notNull().default("LEGACY"),
-  legacyAuthMigratedAt: timestamp("legacy_auth_migrated_at"),
   role: userRoleEnum("role").notNull().default("CUSTOMER"),
   status: userStatusEnum("status").notNull().default("ACTIVE"),
   firstName: text("first_name").notNull(),
@@ -85,7 +81,6 @@ export const users = pgTable("users", {
 }, (t) => [
   index("users_role_idx").on(t.role),
   index("users_status_idx").on(t.status),
-  uniqueIndex("users_clerk_user_id_idx").on(t.clerkUserId),
 ]);
 
 export const userSessions = pgTable("user_sessions", {

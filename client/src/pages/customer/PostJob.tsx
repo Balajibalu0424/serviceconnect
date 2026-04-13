@@ -223,8 +223,6 @@ function OtpStep({ email, otp, setOtp, onVerify, onResend, loading, fallbackCode
   }, [resendCooldown]);
 
   const handleResend = async () => {
-    // NOTE: Real email OTP delivery is deferred (requires SendGrid/Resend integration).
-    // This button shows UI readiness — in demo mode the code remains centralized.
     setResending(true);
     try {
       await onResend();
@@ -247,7 +245,7 @@ function OtpStep({ email, otp, setOtp, onVerify, onResend, loading, fallbackCode
         <p className="text-muted-foreground">Enter the 6-digit code sent to <strong>{email}</strong></p>
         {fallbackCode && (
           <p className="text-xs text-amber-700 dark:text-amber-300 font-medium mt-1 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-3 py-1.5 inline-block">
-            Provider fallback is active locally. Use code <strong className="font-mono tracking-widest">{fallbackCode}</strong>
+            Fallback verification is active. Use code <strong className="font-mono tracking-widest">{fallbackCode}</strong>
           </p>
         )}
       </div>
@@ -406,7 +404,7 @@ export default function PostJob() {
       title: data.alreadyVerified ? "Already verified" : "Code resent",
       description:
         data.challenge?.deliveryMode === "DEV_FALLBACK" && data.challenge.fallbackCode
-          ? `Provider fallback is active locally. Use ${data.challenge.fallbackCode}.`
+          ? `Fallback verification is active. Use ${data.challenge.fallbackCode}.`
           : "Check your email for the latest code.",
     });
   };

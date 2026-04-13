@@ -2057,3 +2057,93 @@ All secrets remain env-only. No credentials are stored in source.
   - make phone optional for migrated users, or
   - enable a supported phone strategy/country configuration for the target market
 - Any Clerk credentials shared in chat should be rotated before production use.
+
+## Session 13 — Clerk Rollback to Backend Auth
+
+### Objective
+
+- Removed the in-progress Clerk migration from the active code path.
+- Restored ServiceConnect to the existing backend JWT auth flow as the only supported auth mode.
+- Kept the Resend email and Twilio Verify OTP architecture intact so verification remains provider-backed without Clerk.
+
+### Root Cause
+
+- The Clerk migration added duplicate auth modes, webhook sync, and sign-in ticket handling on top of the existing backend auth stack.
+- That extra layer was no longer desired and created unnecessary complexity while email/SMS verification is already handled separately by Resend and Twilio.
+
+### What Changed
+
+- Removed Clerk provider bootstrapping from the frontend app entry.
+- Replaced the dual-mode auth context with the original backend-token auth provider only.
+- Removed Clerk token resolver logic from the shared API client.
+- Removed Clerk sign-in ticket handling from onboarding completion.
+- Removed Clerk middleware, Clerk webhook handling, and Clerk bridge/session issuance from the backend.
+- Removed Clerk password / verification sync hooks from password reset, change-password, and OTP verification endpoints.
+- Removed Clerk-specific schema fields from the app schema surface:
+  - `users.clerkUserId`
+  - `users.authSource`
+  - `users.legacyAuthMigratedAt`
+- Removed Clerk env placeholders from `.env.example`.
+
+### Default Auth State Now
+
+- Login, refresh, logout, and protected routes use the existing backend JWT + refresh-token session flow only.
+- New onboarding completion now always returns legacy `accessToken` + `refreshToken`.
+- Email OTP remains handled by the Resend-backed verification service when configured.
+- SMS OTP remains handled by the Twilio Verify-backed verification service when configured.
+
+### Files Changed
+
+- `.env.example`
+- `client/src/components/onboarding/RoleAwareOnboarding.tsx`
+- `client/src/contexts/AuthContext.tsx`
+- `client/src/lib/queryClient.ts`
+- `client/src/main.tsx`
+- `implementation_report1.md`
+- `package-lock.json`
+- `package.json`
+- `server/auth.ts`
+- `server/index.ts`
+- `server/onboardingService.ts`
+- `server/routes.ts`
+- `shared/onboarding.ts`
+- `shared/schema.ts`
+
+### Notes
+
+- The generated `api/handler.js` bundle will be refreshed by the next build and will no longer include Clerk code once the updated source is built.
+- Existing database Clerk columns, if still present in a deployed database, are now unused by the application and can be dropped in a separate schema cleanup step if desired.
+
+## Session 14 — Temporary Master OTP Fallback
+
+### Objective
+
+- Keep onboarding and registration unblocked while Resend and Twilio Verify are still being configured.
+- Use `123456` as the temporary fallback OTP whenever the relevant provider is not configured.
+
+### What Changed
+
+- Added a centralized master OTP fallback code in `server/deliveryConfig.ts`.
+- Updated `server/verificationService.ts` so:
+  - provider-backed email OTP still uses a generated code when Resend is configured
+  - provider-backed SMS OTP still uses Twilio Verify when configured
+  - fallback mode now uses `123456` instead of a random code
+  - fallback mode is automatically allowed when the provider for that channel is not configured
+- Updated onboarding and verification UI copy so it no longer says the fallback is only local/dev.
+- Added `OTP_MASTER_CODE` and `OTP_MASTER_CODE_ENABLED` to `.env.example`.
+
+### Files Changed
+
+- `.env.example`
+- `client/src/components/auth/PhoneVerificationModal.tsx`
+- `client/src/components/onboarding/RoleAwareOnboarding.tsx`
+- `client/src/pages/customer/PostJob.tsx`
+- `implementation_report1.md`
+- `server/deliveryConfig.ts`
+- `server/verificationService.test.ts`
+- `server/verificationService.ts`
+
+### Notes
+
+- This is a temporary bypass and should be removed or disabled once real OTP delivery is confirmed end to end.
+- If you want to disable the master OTP later without changing code, set `OTP_MASTER_CODE_ENABLED=false`.

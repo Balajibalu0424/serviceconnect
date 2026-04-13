@@ -234,7 +234,7 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
   const search = useSearch();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user, isLoading: authLoading, refreshUser, completeSignInWithToken } = useAuth();
+  const { user, isLoading: authLoading, refreshUser } = useAuth();
   const { data: categories = [] } = useQuery<CategoryRecord[]>({ queryKey: ["/api/categories"] });
 
   const [session, setSession] = useState<OnboardingSessionState | null>(null);
@@ -422,7 +422,7 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
           title: `${channel === "PHONE" ? "Phone" : "Email"} code sent`,
           description:
             payload.challenge?.deliveryMode === "DEV_FALLBACK" && payload.challenge.fallbackCode
-              ? `Provider fallback is active locally. Use ${payload.challenge.fallbackCode}.`
+              ? `Fallback verification is active. Use ${payload.challenge.fallbackCode}.`
               : `Sent to ${payload.challenge?.maskedTarget ?? maskTarget(otpTarget, channel)}.`,
         });
       } catch (error) {
@@ -529,7 +529,7 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
         title: "Code resent",
         description:
           payload.challenge?.deliveryMode === "DEV_FALLBACK" && payload.challenge.fallbackCode
-            ? `Provider fallback is active locally. Use ${payload.challenge.fallbackCode}.`
+            ? `Fallback verification is active. Use ${payload.challenge.fallbackCode}.`
             : `Sent to ${payload.challenge?.maskedTarget ?? maskTarget(otpTarget, channel)}.`,
       });
     } catch (error) {
@@ -595,9 +595,7 @@ export default function RoleAwareOnboarding({ initialRole }: { initialRole?: Onb
         `/api/onboarding/sessions/${session.id}/complete`,
         { password },
       );
-      if (result.signInToken) {
-        await completeSignInWithToken(result.signInToken);
-      } else if (result.accessToken && result.refreshToken) {
+      if (result.accessToken && result.refreshToken) {
         setTokens(result.accessToken, result.refreshToken);
       }
       await refreshUser();

@@ -25,7 +25,6 @@ export function getApiBase() {
 }
 
 const TOKEN_KEYS = { access: "sc_access_token", refresh: "sc_refresh_token" } as const;
-let clerkTokenResolver: null | (() => Promise<string | null>) = null;
 
 function safeGetItem(key: string): string | null {
   try {
@@ -78,13 +77,9 @@ export function getRefreshToken() {
   return tokenStore.refreshToken;
 }
 
-export function registerClerkTokenResolver(resolver: (() => Promise<string | null>) | null) {
-  clerkTokenResolver = resolver;
-}
-
 export async function getAuthHeaders(extraHeaders: Record<string, string> = {}) {
   const headers: Record<string, string> = { ...extraHeaders };
-  const token = tokenStore.accessToken || (clerkTokenResolver ? await clerkTokenResolver().catch(() => null) : null);
+  const token = tokenStore.accessToken;
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }

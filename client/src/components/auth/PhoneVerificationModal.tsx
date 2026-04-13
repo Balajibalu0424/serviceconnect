@@ -42,7 +42,7 @@ export default function PhoneVerificationModal({
         title: "Code sent",
         description:
           data.deliveryMode === "DEV_FALLBACK" && data.fallbackCode
-            ? `Provider fallback is active locally. Use ${data.fallbackCode}.`
+            ? `Fallback verification is active. Use ${data.fallbackCode}.`
             : "Check your phone for the 6-digit verification code.",
       });
     } catch (e: any) {
@@ -131,7 +131,7 @@ export default function PhoneVerificationModal({
               />
               {fallbackCode && (
                 <p className="text-xs rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-                  Provider fallback is active locally. Use <span className="font-mono">{fallbackCode}</span>.
+                  Fallback verification is active. Use <span className="font-mono">{fallbackCode}</span>.
                 </p>
               )}
             </div>

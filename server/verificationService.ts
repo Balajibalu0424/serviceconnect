@@ -5,7 +5,7 @@ import { verificationChallenges } from "@shared/schema";
 import { comparePassword, hashPassword } from "./auth";
 import { VERIFICATION_CODE_TTL_MINUTES, VERIFICATION_MAX_ATTEMPTS } from "@shared/verification";
 import type { VerificationChannel } from "@shared/onboarding";
-import { canUseOtpFallback } from "./deliveryConfig";
+import { canUseOtpFallback, getOtpMasterCode } from "./deliveryConfig";
 import { sendOtpEmail } from "./emailService";
 import { checkPhoneVerificationCode, normalizePhoneNumber, sendPhoneVerificationCode } from "./smsVerifyService";
 
@@ -116,21 +116,24 @@ export async function invalidateVerificationChallenges(
 export async function issueVerificationChallenge(input: IssueChallengeInput): Promise<VerificationResult> {
   const normalizedTarget = normalizeTarget(input.channel, input.target);
   const expiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MINUTES * 60 * 1000);
-  const fallbackCode = generateOtpCode();
-  let deliveryMode: VerificationResult["deliveryMode"] = "DEV_FALLBACK";
-  let hashedCode = await hashPassword(fallbackCode);
+  const generatedCode = generateOtpCode();
+  const fallbackCode = getOtpMasterCode();
+  let deliveryMode: VerificationResult["deliveryMode"] = "PROVIDER";
+  let hashedCode = await hashPassword(generatedCode);
 
   await invalidateVerificationChallenges(input, input.channel);
 
   try {
-    deliveryMode = await deliverChallenge(input.channel, normalizedTarget, fallbackCode);
+    deliveryMode = await deliverChallenge(input.channel, normalizedTarget, generatedCode);
     if (input.channel === "PHONE") {
       hashedCode = await hashPassword(randomBytes(32).toString("hex"));
     }
   } catch (error) {
-    if (!canUseOtpFallback()) {
+    if (!canUseOtpFallback(input.channel)) {
       throw error;
     }
+    deliveryMode = "DEV_FALLBACK";
+    hashedCode = await hashPassword(fallbackCode);
   }
 
   await db.insert(verificationChallenges).values({

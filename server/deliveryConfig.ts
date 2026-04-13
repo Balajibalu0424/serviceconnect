@@ -1,3 +1,5 @@
+import type { VerificationChannel } from "@shared/onboarding";
+
 export class DeliveryConfigurationError extends Error {}
 
 function readEnv(name: string): string | null {
@@ -11,6 +13,10 @@ export function getAppUrl() {
 
 export function getOtpDefaultCountryCode() {
   return readEnv("OTP_DEFAULT_COUNTRY_CODE") || "+353";
+}
+
+export function getOtpMasterCode() {
+  return readEnv("OTP_MASTER_CODE") || "123456";
 }
 
 export function getResendConfig() {
@@ -46,6 +52,20 @@ export function isExplicitOtpFallbackEnabled() {
   return readEnv("OTP_ALLOW_DEV_FALLBACK") === "true";
 }
 
-export function canUseOtpFallback() {
-  return process.env.NODE_ENV !== "production" || isExplicitOtpFallbackEnabled();
+export function isOtpMasterCodeEnabled() {
+  return readEnv("OTP_MASTER_CODE_ENABLED") !== "false";
+}
+
+export function canUseOtpFallback(channel?: VerificationChannel) {
+  if (isExplicitOtpFallbackEnabled()) {
+    return true;
+  }
+
+  if (isOtpMasterCodeEnabled()) {
+    return true;
+  }
+
+  if (channel === "EMAIL") return !isResendConfigured();
+  if (channel === "PHONE") return !isTwilioVerifyConfigured();
+  return !isResendConfigured() || !isTwilioVerifyConfigured();
 }

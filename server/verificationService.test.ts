@@ -14,6 +14,7 @@ const sendOtpEmail = vi.fn();
 const sendPhoneVerificationCode = vi.fn();
 const checkPhoneVerificationCode = vi.fn();
 const canUseOtpFallback = vi.fn();
+const getOtpMasterCode = vi.fn();
 
 vi.mock("./db", () => ({
   db: {
@@ -34,6 +35,7 @@ vi.mock("./auth", () => ({
 
 vi.mock("./deliveryConfig", () => ({
   canUseOtpFallback,
+  getOtpMasterCode,
 }));
 
 vi.mock("./emailService", () => ({
@@ -60,6 +62,7 @@ beforeEach(() => {
   limitMock.mockResolvedValue([]);
 
   canUseOtpFallback.mockReturnValue(true);
+  getOtpMasterCode.mockReturnValue("123456");
   sendOtpEmail.mockResolvedValue(undefined);
   sendPhoneVerificationCode.mockResolvedValue("+353871234567");
   checkPhoneVerificationCode.mockResolvedValue(false);
@@ -111,11 +114,11 @@ describe("verificationService", () => {
 
     expect(result.success).toBe(true);
     expect(result.deliveryMode).toBe("DEV_FALLBACK");
-    expect(result.fallbackCode).toMatch(/^\d{6}$/);
+    expect(result.fallbackCode).toBe("123456");
     expect(insertedValues).toHaveBeenCalledWith(
       expect.objectContaining({
         target: "builder@example.com",
-        hashedCode: `hashed:${result.fallbackCode}`,
+        hashedCode: "hashed:123456",
       }),
     );
   });

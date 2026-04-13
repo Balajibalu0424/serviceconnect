@@ -16,8 +16,6 @@
     "db:seed": "tsx server/seed.ts"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.4",
-    "@clerk/express": "^2.1.0",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
