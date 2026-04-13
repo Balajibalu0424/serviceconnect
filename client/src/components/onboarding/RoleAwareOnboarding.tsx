@@ -37,6 +37,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { DEMO_OTP_CODE } from "@shared/verification";
+import { buildOnboardingPath } from "@/lib/publicRoutes";
 import type {
   CustomerJobDraft,
   OnboardingCompletionResult,
@@ -224,7 +225,7 @@ function RoleSelector({ onChoose }: { onChoose: (role: OnboardingRole) => void }
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export default function RoleAwareOnboarding() {
+export default function RoleAwareOnboarding({ initialRole }: { initialRole?: OnboardingRole }) {
   const search = useSearch();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -249,7 +250,7 @@ export default function RoleAwareOnboarding() {
   const autoSeededCategoryForSession = useRef<string | null>(null);
   const otpRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null));
 
-  const roleParam = useMemo(() => parseRoleParam(search), [search]);
+  const roleParam = useMemo(() => initialRole ?? parseRoleParam(search), [initialRole, search]);
   const categoryParam = useMemo(() => getCategoryParam(search), [search]);
 
   useEffect(() => {
@@ -275,9 +276,10 @@ export default function RoleAwareOnboarding() {
   const navigateForRole = useCallback(
     (role: OnboardingRole) => {
       const params = new URLSearchParams();
-      params.set("role", role);
-      if (role === "CUSTOMER" && categoryParam) params.set("category", categoryParam);
-      setLocation(`/register?${params.toString()}`);
+      if (role === "CUSTOMER" && categoryParam) {
+        params.set("category", categoryParam);
+      }
+      setLocation(buildOnboardingPath(role, params.toString()));
     },
     [categoryParam, setLocation],
   );

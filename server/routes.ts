@@ -3922,7 +3922,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // In production this would send an email via a mail provider.
       // For now we log the link so developers can test without SMTP configured.
-      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password?token=${rawToken}`;
+      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password/${rawToken}`;
       console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
 
       // TODO: replace console.log with actual email send, e.g.:

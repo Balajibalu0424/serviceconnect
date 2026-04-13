@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, setTokens } from "@/lib/queryClient";
+import { buildOnboardingPath } from "@/lib/publicRoutes";
 import { Wrench, Zap, Sparkles, Paintbrush, Leaf, Truck, Hammer, BookOpen, Camera, ChefHat, Globe, Dumbbell, Heart, Car, Scale, Calculator, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, Lightbulb, Flame, Clock, Users, Star, Shield, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -327,8 +328,7 @@ export default function PostJob() {
 
   useEffect(() => {
     if (!authLoading && !user) {
-      const nextSearch = search ? `&${search.replace(/^\?/, "")}` : "";
-      setLocation(`/register?role=CUSTOMER${nextSearch}`);
+      setLocation(buildOnboardingPath("CUSTOMER", search));
     }
   }, [authLoading, search, setLocation, user]);
 

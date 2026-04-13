@@ -1,5 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+import { Switch, Route, Redirect, useLocation, useSearch } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
@@ -60,6 +59,7 @@ import AdminAuditLogs from "@/pages/admin/AuditLogs";
 import AdminFeatureFlags from "@/pages/admin/FeatureFlags";
 import AdminMetrics from "@/pages/admin/Metrics";
 import AdminJobDetail from "@/pages/admin/JobDetail";
+import { buildOnboardingPath, buildResetPasswordPath, RESET_PASSWORD_PATH } from "@/lib/publicRoutes";
 
 function ProtectedRoute({ children, roles, requireVerified = false }: { children: React.ReactNode; roles?: string[]; requireVerified?: boolean }) {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -77,9 +77,40 @@ function ProtectedRoute({ children, roles, requireVerified = false }: { children
 // Unauthenticated users hitting /post-job get routed into the customer onboarding flow
 function PostJobRoute() {
   const { isLoading, isAuthenticated } = useAuth();
+  const search = useSearch();
   if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="text-muted-foreground">Loading...</div></div>;
-  if (!isAuthenticated) return <Redirect to="/register?role=CUSTOMER" />;
+  if (!isAuthenticated) return <Redirect to={buildOnboardingPath("CUSTOMER", search)} />;
   return <PostJob />;
+}
+
+function LegacyRegisterRoute() {
+  const [location] = useLocation();
+  const embeddedSearch = location.includes("?") ? location.slice(location.indexOf("?")) : "";
+  const role = new URLSearchParams(embeddedSearch.replace(/^\?/, "")).get("role");
+
+  if (role === "CUSTOMER" || role === "PROFESSIONAL") {
+    return <Redirect to={buildOnboardingPath(role, embeddedSearch)} />;
+  }
+
+  return <Redirect to={embeddedSearch ? `/register${embeddedSearch}` : "/register"} />;
+}
+
+function LegacyResetPasswordRoute() {
+  const [location] = useLocation();
+  const embeddedSearch = location.includes("?") ? location.slice(location.indexOf("?")) : "";
+  const token = new URLSearchParams(embeddedSearch.replace(/^\?/, "")).get("token");
+
+  if (token) {
+    return <Redirect to={buildResetPasswordPath(token)} />;
+  }
+
+  return <Redirect to={RESET_PASSWORD_PATH} />;
+}
+
+function LegacyPostJobQueryRoute() {
+  const [location] = useLocation();
+  const embeddedSearch = location.includes("?") ? location.slice(location.indexOf("?")) : "";
+  return <Redirect to={embeddedSearch ? `/post-job${embeddedSearch}` : "/post-job"} />;
 }
 
 function AppRoutes() {
@@ -88,12 +119,17 @@ function AppRoutes() {
       {/* Public */}
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
-      <Route path="/register" component={Register} />
       <Route path="/register/customer" component={RegisterCustomer} />
+      <Route path="/register/professional" component={ProOnboarding} />
+      <Route path={/^\/register\?.+$/} component={LegacyRegisterRoute} />
+      <Route path="/register" component={Register} />
       <Route path="/forgot-password" component={ForgotPassword} />
+      <Route path="/reset-password/:token" component={ResetPassword} />
+      <Route path={/^\/reset-password\?.+$/} component={LegacyResetPasswordRoute} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/services" component={Services} />
+      <Route path={/^\/post-job\?.+$/} component={LegacyPostJobQueryRoute} />
       <Route path="/post-job" component={PostJobRoute} />
       <Route path="/pro/onboarding" component={ProOnboarding} />
       <Route path="/pro/:id/profile" component={ProPublicProfile} />

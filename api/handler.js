@@ -55176,20 +55176,21 @@ async function registerRoutes(httpServer, app2) {
           eq(notifications.isRead, false),
           sql`(notifications.data->>'conversationId') = ${convId}`
         )).limit(1);
+        const notificationPreview = maskContactInfo(processedContent).masked.slice(0, 100);
         if (existingUnread) {
           await db.update(notifications).set({
-            message: processedContent.slice(0, 100),
+            message: notificationPreview,
             createdAt: /* @__PURE__ */ new Date()
           }).where(eq(notifications.id, existingUnread.id));
           pusher.trigger(`private-user-${p.userId}`, "new_notification", {
             type: "NEW_MESSAGE",
             title: "New message",
-            message: processedContent.slice(0, 100),
+            message: notificationPreview,
             data: { conversationId: convId }
           }).catch(() => {
           });
         } else {
-          await createNotification(p.userId, "NEW_MESSAGE", "New message", processedContent.slice(0, 100), { conversationId: convId });
+          await createNotification(p.userId, "NEW_MESSAGE", "New message", notificationPreview, { conversationId: convId });
         }
       }
       return res.status(201).json(msg);
@@ -56580,7 +56581,7 @@ async function registerRoutes(httpServer, app2) {
         tokenHash,
         expiresAt
       });
-      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password?token=${rawToken}`;
+      const resetLink = `${process.env.APP_URL || "https://codebasefull.vercel.app"}/#/reset-password/${rawToken}`;
       console.log(`[PASSWORD RESET] Reset link for ${user.email}: ${resetLink}`);
       return res.json({ message: "If that email is registered you will receive a reset link shortly." });
     } catch (err) {

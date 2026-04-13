@@ -5,10 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { extractResetToken } from "@/lib/publicRoutes";
 import { Eye, EyeOff, CheckCircle, ArrowLeft, Shield } from "lucide-react";
 
 export default function ResetPassword() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { toast } = useToast();
 
   const [token, setToken] = useState("");
@@ -19,16 +20,10 @@ export default function ResetPassword() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
-  // Extract token from the hash query string: #/reset-password?token=xxx
+  // Support both the canonical /reset-password/:token route and older query-string links.
   useEffect(() => {
-    const hash = window.location.hash; // e.g. "#/reset-password?token=abc123"
-    const queryStart = hash.indexOf("?");
-    if (queryStart !== -1) {
-      const params = new URLSearchParams(hash.slice(queryStart + 1));
-      const t = params.get("token");
-      if (t) setToken(t);
-    }
-  }, []);
+    setToken(extractResetToken(location, window.location.search, window.location.hash));
+  }, [location]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

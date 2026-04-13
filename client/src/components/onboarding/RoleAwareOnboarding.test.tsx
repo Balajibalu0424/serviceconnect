@@ -196,7 +196,7 @@ describe("RoleAwareOnboarding", () => {
 
     expect(await screen.findByText("I need help with a job")).toBeInTheDocument();
     fireEvent.click(screen.getByText("I need help with a job"));
-    expect(navigateMock).toHaveBeenCalledWith("/register?role=CUSTOMER");
+    expect(navigateMock).toHaveBeenCalledWith("/register/customer");
   });
 
   it("boots a customer session and advances from AI intake into review", async () => {
