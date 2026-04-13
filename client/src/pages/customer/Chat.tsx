@@ -71,8 +71,8 @@ export default function Chat() {
     return 0;
   });
 
-  const routeConversation = (conversations as any[]).find((c: any) => c.id === urlConvId);
-  const missingConversation = !!urlConvId && !loadingConvs && !routeConversation;
+  const activeConversationFromState = (conversations as any[]).find((c: any) => c.id === activeConvId);
+  const missingConversation = !!urlConvId && !loadingConvs && !activeConversationFromState;
   const selectedConvId = missingConversation ? null : activeConvId;
 
   const { data: msgList = [], isLoading: loadingMsgs } = useQuery<any[]>({
@@ -141,7 +141,9 @@ export default function Chat() {
     sendMessage.mutate(message.trim());
   };
 
-  const activeConv = (conversations as any[]).find((c: any) => c.id === selectedConvId);
+  const activeConv = missingConversation
+    ? null
+    : activeConversationFromState ?? (conversations as any[]).find((c: any) => c.id === selectedConvId);
   const isActiveConvFinished = activeConv ? isFinishedConv(activeConv) : false;
   const activeJobStatus = activeConv?.job?.status;
 
