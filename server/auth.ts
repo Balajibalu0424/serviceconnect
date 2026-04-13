@@ -5,7 +5,7 @@ import { db } from "./db";
 import { users, userSessions } from "@shared/schema";
 import { eq, and, gt } from "drizzle-orm";
 
-function readAuthSecret(name: "JWT_SECRET" | "REFRESH_SECRET", fallback: string) {
+function readRequiredAuthSecret(name: "JWT_SECRET", fallback: string) {
   const configured = process.env[name]?.trim();
   if (configured) {
     return configured;
@@ -18,8 +18,21 @@ function readAuthSecret(name: "JWT_SECRET" | "REFRESH_SECRET", fallback: string)
   return fallback;
 }
 
-const JWT_SECRET = readAuthSecret("JWT_SECRET", "serviceconnect-dev-jwt-secret");
-const REFRESH_SECRET = readAuthSecret("REFRESH_SECRET", "serviceconnect-dev-refresh-secret");
+function readRefreshSecret(jwtSecret: string) {
+  const configured = process.env.REFRESH_SECRET?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return jwtSecret;
+  }
+
+  return "serviceconnect-dev-refresh-secret";
+}
+
+const JWT_SECRET = readRequiredAuthSecret("JWT_SECRET", "serviceconnect-dev-jwt-secret");
+const REFRESH_SECRET = readRefreshSecret(JWT_SECRET);
 
 export function generateTokens(userId: string, role: string) {
   const accessToken = jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: "30m" });

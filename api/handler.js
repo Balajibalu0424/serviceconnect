@@ -62289,7 +62289,7 @@ var pusher = new Pusher({
 // server/auth.ts
 var import_jsonwebtoken = __toESM(require_jsonwebtoken(), 1);
 import bcrypt from "bcryptjs";
-function readAuthSecret(name, fallback) {
+function readRequiredAuthSecret(name, fallback) {
   const configured = process.env[name]?.trim();
   if (configured) {
     return configured;
@@ -62299,8 +62299,18 @@ function readAuthSecret(name, fallback) {
   }
   return fallback;
 }
-var JWT_SECRET = readAuthSecret("JWT_SECRET", "serviceconnect-dev-jwt-secret");
-var REFRESH_SECRET = readAuthSecret("REFRESH_SECRET", "serviceconnect-dev-refresh-secret");
+function readRefreshSecret(jwtSecret) {
+  const configured = process.env.REFRESH_SECRET?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (true) {
+    return jwtSecret;
+  }
+  return "serviceconnect-dev-refresh-secret";
+}
+var JWT_SECRET = readRequiredAuthSecret("JWT_SECRET", "serviceconnect-dev-jwt-secret");
+var REFRESH_SECRET = readRefreshSecret(JWT_SECRET);
 function generateTokens(userId, role) {
   const accessToken = import_jsonwebtoken.default.sign({ userId, role }, JWT_SECRET, { expiresIn: "30m" });
   const refreshToken = import_jsonwebtoken.default.sign({ userId, role }, REFRESH_SECRET, { expiresIn: "30d" });

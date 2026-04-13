@@ -1,11 +1,7 @@
 import type { UploadedAsset } from "@shared/uploads";
-import { getAccessToken } from "@/lib/queryClient";
+import { getAccessToken, getApiBase } from "@/lib/queryClient";
 
 type UploadRoutePurpose = "job-photo" | "portfolio-image" | "verification-document";
-
-function getApiBase() {
-  return import.meta.env.VITE_API_URL || "";
-}
 
 export function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
