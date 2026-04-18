@@ -564,6 +564,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  // Public testimonials — only returns real 4★+ reviews with a comment, names
+  // reduced to "First L." privacy form. Used by the marketing Testimonials page.
+  app.get("/api/public/testimonials", async (_req: Request, res: Response) => {
+    try {
+      const rows = await db
+        .select({
+          id: reviews.id,
+          rating: reviews.rating,
+          comment: reviews.comment,
+          createdAt: reviews.createdAt,
+          reviewerFirstName: users.firstName,
+          reviewerLastName: users.lastName,
+          revieweeId: reviews.revieweeId,
+        })
+        .from(reviews)
+        .leftJoin(users, eq(users.id, reviews.reviewerId))
+        .where(and(eq(reviews.isVisible, true), gte(reviews.rating, 4)))
+        .orderBy(desc(reviews.createdAt))
+        .limit(24);
+
+      const items = rows
+        .filter((r) => (r.comment ?? "").trim().length > 20)
+        .map((r) => ({
+          id: r.id,
+          rating: r.rating,
+          comment: (r.comment ?? "").trim(),
+          createdAt: r.createdAt,
+          name: `${r.reviewerFirstName ?? "A"} ${(r.reviewerLastName ?? "").slice(0, 1)}.`.trim(),
+        }));
+
+      res.json({ count: items.length, items });
+    } catch (err) {
+      console.error("public testimonials error:", err);
+      res.json({ count: 0, items: [] });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // CLIENT ERROR TELEMETRY — lightweight sink for React ErrorBoundary reports.
   // Unauthenticated on purpose (errors can happen on public pages too), but

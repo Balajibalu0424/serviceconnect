@@ -66,9 +66,9 @@ export default function Home() {
             <span className="font-bold text-lg tracking-tight">ServiceConnect</span>
           </Link>
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
-            <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
-            <a href="#categories" className="hover:text-foreground transition-colors">Services</a>
-            <a href="#testimonials" className="hover:text-foreground transition-colors">Testimonials</a>
+            <Link href="/how-it-works" className="hover:text-foreground transition-colors">How It Works</Link>
+            <Link href="/services" className="hover:text-foreground transition-colors">Services</Link>
+            <Link href="/testimonials" className="hover:text-foreground transition-colors">Testimonials</Link>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/login">

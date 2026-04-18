@@ -2287,3 +2287,77 @@ npm run db:migrate    # applies it
 | Versioned migrations | `drizzle-kit push` only | `generate` + `migrate` workflow |
 
 **Public-launch readiness:** cleared of all P0 blockers and all P1 items; remaining work is polish and secondary hardening (items 1–6 above).
+
+---
+
+## Session 14 — Public Marketing Pages (How It Works / Services / Testimonials)
+
+### Goal
+Replace the thin placeholder marketing surface with real, conversion-focused public pages that explain ServiceConnect to both sides of the marketplace, without inventing fake social proof.
+
+### What shipped
+
+**1. Shared chrome: `client/src/components/public/PublicShell.tsx`**
+- Fixed blur-glass top nav (logo, How It Works / Services / Testimonials, Sign In, I'm a Pro, Post a Job).
+- 4-column footer: Product / Get started / Legal / © ServiceConnect · Built in Ireland 🇮🇪.
+- Consistent chrome across all marketing pages; Home still uses its own bespoke nav but now links to the same standalone pages.
+
+**2. `client/src/pages/public/HowItWorks.tsx`**
+- Gradient hero + dual CTAs (Post a job / Join as a pro).
+- Two parallel 5-step tracks:
+  - **For customers:** Tell us what you need → Verified pros respond → Compare quotes and chat → Book and get it done → Review and follow up.
+  - **For professionals:** Create profile → Get verified → See matching jobs → Quote and win → Deliver great work.
+- `DIFFERENTIATORS` block (real identity, AI-quality matching, pros only pay for leads they want, aftercare).
+- `FAQS` as native `<details>` accordions (5 Qs covering pricing, verification, refunds, no-show protection, Ireland coverage).
+- Closing gradient CTA card.
+
+**3. `client/src/pages/public/Services.tsx` (rebuilt)**
+- 12 curated `GROUPS` with icon + gradient tone + blurb + 4 examples each: Home repairs, Finishes, Outdoor, Cleaning, Moves, Events, Learning, Pets, Auto, Digital, Professional services, Business support.
+- Each group card resolves its `slugs[]` against the live `/api/categories` feed and renders clickable pill chips → `/post-job?category=<id>`.
+- Below curated groups, an A–Z grid of **all** live categories rendered only when `categories.length > 0` (graceful when DB isn't seeded).
+- Trust strip (Verified pros / AI quality / Moderation) + dual-CTA (customer gradient + pro outline).
+
+**4. `client/src/pages/public/Testimonials.tsx` (honest beta approach)**
+- Queries a new `/api/public/testimonials` endpoint.
+- **If real approved reviews exist:** renders cards with `StarRow`, privacy-reduced name (`First L.`), creation date, "Verified customer" tag.
+- **If none exist yet:** renders a clearly-labelled dashed-border block — *"No approved public reviews yet — and we won't invent them."* — explaining why. No fabricated quotes.
+- `BETA_PILLARS` framed as our standards (real people on both sides, quotes that make sense, visible moderation, aftercare) — not as quoted user testimony.
+- Trust-in-practice section (reviews only from completed jobs, report in one tap, right of reply for pros).
+
+**5. Backend: `server/routes.ts` → `GET /api/public/testimonials`**
+- Selects visible reviews with `rating >= 4`, joined to reviewer `users` row.
+- Filters out comments under 20 chars.
+- Privacy-reduces name to `First L.`.
+- Returns `{ count, items[] }`, capped at 24 rows, ordered by `createdAt desc`.
+
+### Files changed
+- `client/src/App.tsx` — imported and registered `/how-it-works` and `/testimonials` routes.
+- `client/src/pages/public/Home.tsx` — swapped three in-page `<a href="#...">` nav anchors for `wouter` `Link`s pointing to the new standalone pages.
+- `client/src/components/public/PublicShell.tsx` — new.
+- `client/src/pages/public/HowItWorks.tsx` — new.
+- `client/src/pages/public/Services.tsx` — rewritten (was a ~45 line placeholder).
+- `client/src/pages/public/Testimonials.tsx` — new.
+- `server/routes.ts` — added `/api/public/testimonials`.
+
+### How the pages are linked into the site
+- Registered in `App.tsx` under the public routes block (`/how-it-works`, `/services`, `/testimonials`).
+- Reached from: Home's top nav, `PublicShell`'s top nav, and the footer's Product column on every marketing page.
+- Cross-linked: each marketing page ends in a dual CTA (`/post-job` + `/register/professional`), and Services links each group's pill chips into `/post-job?category=<id>` to carry the user's intent into onboarding.
+
+### Honesty approach (testimonials)
+- No fabricated quotes, no stock photos presented as real customers, no "trusted by 10,000+ users" claims.
+- Real reviews surface automatically the moment a customer completes a job and leaves a 4★+ review with a comment longer than 20 chars.
+- Until then, the page openly tells visitors why the feed is empty — framed as a beta-transparency feature, not a gap.
+
+### Known limitations
+1. No customer-logo strip (we're consumer-side, not B2B, so not applicable).
+2. No press / press-quote section yet — would require real coverage.
+3. `Services` uses curated group blurbs that stay static; future work can let admins edit group copy via CMS.
+4. `How It Works` FAQs are hard-coded; moving them into a DB-backed table would let support iterate without deploys.
+5. Testimonials endpoint is uncached — at current volumes this is fine; introduce a short edge cache if `reviews` grows materially.
+
+### Verification
+- `npm run check` — clean (tsc).
+- `npm run build` — client + server + vercel handler all built.
+- `npm test` — 15/15 passing.
+

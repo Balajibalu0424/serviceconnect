@@ -17,6 +17,8 @@ import Register from "@/pages/public/Register";
 import RegisterCustomer from "@/pages/public/RegisterCustomer";
 import AdminLogin from "@/pages/public/AdminLogin";
 import Services from "@/pages/public/Services";
+import HowItWorks from "@/pages/public/HowItWorks";
+import Testimonials from "@/pages/public/Testimonials";
 import ProOnboarding from "@/pages/public/ProOnboarding";
 import ProPublicProfile from "@/pages/public/ProProfile";
 import ForgotPassword from "@/pages/public/ForgotPassword";
@@ -135,6 +137,8 @@ function AppRoutes() {
       <Route path="/legal/terms" component={TermsOfService} />
       <Route path="/legal/cookies" component={CookiesPolicy} />
       <Route path="/services" component={Services} />
+      <Route path="/how-it-works" component={HowItWorks} />
+      <Route path="/testimonials" component={Testimonials} />
       <Route path={/^\/post-job\?.+$/} component={LegacyPostJobQueryRoute} />
       <Route path="/post-job" component={PostJobRoute} />
       <Route path="/pro/onboarding" component={ProOnboarding} />
