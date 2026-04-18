@@ -607,6 +607,39 @@ export const adminAuditLogs = pgTable("admin_audit_logs", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => [index("audit_admin_idx").on(t.adminId)]);
 
+// ─── User Reports (trust & safety) ────────────────────────────────────────────
+export const reportTargetTypeEnum = pgEnum("report_target_type", ["MESSAGE", "USER", "REVIEW", "JOB"]);
+export const reportStatusEnum = pgEnum("report_status", ["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"]);
+export const reportReasonEnum = pgEnum("report_reason", [
+  "SPAM",
+  "HARASSMENT",
+  "FRAUD",
+  "INAPPROPRIATE",
+  "CONTACT_SHARING",
+  "OFF_PLATFORM",
+  "SAFETY",
+  "OTHER",
+]);
+
+export const userReports = pgTable("user_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reporterId: varchar("reporter_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetType: reportTargetTypeEnum("target_type").notNull(),
+  targetId: varchar("target_id").notNull(),
+  targetUserId: varchar("target_user_id").references(() => users.id, { onDelete: "set null" }),
+  reason: reportReasonEnum("reason").notNull(),
+  details: text("details"),
+  status: reportStatusEnum("status").notNull().default("OPEN"),
+  reviewedBy: varchar("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("user_reports_reporter_idx").on(t.reporterId),
+  index("user_reports_target_idx").on(t.targetType, t.targetId),
+  index("user_reports_status_idx").on(t.status),
+]);
+
 export const platformMetrics = pgTable("platform_metrics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   metricName: text("metric_name").notNull(),
@@ -698,3 +731,5 @@ export type VerificationChallenge = typeof verificationChallenges.$inferSelect;
 export type InsertVerificationChallenge = typeof verificationChallenges.$inferInsert;
 export type Upload = typeof uploads.$inferSelect;
 export type InsertUpload = typeof uploads.$inferInsert;
+export type UserReport = typeof userReports.$inferSelect;
+export type InsertUserReport = typeof userReports.$inferInsert;

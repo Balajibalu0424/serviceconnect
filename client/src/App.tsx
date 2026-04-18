@@ -7,6 +7,7 @@ import { SocketProvider } from "@/contexts/SocketContext";
 import { CallProvider } from "@/contexts/CallContext";
 import { CallOverlay } from "@/components/CallOverlay";
 import AiAssistantWidget from "@/components/ai/AiAssistantWidget";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 
 // Public pages
@@ -20,6 +21,7 @@ import ProOnboarding from "@/pages/public/ProOnboarding";
 import ProPublicProfile from "@/pages/public/ProProfile";
 import ForgotPassword from "@/pages/public/ForgotPassword";
 import ResetPassword from "@/pages/public/ResetPassword";
+import { PrivacyPolicy, TermsOfService, CookiesPolicy } from "@/pages/public/Legal";
 
 // Customer pages
 import CustomerDashboard from "@/pages/customer/Dashboard";
@@ -59,6 +61,7 @@ import AdminAuditLogs from "@/pages/admin/AuditLogs";
 import AdminFeatureFlags from "@/pages/admin/FeatureFlags";
 import AdminMetrics from "@/pages/admin/Metrics";
 import AdminJobDetail from "@/pages/admin/JobDetail";
+import AdminReports from "@/pages/admin/Reports";
 import { buildOnboardingPath, buildResetPasswordPath, RESET_PASSWORD_PATH } from "@/lib/publicRoutes";
 
 function ProtectedRoute({ children, roles, requireVerified = false }: { children: React.ReactNode; roles?: string[]; requireVerified?: boolean }) {
@@ -128,6 +131,9 @@ function AppRoutes() {
       <Route path={/^\/reset-password\?.+$/} component={LegacyResetPasswordRoute} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/admin/login" component={AdminLogin} />
+      <Route path="/legal/privacy" component={PrivacyPolicy} />
+      <Route path="/legal/terms" component={TermsOfService} />
+      <Route path="/legal/cookies" component={CookiesPolicy} />
       <Route path="/services" component={Services} />
       <Route path={/^\/post-job\?.+$/} component={LegacyPostJobQueryRoute} />
       <Route path="/post-job" component={PostJobRoute} />
@@ -243,6 +249,9 @@ function AppRoutes() {
       <Route path="/admin/metrics">
         <ProtectedRoute roles={["ADMIN"]}><AdminMetrics /></ProtectedRoute>
       </Route>
+      <Route path="/admin/reports">
+        <ProtectedRoute roles={["ADMIN"]}><AdminReports /></ProtectedRoute>
+      </Route>
 
       <Route>
         <div className="min-h-screen flex items-center justify-center bg-background">
@@ -259,17 +268,19 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <SocketProvider>
-          <CallProvider>
-            <AppRoutes />
-            <CallOverlay />
-            <AiAssistantWidget />
-            <Toaster />
-          </CallProvider>
-        </SocketProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <SocketProvider>
+            <CallProvider>
+              <AppRoutes />
+              <CallOverlay />
+              <AiAssistantWidget />
+              <Toaster />
+            </CallProvider>
+          </SocketProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

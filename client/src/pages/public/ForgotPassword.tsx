@@ -6,21 +6,27 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Mail, Sparkles, Shield, Zap, CheckCircle } from "lucide-react";
+import { useTurnstile } from "@/components/Turnstile";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const { toast } = useToast();
+  const captcha = useTurnstile("forgot-password");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!captcha.ready) {
+      toast({ title: "Please complete the verification", variant: "destructive" });
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, turnstileToken: captcha.token ?? undefined }),
       });
       // Always show success to prevent email enumeration
       setSent(true);
@@ -121,10 +127,11 @@ export default function ForgotPassword() {
                         data-testid="input-email"
                       />
                     </div>
+                    {captcha.widget}
                     <Button
                       type="submit"
                       className="w-full h-11 bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-lg shadow-blue-500/25 rounded-xl font-semibold gap-2"
-                      disabled={loading}
+                      disabled={loading || !captcha.ready}
                       data-testid="button-submit"
                     >
                       {loading ? "Sending..." : "Send reset link"}

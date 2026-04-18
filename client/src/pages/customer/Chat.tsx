@@ -13,6 +13,7 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useLocation, useSearch } from "wouter";
 import { buildConversationPath, extractConversationId, getChatBasePath } from "@shared/chatRoutes";
+import { ReportDialog } from "@/components/ReportDialog";
 
 const TERMINAL_JOB_STATUSES = ["COMPLETED", "CLOSED"];
 
@@ -336,7 +337,7 @@ export default function Chat() {
                       );
                     }
                     return (
-                      <div key={msg.id} className={cn("flex", isMe ? "justify-end" : "justify-start")}>
+                      <div key={msg.id} className={cn("group flex items-start gap-1", isMe ? "justify-end" : "justify-start")}>
                         <div className={cn(
                           "max-w-[75%] rounded-2xl px-4 py-2.5 text-sm",
                           isMe
@@ -351,6 +352,11 @@ export default function Chat() {
                             {formatDistanceToNow(new Date(msg.createdAt), { addSuffix: true })}
                           </p>
                         </div>
+                        {!isMe && (
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity pt-1">
+                            <ReportDialog targetType="MESSAGE" targetId={msg.id} iconOnly />
+                          </div>
+                        )}
                       </div>
                     );
                   })

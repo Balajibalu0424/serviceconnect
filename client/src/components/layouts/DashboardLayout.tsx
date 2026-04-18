@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Briefcase, MessageSquare, Bell, Settings,
   LogOut, Menu, X, CreditCard, Zap, Users, Star, ChevronRight,
   ListChecks, Home, Dices, ShieldCheck, HelpCircle,
-  FileText, CalendarCheck, BarChart3, FolderTree
+  FileText, CalendarCheck, BarChart3, FolderTree, Flag
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -55,6 +55,7 @@ function AdminNav(): NavItem[] {
     { label: "Chat Monitor", href: "/admin/chat", icon: MessageSquare },
     { label: "Payments", href: "/admin/payments", icon: CreditCard },
     { label: "Support", href: "/admin/support", icon: ShieldCheck },
+    { label: "Reports", href: "/admin/reports", icon: Flag },
     { label: "Analytics", href: "/admin/metrics", icon: BarChart3 },
     { label: "Audit Logs", href: "/admin/audit", icon: ListChecks },
     { label: "Feature Flags", href: "/admin/flags", icon: Zap },

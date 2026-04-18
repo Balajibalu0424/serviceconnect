@@ -10,7 +10,8 @@ import {
   messages, creditPackages, creditTransactions, payments,
   spinWheelEvents, supportTickets, ticketMessages, notifications,
   adminAuditLogs, platformMetrics, featureFlags, callRequests,
-  faqArticles, cannedResponses, passwordResetTokens, uploads
+  faqArticles, cannedResponses, passwordResetTokens, uploads,
+  userReports
 } from "@shared/schema";
 import { pusher } from "./pusher";
 import {
@@ -74,9 +75,12 @@ import {
   onboardingSessionRateLimiter,
   otpSendRateLimiter,
   otpVerifyRateLimiter,
+  paymentIntentRateLimiter,
   quoteSubmissionRateLimiter,
+  reportRateLimiter,
   supportTicketRateLimiter,
 } from "./rateLimit";
+import { requireCaptcha, isCaptchaEnabled, getCaptchaSiteKey } from "./captcha";
 
 // ─── Pusher Initialization (Imported from ./pusher) ──────────────────────────
 
@@ -286,13 +290,28 @@ async function createNotification(userIdOrRole: string, type: string, title: str
 
     const dataAny = data as any;
     const jobId = dataAny?.jobId;
+    const quoteId = dataAny?.quoteId;
+    const bookingId = dataAny?.bookingId;
+    const conversationId = dataAny?.conversationId;
+    const reportId = dataAny?.reportId;
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const dupConditions: any[] = [
       eq(notifications.userId, userIdOrRole),
       eq(notifications.type, type),
       gte(notifications.createdAt, fiveMinutesAgo),
     ];
-    if (jobId) {
+    // Entity-specific dedup: only skip duplicates that target the exact same entity.
+    // This prevents e.g. two separate quote-received notifications (for different quotes
+    // on the same job) from being collapsed into one.
+    if (quoteId) {
+      dupConditions.push(sql`${notifications.data}->>'quoteId' = ${String(quoteId)}`);
+    } else if (bookingId) {
+      dupConditions.push(sql`${notifications.data}->>'bookingId' = ${String(bookingId)}`);
+    } else if (conversationId) {
+      dupConditions.push(sql`${notifications.data}->>'conversationId' = ${String(conversationId)}`);
+    } else if (reportId) {
+      dupConditions.push(sql`${notifications.data}->>'reportId' = ${String(reportId)}`);
+    } else if (jobId) {
       dupConditions.push(sql`${notifications.data}->>'jobId' = ${String(jobId)}`);
     }
     const recentDup = shouldSendInAppNotification(recipient, type)
@@ -533,6 +552,45 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   startAftercareScheduler(createNotification, null);
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // PUBLIC CONFIG — non-secret feature flags the frontend needs at boot.
+  // ═══════════════════════════════════════════════════════════════════════════
+  app.get("/api/public/config", async (_req: Request, res: Response) => {
+    res.json({
+      captcha: {
+        enabled: isCaptchaEnabled(),
+        siteKey: getCaptchaSiteKey(),
+        provider: "turnstile",
+      },
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLIENT ERROR TELEMETRY — lightweight sink for React ErrorBoundary reports.
+  // Unauthenticated on purpose (errors can happen on public pages too), but
+  // rate-limited to prevent abuse.
+  // ═══════════════════════════════════════════════════════════════════════════
+  app.post("/api/client-errors", reportRateLimiter, async (req: Request, res: Response) => {
+    try {
+      const { message, stack, componentStack, url, userAgent, timestamp } = req.body ?? {};
+      const safe = {
+        message: String(message ?? "").slice(0, 1000),
+        stack: String(stack ?? "").slice(0, 4000),
+        componentStack: String(componentStack ?? "").slice(0, 4000),
+        url: String(url ?? "").slice(0, 500),
+        userAgent: String(userAgent ?? "").slice(0, 500),
+        timestamp: String(timestamp ?? new Date().toISOString()).slice(0, 64),
+        ip: req.ip,
+      };
+      // eslint-disable-next-line no-console
+      console.error("[client-error]", JSON.stringify(safe));
+      res.status(204).end();
+    } catch (err) {
+      // Never 500 on telemetry — swallow and move on
+      res.status(204).end();
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // AUTH ROUTES
   // ═══════════════════════════════════════════════════════════════════════════
   app.post("/api/auth/register", async (req: Request, res: Response) => {
@@ -580,7 +638,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/auth/login", loginRateLimiter, async (req: Request, res: Response) => {
+  app.post("/api/auth/login", loginRateLimiter, requireCaptcha(), async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
       const [user] = await db.select().from(users).where(eq(users.email, email?.toLowerCase() || ""));
@@ -2805,7 +2863,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  app.post("/api/credits/stripe/payment-intent", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.post("/api/credits/stripe/payment-intent", requireAuth, paymentIntentRateLimiter, async (req: AuthRequest, res: Response) => {
     try {
       const { packageId } = req.body;
       if (!packageId || typeof packageId !== "string") {
@@ -2886,8 +2944,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
         case "charge.refunded": {
           const charge = event.data.object;
-          const updated = await markStripePaymentRefunded(charge.payment_intent as string, charge.id);
-          await completeStripeWebhookReceipt(receipt.receipt!.id, "PROCESSED", { paymentId: updated?.id ?? null });
+          const result = await markStripePaymentRefunded(charge.payment_intent as string, charge.id);
+          await completeStripeWebhookReceipt(receipt.receipt!.id, "PROCESSED", { paymentId: result.payment?.id ?? null });
+          if (result.payment && !result.alreadyReversed && result.creditsReversed > 0) {
+            await createNotification(
+              result.payment.userId,
+              "PAYMENT",
+              "Refund processed",
+              `Your refund has been processed. ${result.creditsReversed} credits were reversed from your balance.`,
+              {
+                paymentId: result.payment.id,
+                creditsReversed: result.creditsReversed,
+                newBalance: result.newBalance,
+              },
+            );
+          }
           break;
         }
         default:
@@ -3021,6 +3092,141 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.update(notifications).set({ isRead: true, readAt: new Date() })
       .where(and(eq(notifications.id, routeParam(req.params.id)), eq(notifications.userId, req.user!.userId)));
     return res.json({ success: true });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // USER REPORTS (trust & safety) — user-facing report submission
+  // ═══════════════════════════════════════════════════════════════════════════
+  const REPORT_TARGET_TYPES = new Set(["MESSAGE", "USER", "REVIEW", "JOB"]);
+  const REPORT_REASONS = new Set([
+    "SPAM",
+    "HARASSMENT",
+    "FRAUD",
+    "INAPPROPRIATE",
+    "CONTACT_SHARING",
+    "OFF_PLATFORM",
+    "SAFETY",
+    "OTHER",
+  ]);
+
+  app.post("/api/reports", requireAuth, reportRateLimiter, async (req: AuthRequest, res: Response) => {
+    try {
+      const reporterId = req.user!.userId;
+      const targetType = String(req.body?.targetType || "").toUpperCase();
+      const targetId = String(req.body?.targetId || "").trim();
+      const reason = String(req.body?.reason || "").toUpperCase();
+      const details = typeof req.body?.details === "string"
+        ? req.body.details.slice(0, 1000)
+        : null;
+
+      if (!REPORT_TARGET_TYPES.has(targetType)) {
+        return res.status(400).json({ error: "Invalid targetType" });
+      }
+      if (!REPORT_REASONS.has(reason)) {
+        return res.status(400).json({ error: "Invalid reason" });
+      }
+      if (!targetId) {
+        return res.status(400).json({ error: "targetId is required" });
+      }
+
+      // Resolve target user where possible for admin visibility.
+      let targetUserId: string | null = null;
+      try {
+        if (targetType === "USER") {
+          targetUserId = targetId;
+        } else if (targetType === "MESSAGE") {
+          const [m] = await db.select({ senderId: messages.senderId })
+            .from(messages).where(eq(messages.id, targetId)).limit(1);
+          targetUserId = m?.senderId ?? null;
+        } else if (targetType === "REVIEW") {
+          const [r] = await db.select({ reviewerId: reviews.reviewerId })
+            .from(reviews).where(eq(reviews.id, targetId)).limit(1);
+          targetUserId = r?.reviewerId ?? null;
+        } else if (targetType === "JOB") {
+          const [j] = await db.select({ customerId: jobs.customerId })
+            .from(jobs).where(eq(jobs.id, targetId)).limit(1);
+          targetUserId = j?.customerId ?? null;
+        }
+      } catch { /* best-effort only */ }
+
+      // Dedup: same reporter + same target within 24h
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const [dup] = await db.select({ id: userReports.id })
+        .from(userReports)
+        .where(and(
+          eq(userReports.reporterId, reporterId),
+          eq(userReports.targetType, targetType as any),
+          eq(userReports.targetId, targetId),
+          gte(userReports.createdAt, dayAgo),
+        ))
+        .limit(1);
+
+      if (dup) {
+        return res.json({ success: true, reportId: dup.id, deduplicated: true });
+      }
+
+      const [row] = await db.insert(userReports).values({
+        reporterId,
+        targetType: targetType as any,
+        targetId,
+        targetUserId,
+        reason: reason as any,
+        details,
+      }).returning();
+
+      // Notify admins (non-blocking)
+      createNotification(
+        "admin",
+        "MESSAGE_FLAGGED",
+        `New ${targetType.toLowerCase()} report`,
+        `Reason: ${reason}${details ? ` — ${details.slice(0, 80)}` : ""}`,
+        { reportId: row.id, targetType, targetId },
+      ).catch(() => {});
+
+      return res.status(201).json({ success: true, reportId: row.id });
+    } catch (err: any) {
+      console.error("Create report error:", err);
+      return res.status(500).json({ error: "Unable to submit report" });
+    }
+  });
+
+  app.get("/api/reports/mine", requireAuth, async (req: AuthRequest, res: Response) => {
+    const rows = await db.select().from(userReports)
+      .where(eq(userReports.reporterId, req.user!.userId))
+      .orderBy(desc(userReports.createdAt))
+      .limit(100);
+    return res.json(rows);
+  });
+
+  // Admin: list and action reports
+  app.get("/api/admin/reports", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    const status = typeof req.query.status === "string" ? req.query.status.toUpperCase() : null;
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1), 500);
+    const where = status && ["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"].includes(status)
+      ? eq(userReports.status, status as any)
+      : undefined;
+    const rows = await db.select().from(userReports)
+      .where(where as any)
+      .orderBy(desc(userReports.createdAt))
+      .limit(limit);
+    return res.json(rows);
+  });
+
+  app.patch("/api/admin/reports/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req: AuthRequest, res: Response) => {
+    const id = routeParam(req.params.id);
+    const nextStatus = String(req.body?.status || "").toUpperCase();
+    const note = typeof req.body?.reviewNote === "string" ? req.body.reviewNote.slice(0, 1000) : null;
+    if (!["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"].includes(nextStatus)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    const [updated] = await db.update(userReports).set({
+      status: nextStatus as any,
+      reviewNote: note,
+      reviewedBy: req.user!.userId,
+      reviewedAt: new Date(),
+    }).where(eq(userReports.id, id)).returning();
+    if (!updated) return res.status(404).json({ error: "Report not found" });
+    return res.json(updated);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -4374,7 +4580,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ═══════════════════════════════════════════════════════════════════════════
   // FORGOT PASSWORD — request a reset link
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post("/api/auth/forgot-password", forgotPasswordRateLimiter, async (req: Request, res: Response) => {
+  app.post("/api/auth/forgot-password", forgotPasswordRateLimiter, requireCaptcha(), async (req: Request, res: Response) => {
     try {
       const { email } = req.body;
       if (!email || typeof email !== "string") {

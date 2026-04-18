@@ -57302,6 +57302,9 @@ __export(schema_exports, {
   professionalProfiles: () => professionalProfiles,
   quoteStatusEnum: () => quoteStatusEnum,
   quotes: () => quotes,
+  reportReasonEnum: () => reportReasonEnum,
+  reportStatusEnum: () => reportStatusEnum,
+  reportTargetTypeEnum: () => reportTargetTypeEnum,
   reviews: () => reviews,
   serviceCategories: () => serviceCategories,
   spinPrizeEnum: () => spinPrizeEnum,
@@ -57316,6 +57319,7 @@ __export(schema_exports, {
   uploadStatusEnum: () => uploadStatusEnum,
   uploads: () => uploads,
   urgencyEnum: () => urgencyEnum,
+  userReports: () => userReports,
   userRoleEnum: () => userRoleEnum,
   userSessions: () => userSessions,
   userStatusEnum: () => userStatusEnum,
@@ -62220,6 +62224,36 @@ var adminAuditLogs = pgTable("admin_audit_logs", {
   ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`)
 }, (t) => [index("audit_admin_idx").on(t.adminId)]);
+var reportTargetTypeEnum = pgEnum("report_target_type", ["MESSAGE", "USER", "REVIEW", "JOB"]);
+var reportStatusEnum = pgEnum("report_status", ["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"]);
+var reportReasonEnum = pgEnum("report_reason", [
+  "SPAM",
+  "HARASSMENT",
+  "FRAUD",
+  "INAPPROPRIATE",
+  "CONTACT_SHARING",
+  "OFF_PLATFORM",
+  "SAFETY",
+  "OTHER"
+]);
+var userReports = pgTable("user_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reporterId: varchar("reporter_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetType: reportTargetTypeEnum("target_type").notNull(),
+  targetId: varchar("target_id").notNull(),
+  targetUserId: varchar("target_user_id").references(() => users.id, { onDelete: "set null" }),
+  reason: reportReasonEnum("reason").notNull(),
+  details: text("details"),
+  status: reportStatusEnum("status").notNull().default("OPEN"),
+  reviewedBy: varchar("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`)
+}, (t) => [
+  index("user_reports_reporter_idx").on(t.reporterId),
+  index("user_reports_target_idx").on(t.targetType, t.targetId),
+  index("user_reports_status_idx").on(t.status)
+]);
 var platformMetrics = pgTable("platform_metrics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   metricName: text("metric_name").notNull(),
@@ -65684,7 +65718,7 @@ async function issueVerificationChallenge(input) {
       hashedCode = await hashPassword(randomBytes(32).toString("hex"));
     }
   } catch (error) {
-    if (!canUseOtpFallback(input.channel)) {
+    if (!canUseOtpFallback(input.channel) || !fallbackCode) {
       throw error;
     }
     deliveryMode = "DEV_FALLBACK";
@@ -67266,6 +67300,67 @@ function buildKey(req) {
   }
   return ipKeyGenerator(req.ip || "unknown");
 }
+var UpstashRestStore = class {
+  windowMs = 0;
+  prefix;
+  url;
+  token;
+  constructor(opts) {
+    this.url = opts.url.replace(/\/+$/, "");
+    this.token = opts.token;
+    this.prefix = opts.prefix;
+  }
+  init(options) {
+    this.windowMs = options.windowMs;
+  }
+  async pipeline(commands) {
+    const res = await fetch(`${this.url}/pipeline`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(commands)
+    });
+    if (!res.ok) throw new Error(`Upstash error ${res.status}`);
+    return res.json();
+  }
+  fullKey(key) {
+    return `${this.prefix}:${key}`;
+  }
+  async increment(key) {
+    const fk = this.fullKey(key);
+    const ttlSec = Math.ceil(this.windowMs / 1e3);
+    const [incr, _expire, pttl] = await this.pipeline([
+      ["INCR", fk],
+      ["EXPIRE", fk, ttlSec, "NX"],
+      ["PTTL", fk]
+    ]);
+    const totalHits = Number(incr?.result ?? 0);
+    const ttlMs = Number(pttl?.result ?? this.windowMs);
+    return {
+      totalHits,
+      resetTime: new Date(Date.now() + (ttlMs > 0 ? ttlMs : this.windowMs))
+    };
+  }
+  async decrement(key) {
+    await this.pipeline([["DECR", this.fullKey(key)]]);
+  }
+  async resetKey(key) {
+    await this.pipeline([["DEL", this.fullKey(key)]]);
+  }
+};
+function upstashConfigured() {
+  return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+}
+function buildStore(prefix) {
+  if (!upstashConfigured()) return void 0;
+  return new UpstashRestStore({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    prefix: `sc:rl:${prefix}`
+  });
+}
 function buildLimiter(options) {
   return rate_limit_default({
     windowMs: options.windowMs,
@@ -67273,55 +67368,77 @@ function buildLimiter(options) {
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: buildKey,
+    store: buildStore(options.name),
     handler: (_req, res) => {
       res.status(429).json({ error: options.message });
     }
   });
 }
 var loginRateLimiter = buildLimiter({
+  name: "login",
   windowMs: 15 * 60 * 1e3,
   max: 10,
   message: "Too many sign-in attempts. Please try again shortly."
 });
 var forgotPasswordRateLimiter = buildLimiter({
+  name: "forgot",
   windowMs: 15 * 60 * 1e3,
   max: 5,
   message: "Too many password reset requests. Please wait before trying again."
 });
 var onboardingSessionRateLimiter = buildLimiter({
+  name: "onbsess",
   windowMs: 60 * 60 * 1e3,
   max: 25,
   message: "Too many onboarding attempts. Please wait before starting again."
 });
 var onboardingChatRateLimiter = buildLimiter({
+  name: "onbchat",
   windowMs: 60 * 1e3,
   max: 18,
   message: "You're sending onboarding messages too quickly. Please pause for a moment."
 });
 var otpSendRateLimiter = buildLimiter({
+  name: "otpsend",
   windowMs: 15 * 60 * 1e3,
   max: 5,
   message: "Too many verification code requests. Please wait before requesting another code."
 });
 var otpVerifyRateLimiter = buildLimiter({
+  name: "otpverify",
   windowMs: 15 * 60 * 1e3,
   max: 10,
   message: "Too many verification attempts. Please wait before trying another code."
 });
 var chatMessageRateLimiter = buildLimiter({
+  name: "chatmsg",
   windowMs: 60 * 1e3,
   max: 30,
   message: "You're sending messages too quickly. Please slow down."
 });
 var supportTicketRateLimiter = buildLimiter({
+  name: "support",
   windowMs: 60 * 60 * 1e3,
   max: 8,
   message: "Too many support requests. Please wait before opening another ticket."
 });
 var quoteSubmissionRateLimiter = buildLimiter({
+  name: "quote",
   windowMs: 15 * 60 * 1e3,
   max: 15,
   message: "Too many quote submissions. Please wait before sending another quote."
+});
+var paymentIntentRateLimiter = buildLimiter({
+  name: "payintent",
+  windowMs: 10 * 60 * 1e3,
+  max: 20,
+  message: "Too many checkout attempts. Please wait a few minutes before trying again."
+});
+var reportRateLimiter = buildLimiter({
+  name: "report",
+  windowMs: 15 * 60 * 1e3,
+  max: 20,
+  message: "Too many reports submitted. Please wait before submitting more."
 });
 
 // server/onboardingRoutes.ts
@@ -73126,17 +73243,79 @@ async function markStripePaymentFailed(intentId, reason) {
   return updated;
 }
 async function markStripePaymentRefunded(intentId, chargeId) {
-  const [payment] = await db.select().from(payments).where(eq(payments.stripePaymentId, intentId)).limit(1);
-  if (!payment) return null;
-  const [updated] = await db.update(payments).set({
-    status: "REFUNDED",
-    providerChargeId: chargeId ?? payment.providerChargeId,
-    metadata: {
-      ...payment.metadata ?? {},
-      refundRecordedAt: (/* @__PURE__ */ new Date()).toISOString()
+  return db.transaction(async (tx) => {
+    const [payment] = await tx.select().from(payments).where(eq(payments.stripePaymentId, intentId)).for("update").limit(1);
+    if (!payment) return { payment: null, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    const existingMeta = payment.metadata ?? {};
+    const alreadyReversed = existingMeta.creditsReversedAt ? true : false;
+    const [updated] = await tx.update(payments).set({
+      status: "REFUNDED",
+      providerChargeId: chargeId ?? payment.providerChargeId,
+      metadata: {
+        ...existingMeta,
+        refundRecordedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    }).where(eq(payments.id, payment.id)).returning();
+    if (alreadyReversed) {
+      return { payment: updated, creditsReversed: 0, alreadyReversed: true, newBalance: null };
     }
-  }).where(eq(payments.id, payment.id)).returning();
-  return updated;
+    if (payment.referenceType !== "CREDIT_PACKAGE") {
+      await tx.update(payments).set({
+        metadata: {
+          ...existingMeta,
+          refundRecordedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          creditsReversedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          creditsReversed: 0,
+          refundReason: "non-credit-payment"
+        }
+      }).where(eq(payments.id, payment.id));
+      return { payment: updated, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    }
+    const snapshot = existingMeta.packageSnapshot;
+    const grantedCredits = snapshot?.totalCredits ?? 0;
+    if (!payment.fulfilledAt || grantedCredits <= 0) {
+      await tx.update(payments).set({
+        metadata: {
+          ...existingMeta,
+          refundRecordedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          creditsReversedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          creditsReversed: 0,
+          refundReason: payment.fulfilledAt ? "no-snapshot" : "never-fulfilled"
+        }
+      }).where(eq(payments.id, payment.id));
+      return { payment: updated, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    }
+    const [user] = await tx.select({ balance: users.creditBalance }).from(users).where(eq(users.id, payment.userId)).for("update");
+    if (!user) {
+      return { payment: updated, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    }
+    const newBalance = user.balance - grantedCredits;
+    await tx.update(users).set({ creditBalance: newBalance }).where(eq(users.id, payment.userId));
+    await tx.insert(creditTransactions).values({
+      userId: payment.userId,
+      type: "REFUND",
+      amount: -grantedCredits,
+      balanceAfter: newBalance,
+      description: `Refund reversal for ${snapshot?.name ?? "credit purchase"} (${grantedCredits} credits)`,
+      referenceType: "PAYMENT",
+      referenceId: payment.id
+    });
+    await tx.update(payments).set({
+      metadata: {
+        ...existingMeta,
+        refundRecordedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        creditsReversedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        creditsReversed: grantedCredits,
+        balanceAfterReversal: newBalance
+      }
+    }).where(eq(payments.id, payment.id));
+    return {
+      payment: updated,
+      creditsReversed: grantedCredits,
+      alreadyReversed: false,
+      newBalance
+    };
+  });
 }
 async function registerStripeWebhookReceipt(event) {
   try {
@@ -73246,6 +73425,48 @@ function getUploadPublicUrl(upload) {
     return buildVerificationDocumentAccessUrl(upload.id);
   }
   return upload.storageUrl;
+}
+
+// server/captcha.ts
+var VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+function isCaptchaEnabled() {
+  return Boolean(process.env.TURNSTILE_SECRET_KEY);
+}
+function getCaptchaSiteKey() {
+  return process.env.TURNSTILE_SITE_KEY || null;
+}
+async function verifyToken(token, ip) {
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) return true;
+  if (!token) return false;
+  try {
+    const body = new URLSearchParams();
+    body.append("secret", secret);
+    body.append("response", token);
+    if (ip) body.append("remoteip", ip);
+    const res = await fetch(VERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
+    });
+    if (!res.ok) return false;
+    const json2 = await res.json();
+    return Boolean(json2?.success);
+  } catch (err) {
+    console.error("Turnstile verify error:", err);
+    return false;
+  }
+}
+function requireCaptcha() {
+  return async (req, res, next) => {
+    if (!isCaptchaEnabled()) return next();
+    const token = req.headers["x-turnstile-token"] || (req.body && typeof req.body === "object" ? req.body.turnstileToken : void 0) || "";
+    const ok = await verifyToken(token, req.ip);
+    if (!ok) {
+      return res.status(400).json({ error: "Captcha verification failed. Please refresh and try again." });
+    }
+    next();
+  };
 }
 
 // server/routes.ts
@@ -73418,13 +73639,25 @@ async function createNotification(userIdOrRole, type, title, message, data = {})
     if (!shouldSendInAppNotification(recipient, type) && !shouldSendEmailNotification(recipient, type)) return;
     const dataAny = data;
     const jobId = dataAny?.jobId;
+    const quoteId = dataAny?.quoteId;
+    const bookingId = dataAny?.bookingId;
+    const conversationId = dataAny?.conversationId;
+    const reportId = dataAny?.reportId;
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1e3);
     const dupConditions = [
       eq(notifications.userId, userIdOrRole),
       eq(notifications.type, type),
       gte(notifications.createdAt, fiveMinutesAgo)
     ];
-    if (jobId) {
+    if (quoteId) {
+      dupConditions.push(sql`${notifications.data}->>'quoteId' = ${String(quoteId)}`);
+    } else if (bookingId) {
+      dupConditions.push(sql`${notifications.data}->>'bookingId' = ${String(bookingId)}`);
+    } else if (conversationId) {
+      dupConditions.push(sql`${notifications.data}->>'conversationId' = ${String(conversationId)}`);
+    } else if (reportId) {
+      dupConditions.push(sql`${notifications.data}->>'reportId' = ${String(reportId)}`);
+    } else if (jobId) {
       dupConditions.push(sql`${notifications.data}->>'jobId' = ${String(jobId)}`);
     }
     const recentDup = shouldSendInAppNotification(recipient, type) ? await db.select({ id: notifications.id }).from(notifications).where(and(...dupConditions)).limit(1) : [];
@@ -73599,6 +73832,33 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   startAftercareScheduler(createNotification, null);
+  app2.get("/api/public/config", async (_req, res) => {
+    res.json({
+      captcha: {
+        enabled: isCaptchaEnabled(),
+        siteKey: getCaptchaSiteKey(),
+        provider: "turnstile"
+      }
+    });
+  });
+  app2.post("/api/client-errors", reportRateLimiter, async (req, res) => {
+    try {
+      const { message, stack, componentStack, url, userAgent, timestamp: timestamp2 } = req.body ?? {};
+      const safe = {
+        message: String(message ?? "").slice(0, 1e3),
+        stack: String(stack ?? "").slice(0, 4e3),
+        componentStack: String(componentStack ?? "").slice(0, 4e3),
+        url: String(url ?? "").slice(0, 500),
+        userAgent: String(userAgent ?? "").slice(0, 500),
+        timestamp: String(timestamp2 ?? (/* @__PURE__ */ new Date()).toISOString()).slice(0, 64),
+        ip: req.ip
+      };
+      console.error("[client-error]", JSON.stringify(safe));
+      res.status(204).end();
+    } catch (err) {
+      res.status(204).end();
+    }
+  });
   app2.post("/api/auth/register", async (req, res) => {
     const requestedRole = req.body?.role || "CUSTOMER";
     if (requestedRole === "CUSTOMER" || requestedRole === "PROFESSIONAL") {
@@ -73640,7 +73900,7 @@ async function registerRoutes(httpServer, app2) {
       return res.status(500).json({ error: e.message });
     }
   });
-  app2.post("/api/auth/login", loginRateLimiter, async (req, res) => {
+  app2.post("/api/auth/login", loginRateLimiter, requireCaptcha(), async (req, res) => {
     try {
       const { email, password } = req.body;
       const [user] = await db.select().from(users).where(eq(users.email, email?.toLowerCase() || ""));
@@ -75427,7 +75687,7 @@ async function registerRoutes(httpServer, app2) {
       code: "DIRECT_PURCHASE_DISABLED"
     });
   });
-  app2.post("/api/credits/stripe/payment-intent", requireAuth, async (req, res) => {
+  app2.post("/api/credits/stripe/payment-intent", requireAuth, paymentIntentRateLimiter, async (req, res) => {
     try {
       const { packageId } = req.body;
       if (!packageId || typeof packageId !== "string") {
@@ -75498,8 +75758,21 @@ async function registerRoutes(httpServer, app2) {
         }
         case "charge.refunded": {
           const charge = event.data.object;
-          const updated = await markStripePaymentRefunded(charge.payment_intent, charge.id);
-          await completeStripeWebhookReceipt(receipt.receipt.id, "PROCESSED", { paymentId: updated?.id ?? null });
+          const result = await markStripePaymentRefunded(charge.payment_intent, charge.id);
+          await completeStripeWebhookReceipt(receipt.receipt.id, "PROCESSED", { paymentId: result.payment?.id ?? null });
+          if (result.payment && !result.alreadyReversed && result.creditsReversed > 0) {
+            await createNotification(
+              result.payment.userId,
+              "PAYMENT",
+              "Refund processed",
+              `Your refund has been processed. ${result.creditsReversed} credits were reversed from your balance.`,
+              {
+                paymentId: result.payment.id,
+                creditsReversed: result.creditsReversed,
+                newBalance: result.newBalance
+              }
+            );
+          }
           break;
         }
         default:
@@ -75620,6 +75893,108 @@ async function registerRoutes(httpServer, app2) {
   app2.post("/api/notifications/:id/read", requireAuth, async (req, res) => {
     await db.update(notifications).set({ isRead: true, readAt: /* @__PURE__ */ new Date() }).where(and(eq(notifications.id, routeParam(req.params.id)), eq(notifications.userId, req.user.userId)));
     return res.json({ success: true });
+  });
+  const REPORT_TARGET_TYPES = /* @__PURE__ */ new Set(["MESSAGE", "USER", "REVIEW", "JOB"]);
+  const REPORT_REASONS = /* @__PURE__ */ new Set([
+    "SPAM",
+    "HARASSMENT",
+    "FRAUD",
+    "INAPPROPRIATE",
+    "CONTACT_SHARING",
+    "OFF_PLATFORM",
+    "SAFETY",
+    "OTHER"
+  ]);
+  app2.post("/api/reports", requireAuth, reportRateLimiter, async (req, res) => {
+    try {
+      const reporterId = req.user.userId;
+      const targetType = String(req.body?.targetType || "").toUpperCase();
+      const targetId = String(req.body?.targetId || "").trim();
+      const reason = String(req.body?.reason || "").toUpperCase();
+      const details = typeof req.body?.details === "string" ? req.body.details.slice(0, 1e3) : null;
+      if (!REPORT_TARGET_TYPES.has(targetType)) {
+        return res.status(400).json({ error: "Invalid targetType" });
+      }
+      if (!REPORT_REASONS.has(reason)) {
+        return res.status(400).json({ error: "Invalid reason" });
+      }
+      if (!targetId) {
+        return res.status(400).json({ error: "targetId is required" });
+      }
+      let targetUserId = null;
+      try {
+        if (targetType === "USER") {
+          targetUserId = targetId;
+        } else if (targetType === "MESSAGE") {
+          const [m] = await db.select({ senderId: messages.senderId }).from(messages).where(eq(messages.id, targetId)).limit(1);
+          targetUserId = m?.senderId ?? null;
+        } else if (targetType === "REVIEW") {
+          const [r] = await db.select({ reviewerId: reviews.reviewerId }).from(reviews).where(eq(reviews.id, targetId)).limit(1);
+          targetUserId = r?.reviewerId ?? null;
+        } else if (targetType === "JOB") {
+          const [j] = await db.select({ customerId: jobs.customerId }).from(jobs).where(eq(jobs.id, targetId)).limit(1);
+          targetUserId = j?.customerId ?? null;
+        }
+      } catch {
+      }
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1e3);
+      const [dup] = await db.select({ id: userReports.id }).from(userReports).where(and(
+        eq(userReports.reporterId, reporterId),
+        eq(userReports.targetType, targetType),
+        eq(userReports.targetId, targetId),
+        gte(userReports.createdAt, dayAgo)
+      )).limit(1);
+      if (dup) {
+        return res.json({ success: true, reportId: dup.id, deduplicated: true });
+      }
+      const [row] = await db.insert(userReports).values({
+        reporterId,
+        targetType,
+        targetId,
+        targetUserId,
+        reason,
+        details
+      }).returning();
+      createNotification(
+        "admin",
+        "MESSAGE_FLAGGED",
+        `New ${targetType.toLowerCase()} report`,
+        `Reason: ${reason}${details ? ` \u2014 ${details.slice(0, 80)}` : ""}`,
+        { reportId: row.id, targetType, targetId }
+      ).catch(() => {
+      });
+      return res.status(201).json({ success: true, reportId: row.id });
+    } catch (err) {
+      console.error("Create report error:", err);
+      return res.status(500).json({ error: "Unable to submit report" });
+    }
+  });
+  app2.get("/api/reports/mine", requireAuth, async (req, res) => {
+    const rows = await db.select().from(userReports).where(eq(userReports.reporterId, req.user.userId)).orderBy(desc(userReports.createdAt)).limit(100);
+    return res.json(rows);
+  });
+  app2.get("/api/admin/reports", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    const status = typeof req.query.status === "string" ? req.query.status.toUpperCase() : null;
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1), 500);
+    const where = status && ["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"].includes(status) ? eq(userReports.status, status) : void 0;
+    const rows = await db.select().from(userReports).where(where).orderBy(desc(userReports.createdAt)).limit(limit);
+    return res.json(rows);
+  });
+  app2.patch("/api/admin/reports/:id", requireAuth, requireRole("ADMIN", "SUPPORT"), async (req, res) => {
+    const id = routeParam(req.params.id);
+    const nextStatus = String(req.body?.status || "").toUpperCase();
+    const note = typeof req.body?.reviewNote === "string" ? req.body.reviewNote.slice(0, 1e3) : null;
+    if (!["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"].includes(nextStatus)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    const [updated] = await db.update(userReports).set({
+      status: nextStatus,
+      reviewNote: note,
+      reviewedBy: req.user.userId,
+      reviewedAt: /* @__PURE__ */ new Date()
+    }).where(eq(userReports.id, id)).returning();
+    if (!updated) return res.status(404).json({ error: "Report not found" });
+    return res.json(updated);
   });
   const SLA_HOURS = { LOW: 72, MEDIUM: 48, HIGH: 24, URGENT: 4 };
   function calcSlaDeadline(priority) {
@@ -76813,7 +77188,7 @@ async function registerRoutes(httpServer, app2) {
       return res.status(500).json({ error: err.message });
     }
   });
-  app2.post("/api/auth/forgot-password", forgotPasswordRateLimiter, async (req, res) => {
+  app2.post("/api/auth/forgot-password", forgotPasswordRateLimiter, requireCaptcha(), async (req, res) => {
     try {
       const { email } = req.body;
       if (!email || typeof email !== "string") {

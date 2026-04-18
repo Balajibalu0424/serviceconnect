@@ -129,7 +129,7 @@ export async function issueVerificationChallenge(input: IssueChallengeInput): Pr
       hashedCode = await hashPassword(randomBytes(32).toString("hex"));
     }
   } catch (error) {
-    if (!canUseOtpFallback(input.channel)) {
+    if (!canUseOtpFallback(input.channel) || !fallbackCode) {
       throw error;
     }
     deliveryMode = "DEV_FALLBACK";

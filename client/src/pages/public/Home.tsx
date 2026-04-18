@@ -408,9 +408,9 @@ export default function Home() {
           </div>
           <p className="text-xs text-muted-foreground">© 2026 ServiceConnect. All rights reserved. Built in Ireland 🇮🇪</p>
           <div className="flex gap-6 text-xs text-muted-foreground">
-            <a href="#" className="hover:text-foreground transition-colors">Privacy</a>
-            <a href="#" className="hover:text-foreground transition-colors">Terms</a>
-            <a href="#" className="hover:text-foreground transition-colors">Cookies</a>
+            <Link href="/legal/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+            <Link href="/legal/terms" className="hover:text-foreground transition-colors">Terms</Link>
+            <Link href="/legal/cookies" className="hover:text-foreground transition-colors">Cookies</Link>
           </div>
         </div>
       </footer>

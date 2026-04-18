@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit push --force",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push:force": "drizzle-kit push --force",
     "db:seed": "tsx server/seed.ts"
   },
   "dependencies": {

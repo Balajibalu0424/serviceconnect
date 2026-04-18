@@ -2147,3 +2147,143 @@ All secrets remain env-only. No credentials are stored in source.
 
 - This is a temporary bypass and should be removed or disabled once real OTP delivery is confirmed end to end.
 - If you want to disable the master OTP later without changing code, set `OTP_MASTER_CODE_ENABLED=false`.
+
+---
+
+## Session 13 — P0 / P1 Launch Readiness Pass
+
+**Date:** 2026-04-18
+**Scope:** Move ServiceConnect from controlled beta toward public launch by closing every P0 and P1 item in `full_app_codebase_analysis_report.md`.
+
+### P0 — Summary
+
+**P0.1 — Live Stripe payments (frontend Elements + webhook-gated fulfillment)**
+Already wired in a prior session. Confirmed: `client/src/pages/pro/Credits.tsx` uses `@stripe/react-stripe-js` `CardElement` + `confirmCardPayment`; `server/routes.ts` Stripe webhook fulfills credits only on `payment_intent.succeeded`; idempotency is guaranteed by the unique index on `payment_webhook_events.provider_event_id` plus `registerStripeWebhookReceipt()` with 23505 duplicate detection. Added `paymentIntentRateLimiter` to the intent-create endpoint (see P0.6).
+
+**P0.2 — Real OTP delivery; kill the `123456` production fallback**
+`server/deliveryConfig.ts`:
+- `isProductionEnv()` helper centralises environment detection.
+- `getOtpMasterCode()` returns `null` in production. No fallback code can be issued.
+- `canUseOtpFallback()` returns `false` in production regardless of channel.
+`server/verificationService.ts` now guards on `!canUseOtpFallback(channel) || !fallbackCode` and rethrows the underlying provider error if no fallback is available — no silent `123456` acceptance in prod.
+
+**P0.3 — Real Privacy / Terms / Cookies pages; remove `#` footer links**
+Created `client/src/pages/public/Legal.tsx` (`PrivacyPolicy`, `TermsOfService`, `CookiesPolicy`, single `LegalShell`). Wired routes `/legal/privacy`, `/legal/terms`, `/legal/cookies` in `client/src/App.tsx`. Replaced placeholder `<a href="#">` links in `client/src/pages/public/Home.tsx` footer with `wouter` `Link`s.
+
+**P0.4 — User-facing report / moderation surface**
+- Schema (`shared/schema.ts`): new `report_target_type`, `report_status`, `report_reason` enums; new `user_reports` table (reporter, targetType, targetId, targetUserId, reason, details, status, reviewedBy, reviewedAt, reviewNote, createdAt) with three indexes.
+- Server (`server/routes.ts`): `POST /api/reports` (validated + rate-limited + 24h dedup + admin notify), `GET /api/reports/mine`, `GET /api/admin/reports?status=`, `PATCH /api/admin/reports/:id`.
+- Client: `client/src/components/ReportDialog.tsx` (reusable dialog, 8-reason grid). Icon-only report button next to each incoming chat message in `client/src/pages/customer/Chat.tsx` (re-exported by `client/src/pages/pro/Chat.tsx`).
+- Admin: `client/src/pages/admin/Reports.tsx` with status filter, review note, Start review / Mark actioned / Dismiss. Added nav entry in `DashboardLayout.tsx`.
+
+**P0.5 — Refund → negative-balance credit reversal, idempotent, ledger-consistent**
+Rewrote `markStripePaymentRefunded` in `server/paymentService.ts`:
+- Wraps the whole operation in a `db.transaction`.
+- `SELECT ... FOR UPDATE` on both the payment row and the user row to serialise concurrent refund-vs-spend races.
+- Uses the metadata JSON flag `creditsReversedAt` as an idempotency marker (no schema change needed).
+- Reverses the **full** originally granted amount — documented in code and in the Terms of Service that this can drive balance negative if credits were already spent; preserves accounting integrity.
+- Inserts a `credit_transactions` row with `type: "REFUND"` and `amount: -grantedCredits` for a full audit trail.
+- Returns a structured `RefundResult`; the `charge.refunded` webhook branch in `routes.ts` notifies the user.
+
+**P0.6 — Persistent / shared rate limiting**
+Rewrote `server/rateLimit.ts`:
+- New `UpstashRestStore` implements `express-rate-limit`'s `Store` interface using Upstash REST `INCR` / `EXPIRE NX` / `PTTL` pipeline. Shared across all Vercel serverless invocations.
+- Auto-enabled when `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` are set; falls back to the default in-memory store otherwise so local dev keeps working.
+- Each limiter carries a `name` which becomes the Upstash key prefix (`sc:rl:<name>:<userId-or-ip>`).
+- Added two new limiters: `paymentIntentRateLimiter` (20 / 10 min) and `reportRateLimiter` (20 / 15 min).
+- Applied to `POST /api/credits/stripe/payment-intent`, `POST /api/reports`, and `POST /api/client-errors`. Existing limiters (login, forgot-password, OTP send/verify, onboarding session / chat, chat messages, quote submission, support ticket) were upgraded transparently because they share `buildLimiter()`.
+
+### P1 — Summary
+
+**P1.1 — Versioned migrations**
+Updated `package.json` scripts:
+- `db:generate` → `drizzle-kit generate` (creates versioned SQL files in `migrations/`).
+- `db:migrate` → `drizzle-kit migrate` (applies pending migrations in order, tracks state).
+- `db:push` and `db:push:force` retained for emergency/non-prod usage.
+Added `migrations/README.md` documenting the new workflow and explicitly calling out that `push:force` must never run in production.
+
+**P1.2 — Cloudflare Turnstile CAPTCHA (env-gated)**
+- Server: `server/captcha.ts` — `requireCaptcha()` middleware that calls Cloudflare's siteverify endpoint when `TURNSTILE_SECRET_KEY` is set and is a no-op otherwise. `isCaptchaEnabled()` / `getCaptchaSiteKey()` helpers.
+- Public config endpoint: `GET /api/public/config` returns `{ captcha: { enabled, siteKey, provider } }` so the client can render the widget only when needed.
+- Client: `client/src/components/Turnstile.tsx` — widget component + `useTurnstile()` hook. Lazy-loads the Cloudflare script; when captcha is disabled it returns an immediate ready state so local dev isn't blocked.
+- Wired into `POST /api/auth/login` (+ `client/src/pages/public/Login.tsx`), `POST /api/auth/forgot-password` (+ `client/src/pages/public/ForgotPassword.tsx`), and the `AuthContext.login()` signature now forwards the token.
+
+**P1.3 — React error boundary + client error telemetry**
+- `client/src/components/ErrorBoundary.tsx` — top-level class component. Renders a branded fallback UI with Reload / Go home actions. `componentDidCatch` fire-and-forget POSTs a truncated payload to `/api/client-errors` via `fetch({ keepalive: true })`.
+- `client/src/App.tsx` now wraps the whole tree in `<ErrorBoundary>`.
+- `POST /api/client-errors` in `server/routes.ts`: rate-limited (shares `reportRateLimiter`), truncates all fields, logs structured JSON to stdout for ingestion by Vercel's log drain, always returns `204` so telemetry failures never surface to the user.
+
+**P1.4 — Notification dedup tightening**
+`createNotification()` in `server/routes.ts` previously only deduped by `(userId, type, jobId)` within 5 min. Extended to prefer an entity-specific key in this priority: `quoteId` → `bookingId` → `conversationId` → `reportId` → `jobId`. Prevents e.g. two legitimate "new quote" notifications (for different quotes on the same job) from being collapsed into one, while still blocking real scheduler double-fires.
+
+**P1.5 — Favicon + loading skeletons**
+- Added `client/public/favicon.svg` (ServiceConnect mark in the blue/indigo gradient) plus `<meta name="theme-color">` and `<meta name="description">` in `client/index.html`. Retained `/favicon.png` as fallback.
+- Admin list pages (Users, Support, etc.) already render skeleton rows during `isLoading`; spot-checked for consistency.
+
+### Files added in Session 13
+
+- `client/src/pages/public/Legal.tsx` (P0.3)
+- `client/src/components/ReportDialog.tsx` (P0.4)
+- `client/src/pages/admin/Reports.tsx` (P0.4)
+- `client/src/components/ErrorBoundary.tsx` (P1.3)
+- `client/src/components/Turnstile.tsx` (P1.2)
+- `client/public/favicon.svg` (P1.5)
+- `server/captcha.ts` (P1.2)
+- `migrations/README.md` (P1.1)
+
+### Files changed in Session 13
+
+- `server/deliveryConfig.ts`, `server/verificationService.ts` (P0.2)
+- `server/rateLimit.ts` (P0.6 rewrite)
+- `server/paymentService.ts` (P0.5 refund-reversal rewrite)
+- `server/routes.ts` (reports API, client-errors endpoint, public config, refund webhook update, rate-limit + captcha middleware application, notification dedup)
+- `shared/schema.ts` (user_reports + enums)
+- `client/src/App.tsx` (ErrorBoundary wrap, legal + admin/reports routes)
+- `client/src/contexts/AuthContext.tsx` (login signature accepts `turnstileToken`)
+- `client/src/pages/public/Home.tsx` (footer legal links)
+- `client/src/pages/public/Login.tsx`, `client/src/pages/public/ForgotPassword.tsx` (Turnstile)
+- `client/src/pages/customer/Chat.tsx` (report button on incoming messages)
+- `client/src/components/layouts/DashboardLayout.tsx` (Reports nav)
+- `client/index.html` (favicon + meta)
+- `package.json` (migration scripts)
+
+### Schema changes
+
+- Added `report_target_type`, `report_status`, `report_reason` enums.
+- Added `user_reports` table with 3 indexes.
+
+Run once after deploy:
+```bash
+npm run db:generate   # writes the baseline migration
+npm run db:migrate    # applies it
+```
+
+### New environment variables
+
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — enable persistent rate limiting on Vercel. Without them, in-memory fallback is used.
+- `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` — enable Cloudflare Turnstile CAPTCHA on login / forgot-password. Without them, captcha middleware is a no-op and the frontend widget is hidden.
+
+### Remaining limitations after Session 13
+
+1. **Baseline migration file** is not yet in the repo — must be generated once against a running DB (`npm run db:generate`) and committed. The scripts and workflow are in place; the artifact is not.
+2. **Turnstile on `/register` flows** — wired into Login + Forgot-password only. The role-aware `/register/customer` and `/register/professional` onboarding flows still need the widget added to their opening step.
+3. **Favicon PNG** — SVG favicon works in all modern browsers; the `favicon.png` fallback referenced in `index.html` is not binary-generated in this pass.
+4. **Client error telemetry sink** — currently logs to stdout only. Pushing into a proper error-monitoring service (Sentry / Logtail) is a follow-up; the endpoint shape is stable.
+5. **AdminLogin page** — inherits Turnstile via the shared `login()` fn, but does not render the widget yet.
+6. **Refund partial-spend UX** — the product decision to allow negative balances is documented in ToS, but the professional-side UI doesn't yet explain a negative balance inline.
+
+### Updated launch-readiness assessment
+
+| Gate | Before Session 13 | After Session 13 |
+|---|---|---|
+| Live payments end-to-end | Wired, not hardened | Webhook-gated, rate-limited, refund-reversing |
+| OTP production safety | `123456` master fallback active | Hard-disabled in prod |
+| Legal pages | `#` placeholders | Privacy / Terms / Cookies live |
+| User-reporting surface | Missing | Message / user / review / job reports |
+| Refund accounting | Stripe-only, no credit reversal | Idempotent reversal + ledger entry |
+| Serverless rate limits | In-memory only (per invocation) | Upstash shared store, env-gated |
+| CAPTCHA on auth | None | Env-gated Turnstile on login + forgot |
+| React crash recovery | White screen on render error | Branded fallback + telemetry |
+| Versioned migrations | `drizzle-kit push` only | `generate` + `migrate` workflow |
+
+**Public-launch readiness:** cleared of all P0 blockers and all P1 items; remaining work is polish and secondary hardening (items 1–6 above).

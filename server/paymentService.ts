@@ -205,20 +205,116 @@ export async function markStripePaymentFailed(intentId: string, reason: string |
   return updated;
 }
 
-export async function markStripePaymentRefunded(intentId: string, chargeId?: string | null) {
-  const [payment] = await db.select().from(payments).where(eq(payments.stripePaymentId, intentId)).limit(1);
-  if (!payment) return null;
+export interface RefundResult {
+  payment: typeof payments.$inferSelect | null;
+  creditsReversed: number;
+  alreadyReversed: boolean;
+  newBalance: number | null;
+}
 
-  const [updated] = await db.update(payments).set({
-    status: "REFUNDED",
-    providerChargeId: chargeId ?? payment.providerChargeId,
-    metadata: {
-      ...((payment.metadata as Record<string, unknown> | null) ?? {}),
-      refundRecordedAt: new Date().toISOString(),
-    },
-  }).where(eq(payments.id, payment.id)).returning();
+/**
+ * Mark a Stripe payment as refunded AND reverse the credits granted by that
+ * payment. Idempotent via a metadata flag on the payment row.
+ *
+ * Product decision when the user has already spent some of the credits:
+ *   - We still reverse the FULL original amount granted. This can drive the
+ *     user balance negative. A negative balance blocks future spend until the
+ *     user repurchases, and is auditable via the credit_transactions ledger.
+ *   - This is the safest option because it preserves accounting integrity —
+ *     every purchase that is fully refunded contributes zero net credits.
+ */
+export async function markStripePaymentRefunded(intentId: string, chargeId?: string | null): Promise<RefundResult> {
+  return db.transaction(async (tx) => {
+    const [payment] = await tx.select().from(payments).where(eq(payments.stripePaymentId, intentId)).for("update").limit(1);
+    if (!payment) return { payment: null, creditsReversed: 0, alreadyReversed: false, newBalance: null };
 
-  return updated;
+    const existingMeta = (payment.metadata as Record<string, unknown> | null) ?? {};
+    const alreadyReversed = existingMeta.creditsReversedAt ? true : false;
+
+    // Always make sure the payment row is marked REFUNDED and carries the
+    // charge id, even if we've already reversed credits previously.
+    const [updated] = await tx.update(payments).set({
+      status: "REFUNDED",
+      providerChargeId: chargeId ?? payment.providerChargeId,
+      metadata: {
+        ...existingMeta,
+        refundRecordedAt: new Date().toISOString(),
+      },
+    }).where(eq(payments.id, payment.id)).returning();
+
+    if (alreadyReversed) {
+      return { payment: updated, creditsReversed: 0, alreadyReversed: true, newBalance: null };
+    }
+
+    // Only credit-package payments grant credits. Everything else simply marks
+    // as refunded without balance changes.
+    if (payment.referenceType !== "CREDIT_PACKAGE") {
+      await tx.update(payments).set({
+        metadata: {
+          ...existingMeta,
+          refundRecordedAt: new Date().toISOString(),
+          creditsReversedAt: new Date().toISOString(),
+          creditsReversed: 0,
+          refundReason: "non-credit-payment",
+        },
+      }).where(eq(payments.id, payment.id));
+      return { payment: updated, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    }
+
+    const snapshot = (existingMeta.packageSnapshot as CreditPackageSnapshot | undefined);
+    const grantedCredits = snapshot?.totalCredits ?? 0;
+
+    // If payment never fulfilled we don't need to deduct anything.
+    if (!payment.fulfilledAt || grantedCredits <= 0) {
+      await tx.update(payments).set({
+        metadata: {
+          ...existingMeta,
+          refundRecordedAt: new Date().toISOString(),
+          creditsReversedAt: new Date().toISOString(),
+          creditsReversed: 0,
+          refundReason: payment.fulfilledAt ? "no-snapshot" : "never-fulfilled",
+        },
+      }).where(eq(payments.id, payment.id));
+      return { payment: updated, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    }
+
+    // Row-level lock on user so concurrent spend vs refund stays consistent.
+    const [user] = await tx.select({ balance: users.creditBalance })
+      .from(users).where(eq(users.id, payment.userId)).for("update");
+    if (!user) {
+      return { payment: updated, creditsReversed: 0, alreadyReversed: false, newBalance: null };
+    }
+
+    const newBalance = user.balance - grantedCredits;
+    await tx.update(users).set({ creditBalance: newBalance }).where(eq(users.id, payment.userId));
+
+    await tx.insert(creditTransactions).values({
+      userId: payment.userId,
+      type: "REFUND",
+      amount: -grantedCredits,
+      balanceAfter: newBalance,
+      description: `Refund reversal for ${snapshot?.name ?? "credit purchase"} (${grantedCredits} credits)`,
+      referenceType: "PAYMENT",
+      referenceId: payment.id,
+    });
+
+    await tx.update(payments).set({
+      metadata: {
+        ...existingMeta,
+        refundRecordedAt: new Date().toISOString(),
+        creditsReversedAt: new Date().toISOString(),
+        creditsReversed: grantedCredits,
+        balanceAfterReversal: newBalance,
+      },
+    }).where(eq(payments.id, payment.id));
+
+    return {
+      payment: updated,
+      creditsReversed: grantedCredits,
+      alreadyReversed: false,
+      newBalance,
+    };
+  });
 }
 
 export async function registerStripeWebhookReceipt(event: Stripe.Event) {

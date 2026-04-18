@@ -11,6 +11,7 @@ import {
   PROFESSIONAL_ONBOARDING_PATH,
 } from "@/lib/publicRoutes";
 import { Sparkles, Shield, Zap, ArrowRight, Eye, EyeOff } from "lucide-react";
+import { useTurnstile } from "@/components/Turnstile";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -21,6 +22,7 @@ export default function Login() {
   const { user, login, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const captcha = useTurnstile("login");
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -32,10 +34,14 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!captcha.ready) {
+      toast({ title: "Please complete the verification", variant: "destructive" });
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const loggedInUser = await login(email, password);
+      const loggedInUser = await login(email, password, captcha.token);
       if (loggedInUser.role === "PROFESSIONAL") setLocation("/pro/dashboard");
       else if (loggedInUser.role === "ADMIN") setLocation("/admin");
       else setLocation("/dashboard");
@@ -171,10 +177,11 @@ export default function Login() {
                     </button>
                   </div>
                 </div>
+                {captcha.widget}
                 <Button
                   type="submit"
                   className="w-full h-11 bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-lg shadow-blue-500/25 rounded-xl font-semibold gap-2 group"
-                  disabled={loading}
+                  disabled={loading || !captcha.ready}
                   data-testid="button-submit"
                 >
                   {loading ? "Signing in..." : "Sign in"}

@@ -30,7 +30,7 @@ interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<AuthUser>;
+  login: (email: string, password: string, turnstileToken?: string | null) => Promise<AuthUser>;
   register: (userData: any) => Promise<AuthUser>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -78,8 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void fetchUser();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const res = await apiRequest("POST", "/api/auth/login", { email, password });
+  const login = async (email: string, password: string, turnstileToken?: string | null) => {
+    const res = await apiRequest("POST", "/api/auth/login", { email, password, turnstileToken: turnstileToken ?? undefined });
     if (!res.ok) {
       throw new Error(await readError(res));
     }
