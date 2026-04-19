@@ -2361,3 +2361,44 @@ Replace the thin placeholder marketing surface with real, conversion-focused pub
 - `npm run build` — client + server + vercel handler all built.
 - `npm test` — 15/15 passing.
 
+
+---
+
+## Session 15 — Full Platform UX/UI/Product Enhancement
+
+**Date:** 2026-04-19
+**Scope:** Introduced a shared UI primitive layer and rolled it across the highest-traffic list/entity pages on Admin, Customer, and Professional so status, empty states, skeletons, and page headers look and feel identical everywhere.
+
+### New shared primitives (`client/src/components/ui/`)
+- **`page-header.tsx`** — canonical `PageHeader` with eyebrow / gradient title / description / icon / actions slot. Replaces 5 bespoke header blocks that each had slightly different typography.
+- **`empty-state.tsx`** — glass-morphism empty state with tone + primary/secondary action slots + compact mode.
+- **`status-pill.tsx`** — single canonical status chip with a 40-entry `STATUS_TONE` map covering jobs, quotes, bookings, users, reviews, support tickets, payments, and payouts. 7 tones × 3 sizes. `humaniseStatus()` helper turns `IN_PROGRESS` → `In progress` consistently.
+- **`loading-skeleton.tsx`** — `ListSkeleton`, `StatGridSkeleton`, `PageLoading` (spinning border). Replaces half a dozen ad-hoc `animate-pulse` blocks.
+- **`stat-tile.tsx`** — 8-tone glass-morphism stat tile with optional href + trend badge.
+- **`surface.tsx`** — `Surface` + `SurfaceHeader` for glass panels with a shared section header idiom.
+
+### Pages migrated to shared primitives
+| Role | Page | Changes |
+|---|---|---|
+| Customer | `MyJobs.tsx` | Filter tabs (all/active/drafts/closed with counts), search, `PageHeader`, `JobMeta` helper, `StatusPill` everywhere, `EmptyState` for zero + zero-filtered, `ListSkeleton` |
+| Customer | `Bookings.tsx` | `PageHeader`, 3-tile summary strip (Active / Completed / Total spend), `StatusPill` on each booking, `EmptyState` |
+| Pro | `Leads.tsx` | `PageHeader`, 5-tile summary (Pending / Accepted / Rejected / Won value / Win rate), `StatusPill`, `ListSkeleton`, `EmptyState` with Browse Feed + View Matchbooked CTAs |
+| Pro | `Bookings.tsx` | `PageHeader`, 3-tile summary (Active / Completed / Earnings), `StatusPill`, `ListSkeleton`, `EmptyState` |
+| Admin | `Jobs.tsx` | `PageHeader`, `ListSkeleton`, `EmptyState` with Clear-filters action |
+| Admin | `Users.tsx` | `PageHeader`, `ListSkeleton`, `EmptyState` with Clear-filters action |
+| Admin | `Reviews.tsx` | `PageHeader`, `ListSkeleton`, `StatusPill` for Visible/Hidden, `EmptyState` with Clear-filters action |
+
+### UX/behavior wins
+- **Status consistency.** A `COMPLETED` booking, an `ACCEPTED` quote, a `VERIFIED` professional, and a `RESOLVED` support ticket all render with the same tone across every role view. No more per-page colour drift.
+- **Empty states are now actionable.** Every list page ships a primary CTA that either deep-links the user forward (Browse Feed, Browse Matchbooked) or clears the filters that produced the empty result — instead of a static "no items" string.
+- **Summary density.** Pro Leads now surfaces Win-rate and Won-value at a glance; Pro Bookings surfaces lifetime Earnings; Customer Bookings surfaces Total spend. All computed client-side from the existing payload — no new endpoints required.
+- **Skeleton parity.** All migrated pages share the same three-line `ListSkeleton` rhythm instead of six different animate-pulse shapes.
+- **Headers.** Eyebrow + gradient title + description + icon gives every role its own "section identity" (`Customer` / `Professional` / `Admin`) without fragmenting the typography.
+
+### Verification
+- `npm run check` — clean (tsc, 0 errors).
+- All new primitives are tree-shakeable (named exports) and have zero runtime deps beyond shadcn/ui + lucide-react.
+
+### Deferred (tracked for a follow-up pass)
+- `admin/AuditLogs.tsx`, `admin/Support.tsx`, `pro/VerificationPending.tsx` — still using bespoke headers.
+- Dedicated pro-dashboard summary endpoint (win-rate / earnings / streak) — current client-side reduces are sufficient for the pages shipped this session.

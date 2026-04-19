@@ -4,26 +4,15 @@ import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Users, MessageSquare, Briefcase, Euro, Clock, Tag, ChevronDown, ChevronUp, Archive, Hash, CheckCircle2, XCircle, AlertCircle, MapPin } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/status-pill";
+import { ListSkeleton } from "@/components/ui/loading-skeleton";
+import { Users, MessageSquare, Briefcase, Euro, Clock, Tag, ChevronDown, ChevronUp, Archive, Hash, MapPin, Target } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { buildConversationPath } from "@shared/chatRoutes";
-
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  PENDING: { label: "Pending", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
-  ACCEPTED: { label: "Accepted", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
-  REJECTED: { label: "Rejected", color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
-  EXPIRED: { label: "Expired", color: "bg-muted text-muted-foreground" },
-  WITHDRAWN: { label: "Withdrawn", color: "bg-muted text-muted-foreground" },
-};
-
-const STATUS_ICON: Record<string, any> = {
-  PENDING: AlertCircle,
-  ACCEPTED: CheckCircle2,
-  REJECTED: XCircle,
-  EXPIRED: Clock,
-};
 
 export default function ProLeads() {
   const { data: rawData, isLoading } = useQuery<any>({ queryKey: ["/api/quotes"] });
@@ -37,9 +26,6 @@ export default function ProLeads() {
   const rejected = allQuotes.filter(q => q.status === "REJECTED");
 
   const renderQuoteCard = (q: any, archived = false) => {
-    const StatusIcon = STATUS_ICON[q.status] || AlertCircle;
-    const statusConf = STATUS_CONFIG[q.status] || { label: q.status, color: "bg-muted text-muted-foreground" };
-
     return (
       <Card
         key={q.id}
@@ -109,10 +95,7 @@ export default function ProLeads() {
 
             {/* Right side: status + chat */}
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
-              <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1", statusConf.color)}>
-                <StatusIcon className="w-3 h-3" />
-                {statusConf.label}
-              </span>
+              <StatusPill status={q.status} />
 
               {q.conversationId && (
                 <Link href={buildConversationPath(true, q.conversationId)}>
@@ -148,74 +131,69 @@ export default function ProLeads() {
     );
   };
 
+  const winRate = accepted.length + rejected.length > 0
+    ? Math.round((accepted.length / (accepted.length + rejected.length)) * 100)
+    : null;
+  const totalWinValue = accepted.reduce((sum, q) => sum + Number(q.amount || 0), 0);
+
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-5">
-        <div>
-          <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">My Leads</h1>
-          <p className="text-sm text-muted-foreground mt-1">Quotes you've submitted for jobs</p>
-        </div>
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-[1200px] mx-auto">
+        <PageHeader
+          eyebrow="Professional"
+          title="My leads"
+          description="Every quote you've submitted, grouped by status. Track what's pending, what you won and your win rate at a glance."
+          icon={<Target className="w-5 h-5" />}
+        />
 
         {/* Summary */}
         {allQuotes.length > 0 && (
-          <div className="flex gap-5 bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 w-fit">
-            <div className="text-center">
-              <p className="text-xl font-bold text-amber-600">{pending.length}</p>
-              <p className="text-xs text-muted-foreground">Pending</p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 shadow-sm">
+            <div className="text-center md:border-r md:border-border/40">
+              <p className="text-2xl font-bold font-outfit text-amber-600 dark:text-amber-400">{pending.length}</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Pending</p>
             </div>
-            <div className="w-px bg-border" />
-            <div className="text-center">
-              <p className="text-xl font-bold text-emerald-600">{accepted.length}</p>
-              <p className="text-xs text-muted-foreground">Accepted</p>
+            <div className="text-center md:border-r md:border-border/40">
+              <p className="text-2xl font-bold font-outfit text-emerald-600 dark:text-emerald-400">{accepted.length}</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Accepted</p>
             </div>
-            <div className="w-px bg-border" />
-            <div className="text-center">
-              <p className="text-xl font-bold text-muted-foreground">{rejected.length}</p>
-              <p className="text-xs text-muted-foreground">Rejected</p>
+            <div className="text-center md:border-r md:border-border/40">
+              <p className="text-2xl font-bold font-outfit text-muted-foreground">{rejected.length}</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Rejected</p>
             </div>
-            {archivedQuotes.length > 0 && (
-              <>
-                <div className="w-px bg-border" />
-                <div className="text-center">
-                  <p className="text-xl font-bold text-gray-400">{archivedQuotes.length}</p>
-                  <p className="text-xs text-muted-foreground">Archived</p>
-                </div>
-              </>
-            )}
-            {accepted.length + rejected.length > 0 && (
-              <>
-                <div className="w-px bg-border" />
-                <div className="text-center">
-                  <p className="text-xl font-bold text-primary">
-                    {Math.round((accepted.length / (accepted.length + rejected.length)) * 100)}%
-                  </p>
-                  <p className="text-xs text-muted-foreground">Win rate</p>
-                </div>
-              </>
-            )}
+            <div className="text-center md:border-r md:border-border/40">
+              <p className="text-2xl font-bold font-outfit text-foreground">
+                €{totalWinValue.toLocaleString("en-IE", { maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Won value</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold font-outfit text-primary">
+                {winRate !== null ? `${winRate}%` : "—"}
+              </p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Win rate</p>
+            </div>
           </div>
         )}
 
         {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map(i => <div key={i} className="h-28 rounded-2xl bg-muted animate-pulse" />)}
-          </div>
+          <ListSkeleton rows={3} />
         ) : allQuotes.length === 0 && archivedQuotes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
-            <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
-              <Users className="w-8 h-8 opacity-40" />
-            </div>
-            <p className="font-heading font-medium text-lg text-foreground">No active leads</p>
-            <p className="text-sm mt-1 max-w-xs mx-auto">Unlock jobs from your matchbooked list to start quoting customers</p>
-            <div className="flex flex-col sm:flex-row gap-2 mt-6">
-              <Link href="/pro/matchbooked">
-                <Button variant="outline" size="sm" className="gap-1.5 rounded-xl">View Matchbooked</Button>
-              </Link>
+          <EmptyState
+            icon={<Users className="w-7 h-7" />}
+            title="No quotes submitted yet"
+            description="Unlock jobs from your matchbooked list to start quoting customers. Quotes you send appear here with full status tracking."
+            primaryAction={
               <Link href="/pro/feed">
-                <Button variant="default" size="sm" className="gap-1.5 rounded-xl">Browse Job Feed</Button>
+                <Button className="rounded-xl shadow-md shadow-primary/20">Browse job feed</Button>
               </Link>
-            </div>
-          </div>
+            }
+            secondaryAction={
+              <Link href="/pro/matchbooked">
+                <Button variant="ghost" className="rounded-xl">View matchbooked</Button>
+              </Link>
+            }
+          />
         ) : (
           <>
             {/* Active quotes — pending first, then accepted, then rejected */}

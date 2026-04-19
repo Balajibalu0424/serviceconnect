@@ -6,6 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/status-pill";
+import { ListSkeleton } from "@/components/ui/loading-skeleton";
 import {
   Briefcase, Flame, ShieldAlert, Search, ChevronLeft, ChevronRight,
   MapPin, Clock, Coins, BarChart3, Eye, Loader2, Inbox, Zap
@@ -96,21 +100,12 @@ export default function AdminJobs() {
   return (
     <DashboardLayout>
       <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight font-outfit flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-                <Briefcase className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              </div>
-              Job Management
-              <Badge variant="secondary" className="text-xs px-2.5 py-0.5 rounded-full font-mono">
-                {total}
-              </Badge>
-            </h1>
-            <p className="text-sm text-muted-foreground">Review, publish, and manage all platform jobs</p>
-          </div>
-        </div>
+        <PageHeader
+          eyebrow="Admin"
+          title="Job management"
+          description={`${total.toLocaleString()} jobs total. Review, publish, moderate or close any listing across the platform.`}
+          icon={<Briefcase className="w-5 h-5" />}
+        />
 
         {/* Search & Filter Bar */}
         <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 shadow-sm">
@@ -145,32 +140,18 @@ export default function AdminJobs() {
 
         {/* Job List */}
         {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-5 animate-pulse">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-muted" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 w-48 bg-muted rounded" />
-                    <div className="h-3 w-72 bg-muted rounded" />
-                  </div>
-                  <div className="h-8 w-20 bg-muted rounded" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <ListSkeleton rows={5} />
         ) : jobs.length === 0 ? (
-          <div className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl shadow-sm">
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-muted/30 flex items-center justify-center mb-4">
-                <Inbox className="w-8 h-8 text-muted-foreground/30" />
-              </div>
-              <h3 className="text-lg font-semibold font-outfit mb-1">No jobs found</h3>
-              <p className="text-sm text-muted-foreground max-w-sm">
-                {search ? "Try adjusting your search terms or filters." : "No jobs have been posted yet."}
-              </p>
-            </div>
-          </div>
+          <EmptyState
+            icon={<Inbox className="w-6 h-6" />}
+            title="No jobs found"
+            description={search ? "Try a different search term or clear your filters." : "No jobs have been posted yet. When customers post jobs, they'll appear here."}
+            primaryAction={
+              search || statusFilter !== "all" ? (
+                <Button variant="outline" className="rounded-xl" onClick={() => { setSearch(""); setStatusFilter("all"); setPage(1); }}>Clear filters</Button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="space-y-2">
             {jobs.map((job: any) => {

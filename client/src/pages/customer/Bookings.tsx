@@ -2,27 +2,20 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/status-pill";
 import { ListChecks, CheckCircle2, XCircle, MessageCircle, User, MapPin, Clock, Euro, Hash, CalendarCheck, ArrowRight, Star, PlusCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
-import { cn } from "@/lib/utils";
 import { BookingTimeline } from "@/components/bookings/BookingTimeline";
 import { buildConversationPath } from "@shared/chatRoutes";
-
-const STATUS_COLORS: Record<string, string> = {
-  CONFIRMED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  IN_PROGRESS: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  COMPLETED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  CANCELLED: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  DISPUTED: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-};
 
 export default function Bookings() {
   const { data: bookings = [] } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
@@ -97,6 +90,7 @@ export default function Bookings() {
                   {b.job?.title || `Booking #${b.id.slice(-8)}`}
                 </p>
               </Link>
+              <StatusPill status={b.status} />
               {b.job?.referenceCode && (
                 <span className="text-xs font-mono text-muted-foreground flex items-center gap-0.5">
                   <Hash className="w-3 h-3" />{b.job.referenceCode}
@@ -200,29 +194,60 @@ export default function Bookings() {
     </Card>
   );
 
+  const totalSpent = past
+    .filter(b => b.status === "COMPLETED" && b.totalAmount)
+    .reduce((sum, b) => sum + Number(b.totalAmount || 0), 0);
+
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-5xl mx-auto">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">Bookings</h1>
-            <p className="text-sm text-muted-foreground mt-1">Manage your confirmed and completed jobs</p>
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-5xl mx-auto">
+        <PageHeader
+          eyebrow="Customer"
+          title="Bookings"
+          description="Track bookings from quote acceptance through completion. Cancel, complete or leave a review in one click."
+          icon={<ListChecks className="w-5 h-5" />}
+        />
+
+        {/* Summary strip */}
+        {(bookings as any[]).length > 0 && (
+          <div className="grid grid-cols-3 gap-3 bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 shadow-sm">
+            <div className="text-center border-r border-border/40">
+              <p className="text-2xl font-bold font-outfit text-indigo-600 dark:text-indigo-400">{active.length}</p>
+              <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Active</p>
+            </div>
+            <div className="text-center border-r border-border/40">
+              <p className="text-2xl font-bold font-outfit text-emerald-600 dark:text-emerald-400">
+                {past.filter(b => b.status === "COMPLETED").length}
+              </p>
+              <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Completed</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold font-outfit text-foreground">
+                €{totalSpent.toLocaleString("en-IE", { maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Total spend</p>
+            </div>
           </div>
-        </div>
+        )}
 
         {(bookings as any[]).length === 0 ? (
-          <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
-            <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
-              <ListChecks className="w-8 h-8 opacity-50" />
-            </div>
-            <p className="font-heading font-medium text-lg text-foreground">No bookings yet</p>
-            <p className="text-sm mt-1 max-w-sm mx-auto">When you accept a quote from a professional, it will appear here as a booking.</p>
-            <Link href="/post-job">
-              <Button className="mt-6 gap-2 shadow-sm rounded-xl" size="sm">
-                <PlusCircle className="w-4 h-4" /> Post your first job
-              </Button>
-            </Link>
-          </div>
+          <EmptyState
+            icon={<ListChecks className="w-7 h-7" />}
+            title="No bookings yet"
+            description="When you accept a quote from a professional, it will appear here. Bookings track scheduling, completion and reviews in one place."
+            primaryAction={
+              <Link href="/post-job">
+                <Button className="gap-2 rounded-xl shadow-md shadow-primary/20">
+                  <PlusCircle className="w-4 h-4" /> Post your first job
+                </Button>
+              </Link>
+            }
+            secondaryAction={
+              <Link href="/my-jobs">
+                <Button variant="ghost" className="rounded-xl">View jobs</Button>
+              </Link>
+            }
+          />
         ) : (
           <div className="space-y-6">
             {active.length > 0 && (

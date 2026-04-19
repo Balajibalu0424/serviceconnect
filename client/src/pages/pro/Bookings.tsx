@@ -4,6 +4,10 @@ import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/status-pill";
+import { ListSkeleton } from "@/components/ui/loading-skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ListChecks, MessageCircle, MapPin, User, CheckCircle2, Clock, Euro, Hash, CalendarCheck, ArrowRight, XCircle } from "lucide-react";
@@ -15,14 +19,6 @@ import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { BookingTimeline } from "@/components/bookings/BookingTimeline";
 import { buildConversationPath } from "@shared/chatRoutes";
-
-const STATUS_COLORS: Record<string, string> = {
-  CONFIRMED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  IN_PROGRESS: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  COMPLETED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  CANCELLED: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  DISPUTED: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-};
 
 export default function ProBookings() {
   const { data: bookings = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/bookings"] });
@@ -118,6 +114,7 @@ export default function ProBookings() {
               <p className="font-heading font-bold text-lg group-hover:text-primary transition-colors">
                 {b.job?.title || `Booking #${String(b.id).slice(-8)}`}
               </p>
+              <StatusPill status={b.status} />
               {b.job?.referenceCode && (
                 <span className="text-xs font-mono text-muted-foreground flex items-center gap-0.5">
                   <Hash className="w-3 h-3" />{b.job.referenceCode}
@@ -165,39 +162,50 @@ export default function ProBookings() {
     </Card>
   );
 
+  const totalEarnings = (bookings as any[])
+    .filter(b => b.status === "COMPLETED" && b.totalAmount)
+    .reduce((sum, b) => sum + Number(b.totalAmount || 0), 0);
+
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-5xl mx-auto">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">My Bookings</h1>
-            <p className="text-sm text-muted-foreground mt-1">Manage your active and past jobs</p>
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-5xl mx-auto">
+        <PageHeader
+          eyebrow="Professional"
+          title="My bookings"
+          description="Active jobs and completed work. Mark progress, complete jobs, and chat with customers directly."
+          icon={<ListChecks className="w-5 h-5" />}
+        />
+
+        {/* Summary tiles */}
+        {(bookings as any[]).length > 0 && (
+          <div className="grid grid-cols-3 gap-3 bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-4 shadow-sm">
+            <div className="text-center border-r border-border/40">
+              <p className="text-2xl font-bold font-outfit text-indigo-600 dark:text-indigo-400">{activeBookings.length}</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Active</p>
+            </div>
+            <div className="text-center border-r border-border/40">
+              <p className="text-2xl font-bold font-outfit text-emerald-600 dark:text-emerald-400">
+                {pastBookings.filter(b => b.status === "COMPLETED").length}
+              </p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Completed</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold font-outfit text-foreground">
+                €{totalEarnings.toLocaleString("en-IE", { maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">Earnings</p>
+            </div>
           </div>
-        </div>
+        )}
 
         {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-2xl p-5 md:p-6 animate-pulse">
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <div className="flex-1 space-y-2">
-                    <div className="h-5 w-48 bg-muted rounded-lg" />
-                    <div className="h-3.5 w-32 bg-muted/60 rounded" />
-                    <div className="h-3 w-24 bg-muted/40 rounded" />
-                  </div>
-                  <div className="h-6 w-24 bg-muted rounded-full shrink-0" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <ListSkeleton rows={3} />
         ) : (bookings as any[]).length === 0 ? (
-          <div className="text-center py-24 text-muted-foreground bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-3xl border border-white/20 dark:border-white/5">
-            <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
-              <ListChecks className="w-8 h-8 opacity-50" />
-            </div>
-            <p className="font-heading font-medium text-lg text-foreground">No bookings yet</p>
-            <p className="text-sm mt-1 max-w-sm mx-auto">When a customer accepts your quote, the booking will appear here.</p>
-          </div>
+          <EmptyState
+            icon={<ListChecks className="w-7 h-7" />}
+            title="No bookings yet"
+            description="When a customer accepts your quote, the booking appears here. Unlock more jobs and submit quotes to grow your bookings."
+          />
         ) : (
           <div className="space-y-6">
             {activeBookings.length > 0 && (

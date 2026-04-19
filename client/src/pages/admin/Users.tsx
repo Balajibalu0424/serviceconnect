@@ -22,6 +22,9 @@ import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ListSkeleton } from "@/components/ui/loading-skeleton";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -277,21 +280,12 @@ export default function AdminUsers() {
   return (
     <DashboardLayout>
       <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight font-outfit flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              User Management
-              <Badge variant="secondary" className="text-xs px-2.5 py-0.5 rounded-full font-mono">
-                {total}
-              </Badge>
-            </h1>
-            <p className="text-sm text-muted-foreground">Search, verify, suspend, and manage all platform users</p>
-          </div>
-        </div>
+        <PageHeader
+          eyebrow="Admin"
+          title="User management"
+          description={`${total} user${total !== 1 ? "s" : ""} registered. Search, verify, suspend, and drill into any account.`}
+          icon={<Users className="w-5 h-5" />}
+        />
 
         {/* Search & Filter Bar */}
         <div className={cn(GLASS, "p-4 shadow-sm")}>
@@ -335,32 +329,22 @@ export default function AdminUsers() {
 
         {/* User List */}
         {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className={cn(GLASS, "p-5 animate-pulse")}>
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-muted" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 w-48 bg-muted rounded" />
-                    <div className="h-3 w-72 bg-muted rounded" />
-                  </div>
-                  <div className="h-8 w-20 bg-muted rounded" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <ListSkeleton rows={5} />
         ) : users.length === 0 ? (
-          <div className={cn(GLASS, "shadow-sm")}>
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-muted/30 flex items-center justify-center mb-4">
-                <Inbox className="w-8 h-8 text-muted-foreground/30" />
-              </div>
-              <h3 className="text-lg font-semibold font-outfit mb-1">No users found</h3>
-              <p className="text-sm text-muted-foreground max-w-sm">
-                {search ? "Try adjusting your search terms or filters." : "No users have been registered yet."}
-              </p>
-            </div>
-          </div>
+          <EmptyState
+            icon={<Inbox className="w-6 h-6" />}
+            title="No users found"
+            description={search || roleFilter !== "all" || statusFilter !== "all"
+              ? "Try adjusting your search terms or filters."
+              : "No users have been registered yet."}
+            primaryAction={
+              search || roleFilter !== "all" || statusFilter !== "all" ? (
+                <Button onClick={() => { setSearch(""); setRoleFilter("all"); setStatusFilter("all"); setPage(1); }}>
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="space-y-2">
             {users.map((u) => {

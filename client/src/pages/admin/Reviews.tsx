@@ -19,6 +19,10 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ListSkeleton } from "@/components/ui/loading-skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
 
 const PAGE_SIZE = 20;
 
@@ -167,19 +171,13 @@ export default function AdminReviews() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-5">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-amber-500/10">
-            <Star className="w-5 h-5 text-amber-500" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold">Reviews &amp; Moderation</h1>
-            <p className="text-sm text-muted-foreground">
-              {total} review{total !== 1 ? "s" : ""} total
-            </p>
-          </div>
-        </div>
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-[1200px] mx-auto">
+        <PageHeader
+          eyebrow="Admin"
+          title="Reviews & moderation"
+          description={`${total} review${total !== 1 ? "s" : ""} across the platform. Hide inappropriate content, restore cleared reviews, and track rating distribution.`}
+          icon={<Star className="w-5 h-5" />}
+        />
 
         {/* Stats Row */}
         {stats && (
@@ -258,14 +256,21 @@ export default function AdminReviews() {
 
         {/* Review List */}
         <div className="space-y-2">
-          {isLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
+          {isLoading && <ListSkeleton rows={5} />}
 
           {!isLoading && filtered.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              <Inbox className="w-10 h-10 mx-auto mb-3 opacity-20" />
-              <p className="font-medium">No reviews found</p>
-              <p className="text-sm mt-1">Try adjusting your filters or search query.</p>
-            </div>
+            <EmptyState
+              icon={<Inbox className="w-6 h-6" />}
+              title="No reviews found"
+              description="Try adjusting your filters or search query."
+              primaryAction={
+                search || visibilityFilter !== "all" ? (
+                  <Button onClick={() => { setSearch(""); setVisibilityFilter("all"); setPage(1); }}>
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
           )}
 
           {!isLoading &&
@@ -289,9 +294,7 @@ export default function AdminReviews() {
                           <span className="text-muted-foreground mx-1.5">&rarr;</span>
                           {r.revieweeName}
                         </span>
-                        <Badge variant={r.isVisible ? "default" : "secondary"} className="text-xs">
-                          {r.isVisible ? "Visible" : "Hidden"}
-                        </Badge>
+                        <StatusPill status={r.isVisible ? "VISIBLE" : "HIDDEN"} size="xs" />
                       </div>
 
                       {/* Title */}
