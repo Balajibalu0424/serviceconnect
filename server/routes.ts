@@ -1303,63 +1303,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
-      // Location matching logic
-      // Principle: be permissive. A job should only be excluded when we can PROVE
-      // it is out of range. Jobs without coordinates cannot be distance-checked,
-      // so we include them (optionally narrowed by serviceAreas text match).
-      // acos() is wrapped in LEAST(1.0, ...) to avoid domain errors on identical
-      // coordinates (floating-point precision can push the argument slightly >1).
-      if (profile?.lat && profile?.lng) {
-        const radius = profile.radiusKm || 25;
-        const lat = Number(profile.lat);
-        const lng = Number(profile.lng);
-        const areaConditions = Array.isArray(profile.serviceAreas)
-          ? profile.serviceAreas
-              .map((area) => String(area).trim())
-              .filter(Boolean)
-              .map((area) => sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`)
-          : [];
-        const coordlessFallback = areaConditions.length > 0 ? or(...areaConditions) : null;
+      // Location matching — text-based only.
+      // We match the pro's declared serviceAreas (town/city names) against the
+      // location the customer typed on the job (locationTown / locationText /
+      // locationEircode). No lat/lng distance math — if the pro didn't list a
+      // service area, we show every live job in their category.
+      const areas: string[] = Array.isArray(profile?.serviceAreas)
+        ? profile!.serviceAreas.map((a) => String(a).trim()).filter(Boolean)
+        : [];
 
-        conditions.push(
-          coordlessFallback
-            ? sql`
-                (
-                  (
-                    ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
-                    6371 * acos(LEAST(1.0,
-                      cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
-                      cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
-                      sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-                    )) <= ${radius}
-                  )
-                  OR
-                  (
-                    (${jobs.lat} IS NULL OR ${jobs.lng} IS NULL) AND
-                    ${coordlessFallback}
-                  )
-                )
-              `
-            : sql`
-                (
-                  (${jobs.lat} IS NULL OR ${jobs.lng} IS NULL)
-                  OR
-                  (
-                    ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
-                    6371 * acos(LEAST(1.0,
-                      cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
-                      cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
-                      sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-                    )) <= ${radius}
-                  )
-                )
-              `
-        );
-      } else if (profile?.serviceAreas && profile.serviceAreas.length > 0) {
-        // Fallback: If Pro has no lat/lng but has text regions, try ilike on towns
-        const areaConditions = profile.serviceAreas.map(area => 
-          sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`
-        );
+      if (areas.length > 0) {
+        const areaConditions = areas.map((area) => sql`
+          ${jobs.locationTown} ILIKE ${`%${area}%`}
+          OR ${jobs.locationText} ILIKE ${`%${area}%`}
+          OR ${jobs.locationEircode} ILIKE ${`%${area}%`}
+        `);
         conditions.push(or(...areaConditions));
       }
     }
