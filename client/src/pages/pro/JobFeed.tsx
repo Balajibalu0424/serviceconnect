@@ -323,12 +323,18 @@ export default function ProJobFeed() {
 
   const [loadedPages, setLoadedPages] = useState<Record<string, any[]>>({});
   const cacheKey = `${categoryFilter}:${page}`;
-  if (pageData.length > 0 && !loadedPages[cacheKey]) {
-    setLoadedPages(prev => ({ ...prev, [cacheKey]: pageData }));
-    if (pageData.length < PAGE_SIZE) setHasMore(false);
-  } else if (pageData.length === 0 && !isLoading && !isFetching && page > 1) {
-    setHasMore(false);
-  }
+  // Sync loaded-pages cache + hasMore flag whenever a fresh page lands.
+  // Doing this in useEffect avoids setState-during-render React warnings and
+  // the occasional dropped update that can leave the feed appearing empty.
+  useEffect(() => {
+    if (isLoading || isFetching) return;
+    if (pageData.length > 0 && !loadedPages[cacheKey]) {
+      setLoadedPages(prev => ({ ...prev, [cacheKey]: pageData }));
+      if (pageData.length < PAGE_SIZE) setHasMore(false);
+    } else if (pageData.length === 0 && page > 1) {
+      setHasMore(false);
+    }
+  }, [cacheKey, pageData, isLoading, isFetching, page]);
 
   const displayedJobs: any[] = [];
   for (let p = 1; p <= page; p++) {

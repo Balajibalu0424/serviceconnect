@@ -1304,6 +1304,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       // Location matching logic
+      // Principle: be permissive. A job should only be excluded when we can PROVE
+      // it is out of range. Jobs without coordinates cannot be distance-checked,
+      // so we include them (optionally narrowed by serviceAreas text match).
+      // acos() is wrapped in LEAST(1.0, ...) to avoid domain errors on identical
+      // coordinates (floating-point precision can push the argument slightly >1).
       if (profile?.lat && profile?.lng) {
         const radius = profile.radiusKm || 25;
         const lat = Number(profile.lat);
@@ -1322,11 +1327,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 (
                   (
                     ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
-                    6371 * acos(
+                    6371 * acos(LEAST(1.0,
                       cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
                       cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
                       sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-                    ) <= ${radius}
+                    )) <= ${radius}
                   )
                   OR
                   (
@@ -1337,12 +1342,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               `
             : sql`
                 (
-                  ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
-                  6371 * acos(
-                    cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
-                    cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
-                    sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-                  ) <= ${radius}
+                  (${jobs.lat} IS NULL OR ${jobs.lng} IS NULL)
+                  OR
+                  (
+                    ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
+                    6371 * acos(LEAST(1.0,
+                      cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
+                      cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
+                      sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
+                    )) <= ${radius}
+                  )
                 )
               `
         );
