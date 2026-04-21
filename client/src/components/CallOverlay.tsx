@@ -54,6 +54,58 @@ export function CallOverlay() {
     return () => clearInterval(id);
   }, [callStatus]);
 
+  // Play synthetic ringing/dial tone sounds
+  useEffect(() => {
+    if (callStatus !== "RINGING" && callStatus !== "INITIATING") return;
+
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    if (callStatus === "RINGING") {
+      // European ring pattern: 400Hz + 450Hz, 1s on, 2s off
+      oscillator.type = "sine";
+      oscillator.frequency.value = 425;
+      
+      const now = audioCtx.currentTime;
+      for (let i = 0; i < 20; i++) {
+        const start = now + i * 3;
+        gainNode.gain.setValueAtTime(0, start);
+        gainNode.gain.linearRampToValueAtTime(0.5, start + 0.1);
+        gainNode.gain.setValueAtTime(0.5, start + 1);
+        gainNode.gain.linearRampToValueAtTime(0, start + 1.1);
+      }
+    } else if (callStatus === "INITIATING") {
+      // Dial tone pattern: 400Hz + 450Hz, 0.4s on, 0.2s off, 0.4s on, 2s off
+      oscillator.type = "sine";
+      oscillator.frequency.value = 425;
+      
+      const now = audioCtx.currentTime;
+      for (let i = 0; i < 20; i++) {
+        const start = now + i * 3;
+        gainNode.gain.setValueAtTime(0, start);
+        gainNode.gain.linearRampToValueAtTime(0.1, start + 0.05);
+        gainNode.gain.setValueAtTime(0.1, start + 0.4);
+        gainNode.gain.linearRampToValueAtTime(0, start + 0.45);
+        
+        gainNode.gain.setValueAtTime(0, start + 0.65);
+        gainNode.gain.linearRampToValueAtTime(0.1, start + 0.7);
+        gainNode.gain.setValueAtTime(0.1, start + 1.1);
+        gainNode.gain.linearRampToValueAtTime(0, start + 1.15);
+      }
+    }
+
+    oscillator.start();
+
+    return () => {
+      oscillator.stop();
+      audioCtx.close().catch(() => {});
+    };
+  }, [callStatus]);
+
   if (callStatus === "IDLE" || !activeCall) return null;
 
   return (
