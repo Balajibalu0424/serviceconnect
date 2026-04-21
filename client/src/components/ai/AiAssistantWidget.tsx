@@ -144,6 +144,9 @@ export default function AiAssistantWidget() {
         credentials: "include",
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "AI assistant unavailable");
+      }
       const aiReply = data.reply || "I can help you post a job. What service do you need?";
       setMessages([...newMessages, { role: "assistant", content: aiReply }]);
 
@@ -156,10 +159,12 @@ export default function AiAssistantWidget() {
           setDraftData(draft);
         }
       }
-    } catch {
+    } catch (error) {
       setMessages([...newMessages, {
         role: "assistant",
-        content: "Having trouble connecting. Please try again.",
+        content: error instanceof Error && error.message
+          ? error.message
+          : "Having trouble connecting. Please try again.",
       }]);
     } finally {
       setLoading(false);

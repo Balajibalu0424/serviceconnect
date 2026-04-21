@@ -32,6 +32,9 @@ export default function AiEnhanceButton({
         credentials: "include",
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "AI unavailable");
+      }
       onResult(data);
       setDone(true);
       setTimeout(() => setDone(false), 3000);

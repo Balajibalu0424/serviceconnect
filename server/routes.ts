@@ -31,7 +31,7 @@ import {
 import {
   enhanceJobDescription, smartCategoryDetect, deepFakeAnalysis,
   generateQuoteSuggestion, aiChatAssistant, smartProMatch,
-  generateReviewSummary, enhanceProBio, isGeminiAvailable,
+  generateReviewSummary, enhanceProBio, getGeminiModelName, isGeminiAvailable,
   handleOnboardingChat
 } from "./geminiService";
 import { z } from "zod";
@@ -5282,7 +5282,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Health check
   app.get("/api/ai/status", (req, res) => {
-    res.json({ available: isGeminiAvailable(), model: "gemini-2.0-flash" });
+    res.json({ available: isGeminiAvailable(), model: getGeminiModelName() });
   });
 
   // AI: Enhance job description

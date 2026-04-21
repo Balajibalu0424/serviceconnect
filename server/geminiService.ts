@@ -5,7 +5,7 @@
  * result and falls back gracefully when the API key is missing or the model
  * is unreachable.
  *
- * Model: gemini-2.0-flash (fast, cheap, excellent for structured output)
+ * Model: gemini-2.5-flash by default. Override with GEMINI_MODEL if needed.
  */
 
 import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
@@ -13,6 +13,7 @@ import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/ge
 // ─── Initialise Client ───────────────────────────────────────────────────────
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
+const MODEL_NAME = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 let genAI: GoogleGenerativeAI | null = null;
 
 if (API_KEY) {
@@ -32,13 +33,17 @@ const safetySettings = [
 function getModel() {
   if (!genAI) throw new Error("GEMINI_API_KEY not configured — add it to your environment variables");
   return genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: MODEL_NAME,
     safetySettings,
     generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
   });
 }
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
+
+export function getGeminiModelName(): string {
+  return MODEL_NAME;
+}
 
 async function ask(prompt: string): Promise<string> {
   const model = getModel();
@@ -251,9 +256,10 @@ async function aiChatWidgetSandboxed(
   context: { userName?: string; userRole?: string }
 ): Promise<AiChatResponse> {
   const REDIRECT = "I can help you post a job or raise a support ticket. Which would you like to do?";
+  const UNAVAILABLE = "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment.";
 
   if (!isGeminiAvailable()) {
-    return { reply: REDIRECT };
+    return { reply: UNAVAILABLE };
   }
 
   const contextMessages = history
@@ -292,7 +298,7 @@ Respond in JSON: { "reply": "string", "action": "none" | "create_ticket", "ticke
     };
   } catch (error) {
     console.error("[Gemini] aiChatWidgetSandboxed failed:", error);
-    return { reply: REDIRECT };
+    return { reply: UNAVAILABLE };
   }
 }
 
@@ -618,7 +624,6 @@ Return ONLY valid JSON in this format:
 
 export function isGeminiAvailable(): boolean {
   if (!genAI) return false;
-  // Verify the key looks valid (Gemini keys start with "AI" and are 39 chars)
   if (!API_KEY || API_KEY.length < 10) {
     console.warn("[Gemini] API key appears invalid (too short)");
     return false;
@@ -631,7 +636,7 @@ export function isGeminiAvailable(): boolean {
 async function validateKeyOnStartup(): Promise<void> {
   if (!genAI) return;
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
     const result = await model.generateContent("Reply with exactly: OK");
     const text = result.response.text();
     if (text) {

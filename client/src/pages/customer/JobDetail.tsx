@@ -238,12 +238,28 @@ export default function JobDetail() {
         description: editForm.description,
         category: job?.category?.name || "general",
       });
-      if (res.ok) {
-        const data = await res.json();
-        setEditForm(f => ({ ...f, description: data.enhanced || data.description || f.description }));
-        toast({ title: "Description enhanced", description: "AI has improved your job description." });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "AI enhancement unavailable");
       }
-    } catch { /* ignore */ }
+
+      const nextDescription = data.enhanced || data.description || editForm.description;
+      const changed = typeof nextDescription === "string" && nextDescription.trim() !== editForm.description.trim();
+      const improvementCount = Array.isArray(data.improvements) ? data.improvements.length : 0;
+
+      if (!changed && improvementCount === 0) {
+        throw new Error("AI enhancement is currently unavailable");
+      }
+
+      setEditForm(f => ({ ...f, description: nextDescription }));
+      toast({ title: "Description enhanced", description: "AI has improved your job description." });
+    } catch (error: any) {
+      toast({
+        title: "AI unavailable",
+        description: error?.message || "Please try again in a moment.",
+        variant: "destructive",
+      });
+    }
     setEnhancing(false);
   };
 

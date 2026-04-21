@@ -64879,6 +64879,7 @@ var GoogleGenerativeAI = class {
 
 // server/geminiService.ts
 var API_KEY = process.env.GEMINI_API_KEY || "";
+var MODEL_NAME = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 var genAI = null;
 if (API_KEY) {
   genAI = new GoogleGenerativeAI(API_KEY);
@@ -64895,10 +64896,13 @@ var safetySettings = [
 function getModel() {
   if (!genAI) throw new Error("GEMINI_API_KEY not configured \u2014 add it to your environment variables");
   return genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: MODEL_NAME,
     safetySettings,
     generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
   });
+}
+function getGeminiModelName() {
+  return MODEL_NAME;
 }
 async function ask(prompt) {
   const model = getModel();
@@ -65000,8 +65004,9 @@ Return ONLY valid JSON:
 }
 async function aiChatWidgetSandboxed(userMessage, userRole, history, context) {
   const REDIRECT = "I can help you post a job or raise a support ticket. Which would you like to do?";
+  const UNAVAILABLE = "I'm sorry, the AI assistant is temporarily unavailable. Please try again in a moment.";
   if (!isGeminiAvailable()) {
-    return { reply: REDIRECT };
+    return { reply: UNAVAILABLE };
   }
   const contextMessages = history.slice(-6).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
   const systemPrompt = `You are ServiceConnect AI, a strictly scoped assistant.
@@ -65040,7 +65045,7 @@ JSON response:`);
     };
   } catch (error) {
     console.error("[Gemini] aiChatWidgetSandboxed failed:", error);
-    return { reply: REDIRECT };
+    return { reply: UNAVAILABLE };
   }
 }
 async function aiChatAssistant(userMessage, userRole, conversationHistory = [], sandboxedContext) {
@@ -65275,7 +65280,7 @@ function isGeminiAvailable() {
 async function validateKeyOnStartup() {
   if (!genAI) return;
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
     const result = await model.generateContent("Reply with exactly: OK");
     const text2 = result.response.text();
     if (text2) {
@@ -73798,8 +73803,7 @@ async function addCredits(userId, amount, type, description, referenceType, refe
   });
 }
 async function registerRoutes(httpServer, app2) {
-  app2.post("/api/pusher/auth", (req, res) => {
-    if (!req.user) return res.status(401).send("Unauthorized");
+  app2.post("/api/pusher/auth", requireAuth, (req, res) => {
     const socketId = req.body.socket_id;
     const channel = req.body.channel_name;
     if (channel) {
@@ -73807,10 +73811,10 @@ async function registerRoutes(httpServer, app2) {
       return res.send(authResponse);
     } else {
       const userData = {
-        id: req.user.id.toString(),
+        id: req.user.userId,
         user_info: {
-          name: `${req.user.firstName} ${req.user.lastName}`,
-          email: req.user.email
+          name: `User ${req.user.userId}`,
+          role: req.user.role
         }
       };
       const authResponse = pusher.authenticateUser(socketId, userData);
@@ -74428,44 +74432,13 @@ async function registerRoutes(httpServer, app2) {
           return res.json({ jobs: [], noCategories: true });
         }
       }
-      if (profile?.lat && profile?.lng) {
-        const radius = profile.radiusKm || 25;
-        const lat = Number(profile.lat);
-        const lng = Number(profile.lng);
-        const areaConditions = Array.isArray(profile.serviceAreas) ? profile.serviceAreas.map((area) => String(area).trim()).filter(Boolean).map((area) => sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`) : [];
-        const coordlessFallback = areaConditions.length > 0 ? or(...areaConditions) : null;
-        conditions.push(
-          coordlessFallback ? sql`
-                (
-                  (
-                    ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
-                    6371 * acos(
-                      cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
-                      cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
-                      sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-                    ) <= ${radius}
-                  )
-                  OR
-                  (
-                    (${jobs.lat} IS NULL OR ${jobs.lng} IS NULL) AND
-                    ${coordlessFallback}
-                  )
-                )
-              ` : sql`
-                (
-                  ${jobs.lat} IS NOT NULL AND ${jobs.lng} IS NOT NULL AND
-                  6371 * acos(
-                    cos(radians(${lat})) * cos(radians(CAST(${jobs.lat} AS float))) *
-                    cos(radians(CAST(${jobs.lng} AS float)) - radians(${lng})) +
-                    sin(radians(${lat})) * sin(radians(CAST(${jobs.lat} AS float)))
-                  ) <= ${radius}
-                )
-              `
-        );
-      } else if (profile?.serviceAreas && profile.serviceAreas.length > 0) {
-        const areaConditions = profile.serviceAreas.map(
-          (area) => sql`${jobs.locationTown} ILIKE ${`%${area}%`} OR ${jobs.locationText} ILIKE ${`%${area}%`}`
-        );
+      const areas = Array.isArray(profile?.serviceAreas) ? profile.serviceAreas.map((a) => String(a).trim()).filter(Boolean) : [];
+      if (areas.length > 0) {
+        const areaConditions = areas.map((area) => sql`
+          ${jobs.locationTown} ILIKE ${`%${area}%`}
+          OR ${jobs.locationText} ILIKE ${`%${area}%`}
+          OR ${jobs.locationEircode} ILIKE ${`%${area}%`}
+        `);
         conditions.push(or(...areaConditions));
       }
     }
@@ -75321,21 +75294,26 @@ async function registerRoutes(httpServer, app2) {
       const userId = req.user.userId;
       const { targetId, jobId, bookingId, reason } = req.body;
       if (!targetId) return res.status(400).json({ error: "Target user is required" });
+      let callReq;
       const [existing] = await db.select().from(callRequests).where(and(
         eq(callRequests.requesterId, userId),
         eq(callRequests.targetId, targetId),
         eq(callRequests.status, "PENDING")
       ));
-      if (existing) return res.status(409).json({ error: "You already have a pending call request with this user" });
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1e3);
-      const [callReq] = await db.insert(callRequests).values({
-        requesterId: userId,
-        targetId,
-        jobId: jobId || null,
-        bookingId: bookingId || null,
-        reason: reason || "Would like to discuss the project",
-        expiresAt
-      }).returning();
+      if (existing) {
+        callReq = existing;
+      } else {
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1e3);
+        const [inserted] = await db.insert(callRequests).values({
+          requesterId: userId,
+          targetId,
+          jobId: jobId || null,
+          bookingId: bookingId || null,
+          reason: reason || "Would like to discuss the project",
+          expiresAt
+        }).returning();
+        callReq = inserted;
+      }
       const [requester] = await db.select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, userId));
       await createNotification(
         targetId,
@@ -75436,9 +75414,20 @@ async function registerRoutes(httpServer, app2) {
         ];
         const [unreadResult] = await db.select({ c: count() }).from(messages).where(and(...unreadConditions));
         let jobData = null;
+        let phoneUnlocked = false;
+        const proParticipant = participants.find((p) => p.role === "PROFESSIONAL");
         if (conv.jobId) {
-          const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
+          const [j] = await db.select({ title: jobs.title, status: jobs.status, creditCost: jobs.creditCost }).from(jobs).where(eq(jobs.id, conv.jobId));
           jobData = j || null;
+          if (proParticipant) {
+            const [stdUnlock] = await db.select({ phoneUnlocked: jobUnlocks.phoneUnlocked }).from(jobUnlocks).where(and(
+              eq(jobUnlocks.jobId, conv.jobId),
+              eq(jobUnlocks.professionalId, proParticipant.id),
+              eq(jobUnlocks.tier, "STANDARD"),
+              eq(jobUnlocks.phoneUnlocked, true)
+            ));
+            if (stdUnlock) phoneUnlocked = true;
+          }
         }
         const other = participants.find((p) => p.id !== userId);
         const otherName = other ? `${other.firstName} ${other.lastName}`.trim() : "Unknown";
@@ -75449,6 +75438,7 @@ async function registerRoutes(httpServer, app2) {
           lastMessage: lastMsg?.content || null,
           lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
           unreadCount: unreadResult?.c ?? 0,
+          phoneUnlocked,
           // Full objects also available
           participants,
           job: jobData
@@ -77842,7 +77832,7 @@ async function registerRoutes(httpServer, app2) {
     }
   });
   app2.get("/api/ai/status", (req, res) => {
-    res.json({ available: isGeminiAvailable(), model: "gemini-2.0-flash" });
+    res.json({ available: isGeminiAvailable(), model: getGeminiModelName() });
   });
   app2.post("/api/ai/enhance-description", requireAuth, async (req, res) => {
     try {
