@@ -123,6 +123,19 @@ export default function Chat() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const upgradeCall = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await apiRequest("POST", `/api/jobs/${jobId}/upgrade`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Upgraded!", description: "You can now make and receive calls for this job." });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
+    },
+    onError: (e: any) => toast({ title: "Upgrade Failed", description: e.message, variant: "destructive" }),
+  });
+
   const markRead = useMutation({
     mutationFn: async (convId: string) => {
       await apiRequest("PATCH", `/api/chat/conversations/${convId}/read`);
@@ -275,20 +288,48 @@ export default function Chat() {
                   </p>
                 </div>
                 {!isActiveConvFinished && (
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="gap-1.5 text-xs bg-green-500 hover:bg-green-600 shadow-lg"
-                    disabled={requestCall.isPending}
-                    onClick={() => {
-                      const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
-                      if (other) requestCall.mutate(other.id);
-                      else toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
-                    }}
-                  >
-                    <Phone className="w-4 h-4" />
-                    {requestCall.isPending ? "Requesting…" : "Request Call"}
-                  </Button>
+                  activeConv?.phoneUnlocked ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="gap-1.5 text-xs bg-green-500 hover:bg-green-600 shadow-lg"
+                      disabled={requestCall.isPending}
+                      onClick={() => {
+                        const other = activeConv?.participants?.find((p: any) => p.id !== user?.id);
+                        if (other) requestCall.mutate(other.id);
+                        else toast({ title: "Error", description: "Could not find the other participant", variant: "destructive" });
+                      }}
+                    >
+                      <Phone className="w-4 h-4" />
+                      {requestCall.isPending ? "Requesting…" : "Request Call"}
+                    </Button>
+                  ) : (
+                    user?.role === "PROFESSIONAL" ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="gap-1.5 text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300"
+                        disabled={upgradeCall.isPending || !activeConv?.jobId}
+                        onClick={() => {
+                          if (activeConv?.jobId) upgradeCall.mutate(activeConv.jobId);
+                        }}
+                      >
+                        <Lock className="w-4 h-4" />
+                        {upgradeCall.isPending ? "Upgrading…" : `Unlock Phone (${activeConv?.job?.creditCost || '?'} credits)`}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="gap-1.5 text-xs opacity-50 cursor-not-allowed"
+                        disabled
+                        title="The professional hasn't unlocked phone access for this job yet."
+                      >
+                        <Lock className="w-4 h-4" />
+                        Calls Locked
+                      </Button>
+                    )
+                  )
                 )}
               </div>
 

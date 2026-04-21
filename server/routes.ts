@@ -2534,10 +2534,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ];
         const [unreadResult] = await db.select({ c: count() }).from(messages).where(and(...unreadConditions));
 
-        let jobData: { title: string; status: string } | null = null;
+        let jobData: { title: string; status: string; creditCost: number } | null = null;
+        let phoneUnlocked = false;
+
+        const proParticipant = participants.find(p => p.role === "PROFESSIONAL");
+
         if (conv.jobId) {
-          const [j] = await db.select({ title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, conv.jobId));
+          const [j] = await db.select({ title: jobs.title, status: jobs.status, creditCost: jobs.creditCost }).from(jobs).where(eq(jobs.id, conv.jobId));
           jobData = j || null;
+
+          if (proParticipant) {
+            const [stdUnlock] = await db.select({ phoneUnlocked: jobUnlocks.phoneUnlocked })
+              .from(jobUnlocks)
+              .where(and(
+                eq(jobUnlocks.jobId, conv.jobId),
+                eq(jobUnlocks.professionalId, proParticipant.id),
+                eq(jobUnlocks.tier, "STANDARD"),
+                eq(jobUnlocks.phoneUnlocked, true)
+              ));
+            if (stdUnlock) phoneUnlocked = true;
+          }
         }
 
         // Compute the other participant's display name
@@ -2551,6 +2567,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           lastMessage: lastMsg?.content || null,
           lastMessageAt: lastMsg?.createdAt || conv.lastMessageAt,
           unreadCount: unreadResult?.c ?? 0,
+          phoneUnlocked,
           // Full objects also available
           participants,
           job: jobData,
