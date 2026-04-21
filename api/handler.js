@@ -64914,9 +64914,26 @@ async function ask(prompt) {
   return text2;
 }
 async function askJSON(prompt) {
-  const raw = await ask(prompt);
-  const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
-  const cleaned = (jsonMatch[1] || raw).trim();
+  const model = getModel();
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 2048,
+      responseMimeType: "application/json"
+    }
+  });
+  const raw = result.response.text();
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const withoutFences = fenced ? fenced[1].trim() : trimmed.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  const objectStart = withoutFences.indexOf("{");
+  const objectEnd = withoutFences.lastIndexOf("}");
+  const arrayStart = withoutFences.indexOf("[");
+  const arrayEnd = withoutFences.lastIndexOf("]");
+  const extractedObject = objectStart >= 0 && objectEnd > objectStart ? withoutFences.slice(objectStart, objectEnd + 1).trim() : null;
+  const extractedArray = arrayStart >= 0 && arrayEnd > arrayStart ? withoutFences.slice(arrayStart, arrayEnd + 1).trim() : null;
+  const cleaned = extractedObject || extractedArray || withoutFences;
   try {
     return JSON.parse(cleaned);
   } catch (parseErr) {
