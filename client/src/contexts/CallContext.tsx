@@ -75,6 +75,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
   const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([]);
 
   // PHASE 2 FIX: Keep a ref in sync with state so callbacks created at mount time
   // always read the current activeCall value, avoiding stale closures.
@@ -115,6 +116,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setActiveCall(null);
     activeCallRef.current = null;
     setIsMuted(false);
+    iceCandidateQueue.current = [];
     window.sessionStorage.removeItem("incoming_offer");
     if (showToast) {
       toast({ title: toastMsg });
@@ -160,27 +162,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ─── SOCKET LISTENERS ────────────────────────────────────────────────────────
-  // PHASE 3 FIX: Listen for "call_ready" — the new event the server fires when a
-  // DB call request is accepted. This is the correct trigger for the in-browser
-  // ringing/WebRTC flow (replaces the old immediate-call-on-button-click approach).
   useEffect(() => {
     if (!socket) return;
 
     // ── Initiated by SERVER after call-request acceptance ──
-    // Event: "call_ready" — server fires this to both parties when DB request is accepted.
-    // The caller receives it and immediately starts the WebRTC offer.
-    // The callee receives it and shows the incoming RINGING screen.
     const handleCallReady = ({ from, name, role }: { from: string; name: string; role: "caller" | "callee" }) => {
       console.debug("[WebRTC] call_ready received, role:", role);
 
       if (role === "callee") {
-        // Show incoming call screen — WebRTC offer will follow immediately
         setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: false });
         setCallStatus("RINGING");
       } else if (role === "caller") {
-        // Server fired call_ready — set activeCall from the event payload and start the offer.
-        // activeCallRef is null at this point (caller only did a REST request, not a UI action),
-        // so we must read from and name directly from the event.
         setActiveCall({ withUserId: from, withUserName: name || "User", isCaller: true });
         setCallStatus("INITIATING");
         _sendOffer(from).catch(console.error);
@@ -215,6 +207,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (peerConnection.current) {
         try {
           await peerConnection.current.setRemoteDescription(new RTCSessionDescription(signal));
+          // Process any queued ICE candidates for the caller
+          for (const c of iceCandidateQueue.current) {
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(c));
+          }
+          iceCandidateQueue.current = [];
         } catch (e) {
           console.error("[WebRTC] setRemoteDescription (answer) failed:", e);
         }
@@ -229,11 +226,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     // ── ICE candidates ──
     const handleIceCandidate = async ({ candidate }: any) => {
-      if (peerConnection.current && candidate) {
-        try {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.error("[WebRTC] addIceCandidate failed:", e);
+      if (candidate) {
+        if (peerConnection.current && peerConnection.current.remoteDescription) {
+          try {
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error("[WebRTC] addIceCandidate failed:", e);
+          }
+        } else {
+          // Queue the candidate if the PC or remote description isn't ready yet
+          console.debug("[WebRTC] Queuing ICE candidate (PC not ready)");
+          iceCandidateQueue.current.push(candidate);
         }
       }
     };
@@ -253,9 +256,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       socket.off("call_ended", handleCallEnded);
       socket.off("webrtc_ice_candidate", handleIceCandidate);
     };
-  // Only re-register when socket identity changes — NOT on callStatus change,
-  // which would create/drop listeners on every state transition.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
 
   // ─── INTERNAL: send offer (caller side after call_ready) ─────────────────────
@@ -287,8 +287,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   // ─── ACTIONS ─────────────────────────────────────────────────────────────────
 
-  // initiateCall: called when the server-side "call_ready" flow wants to
-  // programmatically start the caller side. Also usable directly if needed.
   const initiateCall = async (userId: string, userName: string) => {
     console.debug("[WebRTC] initiateCall →", userId);
     setActiveCall({ withUserId: userId, withUserName: userName, isCaller: true });
@@ -315,6 +313,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const offer = JSON.parse(incomingOfferStr);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       window.sessionStorage.removeItem("incoming_offer");
+
+      // Process any queued ICE candidates that arrived before we clicked Accept
+      for (const c of iceCandidateQueue.current) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(c));
+        } catch (e) {
+          console.error("[WebRTC] queued addIceCandidate failed:", e);
+        }
+      }
+      iceCandidateQueue.current = [];
 
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
