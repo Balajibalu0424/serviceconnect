@@ -508,8 +508,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   
   // Auth for private channels
   // Unified Pusher Auth (Handles both signin and channel subscription)
-  app.post("/api/pusher/auth", (req: any, res) => {
-    if (!req.user) return res.status(401).send("Unauthorized");
+  app.post("/api/pusher/auth", requireAuth, (req: AuthRequest, res) => {
     const socketId = req.body.socket_id;
     const channel = req.body.channel_name;
 
@@ -520,10 +519,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } else {
       // User authentication (pusher.signin())
       const userData = {
-        id: req.user.id.toString(),
+        id: req.user!.userId,
         user_info: {
-          name: `${req.user.firstName} ${req.user.lastName}`,
-          email: req.user.email
+          name: `User ${req.user!.userId}`,
+          role: req.user!.role,
         }
       };
       const authResponse = pusher.authenticateUser(socketId, userData);
@@ -2373,24 +2372,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!targetId) return res.status(400).json({ error: "Target user is required" });
 
       // Check if there's already a pending call request
+      let callReq;
       const [existing] = await db.select().from(callRequests)
         .where(and(
           eq(callRequests.requesterId, userId),
           eq(callRequests.targetId, targetId),
           eq(callRequests.status, "PENDING")
         ));
-      if (existing) return res.status(409).json({ error: "You already have a pending call request with this user" });
-
-      // Create the call request (expires in 24 hours)
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const [callReq] = await db.insert(callRequests).values({
-        requesterId: userId,
-        targetId,
-        jobId: jobId || null,
-        bookingId: bookingId || null,
-        reason: reason || "Would like to discuss the project",
-        expiresAt,
-      }).returning();
+      
+      if (existing) {
+        // If there's an existing request, just reuse it and "ring" the other party again
+        callReq = existing;
+      } else {
+        // Create the call request (expires in 24 hours)
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const [inserted] = await db.insert(callRequests).values({
+          requesterId: userId,
+          targetId,
+          jobId: jobId || null,
+          bookingId: bookingId || null,
+          reason: reason || "Would like to discuss the project",
+          expiresAt,
+        }).returning();
+        callReq = inserted;
+      }
 
       // Get requester name for notification
       const [requester] = await db.select({ firstName: users.firstName, lastName: users.lastName })
