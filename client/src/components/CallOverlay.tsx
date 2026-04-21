@@ -1,12 +1,39 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useCall } from "@/contexts/CallContext";
 import { Button } from "./ui/button";
-import { Phone, PhoneOff, Mic, MicOff } from "lucide-react";
+import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 
 export function CallOverlay() {
   const { callStatus, activeCall, remoteStream, acceptCall, declineCall, endCall, toggleMute, isMuted } = useCall();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [callSeconds, setCallSeconds] = useState(0);
+  const [isSpeaker, setIsSpeaker] = useState(true);
+
+  const toggleSpeaker = async () => {
+    if (!audioRef.current) return;
+    
+    try {
+      // Toggle the internal muted state of the HTMLAudioElement
+      // This serves as an "Undeafen/Deafen" button, or just a simple Volume toggle
+      audioRef.current.muted = isSpeaker;
+      setIsSpeaker(!isSpeaker);
+      
+      // If the browser supports output device selection (e.g. Chrome/Android)
+      // we can attempt to switch from earpiece to loudspeaker
+      if (typeof (audioRef.current as any).setSinkId === 'function') {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+        if (audioOutputs.length > 1) {
+          // Simplistic toggle between available audio outputs
+          const currentSinkId = (audioRef.current as any).sinkId;
+          const nextDevice = audioOutputs.find(d => d.deviceId !== currentSinkId) || audioOutputs[0];
+          await (audioRef.current as any).setSinkId(nextDevice.deviceId);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not toggle speaker output", err);
+    }
+  };
 
   // Hook up the remote stream to the audio element when it becomes active
   useEffect(() => {
@@ -110,10 +137,20 @@ export function CallOverlay() {
               <span className="text-xs text-muted-foreground font-medium">In Call</span>
               <div className="flex gap-2">
                 <Button
+                  variant={!isSpeaker ? "secondary" : "default"}
+                  size="icon"
+                  className="rounded-full w-10 h-10 hover:scale-105 transition-transform"
+                  onClick={toggleSpeaker}
+                  title="Toggle Speaker"
+                >
+                  {isSpeaker ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                </Button>
+                <Button
                   variant={isMuted ? "destructive" : "secondary"}
                   size="icon"
                   className="rounded-full w-10 h-10 hover:scale-105 transition-transform"
                   onClick={toggleMute}
+                  title="Mute Microphone"
                 >
                   {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </Button>
@@ -122,6 +159,7 @@ export function CallOverlay() {
                   size="icon"
                   className="rounded-full w-10 h-10 hover:scale-105 transition-transform"
                   onClick={endCall}
+                  title="End Call"
                 >
                   <PhoneOff className="w-4 h-4" />
                 </Button>
