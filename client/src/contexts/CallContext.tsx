@@ -36,8 +36,8 @@ const buildIceServers = (): RTCConfiguration => {
     { urls: "stun:global.stun.twilio.com:3478" },
   ];
 
-  const turnUser = import.meta.env.VITE_METERED_USERNAME || "b0ff44e5de8a218ae5fb69e0";
-  const turnCred = import.meta.env.VITE_METERED_CREDENTIAL || "c8h7Hc1PbI0yBYzb";
+  const turnUser = import.meta.env.VITE_METERED_USERNAME;
+  const turnCred = import.meta.env.VITE_METERED_CREDENTIAL;
 
   if (turnUser && turnCred) {
     servers.push(
