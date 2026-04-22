@@ -1,0 +1,129 @@
+[Console Log] ./test_fake_job.js:34: console.log("Got token:", !!token);
+[Console Log] ./test_fake_job.js:54: console.log("Job status:", jobRes.status);
+[Console Log] ./test_fake_job.js:55: console.log("Job Response:", text);
+[Console Log] ./test_triggers.js:21: console.log("TRIGGERS:", JSON.stringify(res.rows, null, 2));
+[Console Log] ./live_api_test.js:18: console.log('--- Area 1: Quote Loading ---');
+[Console Log] ./live_api_test.js:21: console.log(`Total quotes fetched: ${quotes.length}`);
+[Console Log] ./live_api_test.js:26: console.log(`Filtered quotes for job ${quote.jobId}: ${filteredQuotes.length}`);
+[Console Log] ./live_api_test.js:28: console.log(`Leak check: ${mismatch ? 'FAIL (Leaked other jobs)' : 'PASS'}`);
+[Console Log] ./live_api_test.js:31: console.log('\n--- Area 4: Notification Preferences ---');
+[Console Log] ./live_api_test.js:35: console.log('Current Preferences:', profile.notificationPreferences);
+[Console Log] ./live_api_test.js:46: console.log('Updated Preferences:', updatedProfile.notificationPreferences);
+[Console Log] ./live_api_test.js:48: console.log(`Persistence check: ${persistCheck ? 'PASS' : 'FAIL'}`);
+[Console Log] ./live_api_test.js:50: console.log('\n--- Area 5: Job Feed Radius ---');
+[Console Log] ./live_api_test.js:53: console.log(`Jobs in feed: ${feedData.jobs?.length || 0}`);
+[Console Log] ./test_onboarding.js:8: console.log("Using categoryId:", categoryId);
+[Console Log] ./test_onboarding.js:32: console.log("Status:", res.status);
+[Console Log] ./test_onboarding.js:33: console.log("Response:", text);
+[Console Log] ./script/build.ts:43: console.log("building client...");
+[Console Log] ./script/build.ts:46: console.log("building server...");
+[Console Log] ./script/build.ts:68: console.log("building vercel api function...");
+[Console Log] ./script/seed-test-users.ts:7: console.log("Seeding test users...");
+[Console Log] ./script/seed-test-users.ts:22: console.log(`Updating existing user: ${tu.email}`);
+[Console Log] ./script/seed-test-users.ts:32: console.log(`Creating new user: ${tu.email}`);
+[Console Log] ./script/seed-test-users.ts:47: console.log("Successfully seeded test users!");
+[Console Log] ./api/index.ts:39: console.log(`${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`);
+[TODO/FIXME] ./api/handler.js:4807: // TODO: KDDI extension to Shift_JIS
+[TODO/FIXME] ./api/handler.js:4808: // TODO: IBM CCSID 942 = CP932, but F0-F9 custom chars and other char changes.
+[TODO/FIXME] ./api/handler.js:4809: // TODO: IBM CCSID 943 = Shift_JIS = CP932 with original Shift_JIS lower 128 chars.
+[TODO/FIXME] ./api/handler.js:32693: // TODO: Make these a separate, strict decoder?
+[Console Log] ./api/handler.js:40962: console.log("ERROR: ElementType not implemented: " + elementType2);
+[Possible Hardcoded Secret] ./api/handler.js:45549: var MSG_INVALID_SECRET = "secret must be a string or buffer";
+[Possible Hardcoded Secret] ./api/handler.js:45550: var MSG_INVALID_VERIFIER_KEY = "key must be a string or a buffer";
+[Possible Hardcoded Secret] ./api/handler.js:45551: var MSG_INVALID_SIGNER_KEY = "key must be a string, a buffer or an object";
+[TODO/FIXME] ./api/handler.js:49843: // TODO: probably useful to have a numeric version of this too
+[TODO/FIXME] ./api/handler.js:50063: // TODO: Improve the semantics of this helper function
+[TODO/FIXME] ./api/handler.js:50082: // TODO: Make private?
+[Console Log] ./api/handler.js:50601: console.log(message);
+[Console Log] ./api/handler.js:63194: console.log("[Aftercare] Running check...");
+[Console Log] ./api/handler.js:63220: console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_2D`);
+[Console Log] ./api/handler.js:63246: console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_5D`);
+[Console Log] ./api/handler.js:63285: console.log(`[Aftercare] Job ${job.id} auto-closed`);
+[Console Log] ./api/handler.js:63287: console.log("[Aftercare] Check complete");
+[Console Log] ./api/handler.js:63291: console.log("[Aftercare Scheduler] Started \u2014 runs every hour");
+[Console Log] ./api/handler.js:65273: console.log("[Gemini] API key configured, AI features enabled");
+[Console Log] ./api/handler.js:65701: console.log("[Gemini] \u2713 API key validated successfully \u2014 AI features are live");
+[TODO/FIXME] ./api/handler.js:67312: // todo: suggest a valid option with a short levenstein distance?
+[Console Log] ./api/handler.js:78418: console.log(`${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`);
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Empty Catch Block] ./api/handler.js: found empty catch block
+[Console Log] ./tmp/simulate_aftercare_5d.ts:8: console.log(`[SIM] Notification for ${userId}: ${type} - ${title}: ${message}`, data);
+[Console Log] ./tmp/simulate_aftercare_5d.ts:21: console.log(`Aging job ${job.id} to 125 hours ago with purchase...`);
+[Console Log] ./tmp/simulate_aftercare_5d.ts:39: console.log('Running Aftercare Check...');
+[Console Log] ./tmp/simulate_aftercare_5d.ts:43: console.log('Updated Status:', updatedJob[0].status);
+[Console Log] ./tmp/simulate_aftercare_2d.ts:9: console.log(`[SIM] Notification for ${userId}: ${type} - ${title}: ${message}`, data);
+[Console Log] ./tmp/simulate_aftercare_2d.ts:24: console.log(`Aging job ${job.id} to 50 hours ago...`);
+[Console Log] ./tmp/simulate_aftercare_2d.ts:32: console.log('Running Aftercare Check...');
+[Console Log] ./tmp/simulate_aftercare_2d.ts:36: console.log('Updated Status:', updatedJob[0].status);
+[Console Log] ./tmp/find_jobs.ts:13: console.log(JSON.stringify(aliceJobs, null, 2));
+[Console Log] ./tmp/check_job.ts:8: console.log(JSON.stringify(job[0], null, 2));
+[Console Log] ./server/geminiService.ts:26: console.log("[Gemini] API key configured, AI features enabled");
+[Console Log] ./server/geminiService.ts:688: console.log("[Gemini] ✓ API key validated successfully — AI features are live");
+[Console Log] ./server/scheduler.ts:11: console.log("[Aftercare] Running check...");
+[Console Log] ./server/scheduler.ts:40: console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_2D`);
+[Console Log] ./server/scheduler.ts:69: console.log(`[Aftercare] Job ${job.id} moved to AFTERCARE_5D`);
+[Console Log] ./server/scheduler.ts:117: console.log(`[Aftercare] Job ${job.id} auto-closed`);
+[Console Log] ./server/scheduler.ts:120: console.log("[Aftercare] Check complete");
+[Console Log] ./server/scheduler.ts:129: console.log("[Aftercare Scheduler] Started — runs every hour");
+[Console Log] ./server/seed-topup.ts:10: console.log("Starting seed top-up...");
+[Console Log] ./server/seed-topup.ts:102: console.log(`✅ Added ${newJobs.length} new LIVE jobs`);
+[Console Log] ./server/seed-topup.ts:103: newJobs.forEach(j => console.log(`  - ${j.title} [${j.status}]`));
+[Console Log] ./server/check_counts.ts:8: console.log(`users: ${u.c}, service_categories: ${s.c}`);
+[Console Log] ./server/seed.ts:12: console.log("Seeding database...");
+[Console Log] ./server/seed.ts:17: console.log(`Database already has ${existing[0].c} users — skipping seed to prevent duplicates.`);
+[Console Log] ./server/seed.ts:41: console.log(`Created ${categories.length} service categories`);
+[Console Log] ./server/seed.ts:282: console.log("Seed complete!");
+[Console Log] ./server/seed.ts:283: console.log("\nTest accounts:");
+[Console Log] ./server/seed.ts:284: console.log("  Admin:    admin@serviceconnect.ie / admin123456");
+[Console Log] ./server/seed.ts:285: console.log("  Customer: alice@test.com / password123");
+[Console Log] ./server/seed.ts:286: console.log("  Customer: bob@test.com / password123");
+[Console Log] ./server/seed.ts:287: console.log("  Customer: charlie@test.com / password123");
+[Console Log] ./server/seed.ts:288: console.log("  Pro:      pro1@test.com / password123 (Plumber, 20 credits)");
+[Console Log] ./server/seed.ts:289: console.log("  Pro:      pro2@test.com / password123 (Electrician, 20 credits)");
+[Console Log] ./server/seed.ts:290: console.log("  Pro:      pro3@test.com / password123 (Painter, 20 credits)");
+[Console Log] ./client/src/contexts/CallContext.tsx:136: console.debug("[WebRTC] Sending ICE candidate to", targetUserId);
+[Console Log] ./client/src/contexts/CallContext.tsx:145: console.debug("[WebRTC] Remote track received");
+[Console Log] ./client/src/contexts/CallContext.tsx:151: console.debug("[WebRTC] Connection state:", pc.connectionState);
+[Console Log] ./client/src/contexts/CallContext.tsx:170: console.debug("[WebRTC] call_ready received, role:", role);
+[Console Log] ./client/src/contexts/CallContext.tsx:184: console.debug("[WebRTC] incoming_call (offer) from:", from);
+[Console Log] ./client/src/contexts/CallContext.tsx:205: console.debug("[WebRTC] call_accepted (answer) received");
+[Console Log] ./client/src/contexts/CallContext.tsx:223: console.debug("[WebRTC] call_ended/call_declined received:", reason);
+[Console Log] ./client/src/contexts/CallContext.tsx:238: console.debug("[WebRTC] Queuing ICE candidate (PC not ready)");
+[Console Log] ./client/src/contexts/CallContext.tsx:271: console.debug("[WebRTC] Sending offer to", targetUserId);
+[Console Log] ./client/src/contexts/CallContext.tsx:291: console.debug("[WebRTC] initiateCall →", userId);
+[Console Log] ./client/src/contexts/CallContext.tsx:330: console.debug("[WebRTC] Sending answer to", callInfo.withUserId);
+[Empty Catch Block] ./client/src/pages/customer/PostJob.tsx: found empty catch block
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:264: <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:269: dataKey="count"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:307: <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:315: dataKey="total"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:347: <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:350: <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Signups" />
+[Possible Hardcoded Secret] ./client/src/pages/admin/Metrics.tsx:381: dataKey="value"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Dashboard.tsx:236: dataKey="c"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Dashboard.tsx:237: nameKey="role"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Dashboard.tsx:273: dataKey="c"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Dashboard.tsx:274: nameKey="status"
+[Possible Hardcoded Secret] ./client/src/pages/admin/Dashboard.tsx:310: <YAxis type="category" dataKey="status" tick={{ fontSize: 11 }} width={80} />
+[Possible Hardcoded Secret] ./client/src/pages/admin/Dashboard.tsx:314: <Bar dataKey="c" name="Count" radius={[0, 6, 6, 0]}>
+[Possible Hardcoded Secret] ./client/src/lib/onboarding.ts:1: const ONBOARDING_SESSION_KEY = "sc_onboarding_session_id";
