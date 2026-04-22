@@ -2402,3 +2402,37 @@ Replace the thin placeholder marketing surface with real, conversion-focused pub
 ### Deferred (tracked for a follow-up pass)
 - `admin/AuditLogs.tsx`, `admin/Support.tsx`, `pro/VerificationPending.tsx` — still using bespoke headers.
 - Dedicated pro-dashboard summary endpoint (win-rate / earnings / streak) — current client-side reduces are sufficient for the pages shipped this session.
+## Session 16 - Bark-Style Onboarding Questioning
+
+Goal: make the AI intake behave more like a structured lead questionnaire by asking the next most relevant missing question instead of generic follow-ups.
+
+What changed:
+- Added a deterministic onboarding questioning layer in `server/onboardingQuestioning.ts`.
+- Customer intake now normalizes category detection, quality-checks the brief, and asks category-aware follow-ups such as:
+  - plumbing/electrical: issue type, affected fitting, property context
+  - cleaning: one-off vs recurring, property size, focus areas
+  - painting/gardening/handyman: exact task, surfaces/items, size/quantity
+  - removals: from/to, move size, access constraints
+  - tutoring/training/pet care: subject/goal/pet details plus delivery or schedule
+  - photography/catering/web design: project type, timing, scope/features
+- Customer intake now waits for timing or schedule context before marking the brief complete.
+- Professional intake also now asks the next missing profile detail deterministically instead of relying only on model phrasing.
+- Updated the legacy AI onboarding greeting copy so the conversation starts with scope, affected area, and location.
+
+Files changed:
+- `server/onboardingQuestioning.ts`
+- `server/onboardingQuestioning.test.ts`
+- `server/geminiService.ts`
+- `client/src/components/onboarding/AiOnboardingFlow.tsx`
+- `client/src/pages/customer/PostJob.tsx`
+
+Validation:
+- `npm run check` passed
+- `npx vitest run --config vitest.server.config.ts server/onboardingQuestioning.test.ts` passed
+- `npm run build` passed
+- Local smoke test through `handleOnboardingChat()` confirmed:
+  - first plumbing message asked for the missing affected fixture
+  - second message rewrote the brief with location, scope, and timing and completed the intake
+
+Remaining note:
+- This is intentionally pattern-based, not a copy of Bark's proprietary wording or hidden internal form logic. The goal is the same outcome: collect the next highest-value detail until the brief is actionable.

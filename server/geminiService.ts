@@ -9,6 +9,11 @@
  */
 
 import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
+import {
+  refineCustomerOnboardingResponse,
+  refineProfessionalOnboardingResponse,
+  type QuestioningCategoryOption,
+} from "./onboardingQuestioning";
 
 // ─── Initialise Client ───────────────────────────────────────────────────────
 
@@ -540,7 +545,7 @@ export interface OnboardingChatResult {
 export async function handleOnboardingChat(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   mode: "CUSTOMER" | "PROFESSIONAL",
-  availableCategories: Array<{ id: string; name: string; slug: string }>,
+  availableCategories: QuestioningCategoryOption[],
   isLoggedIn: boolean = true
 ): Promise<OnboardingChatResult> {
   const catList = availableCategories.map(c => `- ${c.name} (ID: ${c.id})`).join("\n");
@@ -550,16 +555,28 @@ You need to collect the following information conversationally:
 1. What they need done (Job title/description)
 2. Location
 3. Urgency (Low, Normal, High, Urgent)
-4. Budget (optional, but good to ask)
-5. The most appropriate category from this list (use the exact ID in extractedData.categoryId, but NEVER mention the ID in your reply):
+4. Timing or preferred date if they mention one
+5. Budget (optional, but good to ask)
+6. The most appropriate category from this list (use the exact ID in extractedData.categoryId, but NEVER mention the ID in your reply):
 ${catList}
-${!isLoggedIn ? `6. First Name\n7. Last Name\n8. Email address\n9. Phone Number (optional)\n(Since the user is not logged in, ask for their name and contact info so we can set up their account.)` : ""}
 
-Ask ONE question at a time if information is missing. Be brief, friendly, and professional. You do NOT have to ask about budget or phone number if they provide everything else, but you must ask for Name and Email if they are not logged in.
+Treat this like a strong lead-intake questionnaire. As soon as you can tell the service category, focus on collecting the highest-value missing details for that trade instead of asking generic "tell me more" questions.
+Examples:
+- Plumbing/Electrical: what is wrong, what fitting or area is affected, house/flat/business, how urgent
+- Cleaning: one-off or recurring, property type, bedrooms/bathrooms or size, priority areas
+- Painting/Gardening/Handyman: exact tasks, rooms/areas/items, approximate size or quantity, whether materials are supplied
+- Removals: collection area, destination, move size, stairs/lift/packing
+- Tutoring/Training/Pet care: subject or goal, level/pet details, online vs in-person, schedule
+- Photography/Catering/Web design: event or project type, date, location, headcount/features/scope
+
+Ask ONE question at a time if information is missing. Be brief, friendly, and professional. Never ask for contact details in this chat flow - focus only on building a strong job brief.
 
 IMPORTANT: The "reply" field is shown directly to the user. NEVER include UUIDs, category IDs, or technical identifiers in the reply. Only use human-readable category names (e.g. "Electrical", "Plumbing") in the reply.
 
-CRITICAL RULE: You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false. Every response must include whatever data has been gathered up to this point. Only set "isComplete" to true when you have enough info to post the job (at minimum: description, location, and category).
+CRITICAL RULES:
+- You MUST ALWAYS populate "extractedData" with ALL information collected so far, even if you are still asking questions and "isComplete" is false.
+- Every time the user gives new detail, rewrite the description so it includes all important facts gathered so far.
+- Only set "isComplete" to true when the job is specific enough that a professional could understand the task, location, and likely scope without another clarification.
 
 Return ONLY valid JSON in this format:
 {
@@ -573,7 +590,8 @@ Return ONLY valid JSON in this format:
     "locationText": "location string (or empty string if unknown)",
     "urgency": "LOW|NORMAL|HIGH|URGENT (default NORMAL if unknown)",
     "budgetMin": null,
-    "budgetMax": null${!isLoggedIn ? `,\n    "firstName": "string or empty",\n    "lastName": "string or empty",\n    "email": "string or empty",\n    "phone": "string or empty"` : ""}
+    "budgetMax": null,
+    "preferredDate": "human-readable timing or date if the user mentioned one, otherwise null"
   }
 }`;
 
@@ -588,6 +606,7 @@ ${catList}
 
 Ask ONE question at a time if information is missing. Be brief, friendly, and professional.
 When a professional describes their trade (e.g. "I'm a plumber"), immediately match it to the best category ID(s) from the list above.
+Keep the questioning practical: ask about service categories, base location, areas covered, experience, and a concise but credible bio.
 
 IMPORTANT: The "reply" field is shown directly to the user. NEVER include UUIDs, category IDs, or technical identifiers in the reply. Only use human-readable category names (e.g. "Electrical", "Plumbing") in the reply.
 
@@ -618,7 +637,11 @@ Return ONLY valid JSON in this format:
   const finalPrompt = `${systemPrompt}\n\nConversation so far:\n${history}\n\nAnalyse the conversation and respond with the JSON object:`;
 
   try {
-    return await askJSON<OnboardingChatResult>(finalPrompt);
+    const aiResult = await askJSON<OnboardingChatResult>(finalPrompt);
+    if (mode === "CUSTOMER") {
+      return refineCustomerOnboardingResponse(aiResult.extractedData, availableCategories);
+    }
+    return refineProfessionalOnboardingResponse(aiResult.extractedData, availableCategories);
   } catch (e) {
     console.error("Onboarding chat error", e);
     // Even when AI fails, try to build partial extractedData from the last user message

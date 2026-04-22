@@ -48,8 +48,8 @@ export default function AiOnboardingFlow({ mode, onComplete, initialMessage, isL
   useEffect(() => {
     if (messages.length === 0 && !isLoading && !isCompleted) {
       const greeting = initialMessage || (mode === "CUSTOMER" 
-        ? "Hi there! I'm your AI assistant. Tell me, what kind of service do you need today?"
-        : "Hi! I'm here to help you set up your professional profile. What services do you offer?");
+        ? "Hi there! Tell me what you need done, what part of the property or project is affected, and where it is. I'll ask one specific follow-up at a time if anything important is missing."
+        : "Hi! Tell me what services you offer, where you cover, and what makes you good at it. I'll ask only for the next missing detail.");
       
       setMessages([{ role: "assistant", content: greeting }]);
     }

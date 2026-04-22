@@ -607,7 +607,7 @@ export default function PostJob() {
                 isLoggedIn={isLoggedIn}
                 onComplete={handleAiOnboardingComplete}
                 initialMessage={preselectedCategory 
-                  ? `Hi there! I see you need help with ${preselectedCategory.replace(/-/g, ' ')}. Could you describe exactly what you need done?`
+                  ? `Hi there! I see you need help with ${preselectedCategory.replace(/-/g, ' ')}. Tell me what needs doing, what part is affected, and where the job is. I'll fill in the missing details one question at a time.`
                   : undefined}
               />
             </div>
